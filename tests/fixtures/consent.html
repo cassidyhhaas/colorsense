@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Consent fixture</title>
+<style>
+  html, body { margin: 0; padding: 0; }
+  /* Page is uniformly white so the banner color is the only non-white region. */
+  body { background: #ffffff; height: 1200px; }
+  /* A fixed, full-width cookie banner in a unique color that should be masked out. */
+  #cookie-consent {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    width: 100%;
+    height: 220px;
+    background: #ff00aa;
+    z-index: 9999;
+    color: #ffffff;
+  }
+</style>
+</head>
+<body>
+  <main>Some white content</main>
+  <div id="cookie-consent">We use cookies.</div>
+</body>
+</html>

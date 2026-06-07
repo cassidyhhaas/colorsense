@@ -1,0 +1,156 @@
+"""Pure color-math primitives wrapping :mod:`coloraide`.
+
+All functions here are side-effect free (no I/O). They consume and produce the frozen
+:class:`colorsense.models.Color` contract. The OKLCH coordinates stored on ``Color`` are
+named ``lightness`` / ``chroma`` / ``hue`` and are always computed by converting the sRGB
+color to the ``oklch`` space via :mod:`coloraide`.
+
+Conventions
+-----------
+* ``hex`` on a returned :class:`Color` is the *opaque* normalized lowercase sRGB hex
+  string (``#rrggbb``); alpha is carried separately in ``Color.alpha`` and is **not**
+  encoded into ``hex``. This keeps ``hex`` stable for clustering/equality while alpha
+  remains available for compositing.
+* Achromatic colors yield ``hue = nan`` from coloraide; we normalize that to ``0.0`` so
+  the contract never carries NaN.
+* Compositing (:func:`composite_over`) is performed in **gamma** sRGB (the CSS
+  "source-over" default), matching browser rendering.
+"""
+
+from __future__ import annotations
+
+import math
+
+from coloraide import Color as CAColor
+
+from colorsense.models import Color
+
+# OKLCH lightness is defined on the closed interval [0, 1].
+_L_MIN: float = 0.0
+_L_MAX: float = 1.0
+
+
+def _normalize_hue(hue: float) -> float:
+    """Map a possibly-NaN coloraide hue to a finite degrees value in ``[0, 360)``."""
+    if math.isnan(hue):
+        return 0.0
+    return float(hue % 360.0)
+
+
+def _from_coloraide(ca: CAColor) -> Color:
+    """Build the frozen :class:`Color` contract from a coloraide color.
+
+    The input is gamut-fit into sRGB before extracting hex, and OKLCH coordinates are
+    read from the ``oklch`` conversion of the (alpha-stripped) sRGB color.
+    """
+    srgb = ca.convert("srgb").fit()
+    alpha_raw = srgb[-1]
+    alpha = 1.0 if math.isnan(alpha_raw) else float(alpha_raw)
+
+    # Opaque hex: do not encode alpha into the hex string.
+    hex_str = srgb.to_string(hex=True, alpha=False).lower()
+
+    oklch = srgb.convert("oklch")
+    lightness = float(oklch["lightness"])
+    chroma = float(oklch["chroma"])
+    hue = _normalize_hue(float(oklch["hue"]))
+
+    return Color(
+        hex=hex_str,
+        lightness=lightness,
+        chroma=chroma,
+        hue=hue,
+        alpha=alpha,
+    )
+
+
+def _to_coloraide(c: Color) -> CAColor:
+    """Reconstruct a coloraide sRGB color (with alpha) from the frozen contract."""
+    return CAColor(c.hex).set("alpha", c.alpha)
+
+
+def parse_css_color(value: str) -> Color | None:
+    """Parse a CSS color string into a :class:`Color`, or ``None`` if unparseable.
+
+    Accepts ``rgb()``/``rgba()``, hex (``#rgb``/``#rrggbb``/``#rrggbbaa``),
+    ``hsl()``/``hsla()`` and named CSS colors. The keyword ``transparent`` parses to a
+    color with ``alpha = 0.0``. Non-color input (e.g. ``"banana"``, ``"none"``, ``""``)
+    returns ``None``. The returned ``hex`` is the normalized lowercase opaque sRGB hex
+    string; alpha (if any) is carried in ``Color.alpha`` only.
+    """
+    match = CAColor.match(value.strip())
+    if match is None:
+        return None
+    # Reject trailing garbage (match may parse a valid prefix of a longer string).
+    if match.end != len(value.strip()):
+        return None
+    try:
+        return _from_coloraide(match.color)
+    except (ValueError, KeyError):  # pragma: no cover - defensive
+        return None
+
+
+def composite_over(fg: Color, bg: Color) -> Color:
+    """Alpha-composite ``fg`` over ``bg`` and return an opaque (``alpha = 1.0``) color.
+
+    Uses standard CSS source-over compositing performed in **gamma** sRGB. The result's
+    OKLCH coordinates and hex are recomputed from the composited sRGB color.
+    """
+    fg_ca = _to_coloraide(fg)
+    bg_ca = _to_coloraide(bg)
+    composited = CAColor.layer([fg_ca, bg_ca], space="srgb").set("alpha", 1.0)
+    return _from_coloraide(composited)
+
+
+def delta_e(a: Color, b: Color) -> float:
+    """Perceptual distance between two colors via OKLab ``deltaEOK``.
+
+    Identical colors return ``~0.0``; perceptually different colors return ``> 0``.
+    """
+    return float(_to_coloraide(a).delta_e(_to_coloraide(b), method="ok"))
+
+
+def relative_luminance(c: Color) -> float:
+    """WCAG 2.1 relative luminance of ``c`` (linearized sRGB, Rec. 709 weights).
+
+    White returns ``~1.0`` and black returns ``~0.0``.
+    """
+    return float(_to_coloraide(c).convert("srgb").luminance())
+
+
+def contrast_ratio(fg: Color, bg: Color) -> float:
+    """WCAG 2.1 relative-luminance contrast ratio ``(L1 + 0.05) / (L2 + 0.05)``.
+
+    White-on-black equals ``21.0`` (within floating-point tolerance).
+    """
+    l1 = relative_luminance(fg)
+    l2 = relative_luminance(bg)
+    lighter, darker = (l1, l2) if l1 >= l2 else (l2, l1)
+    return (lighter + 0.05) / (darker + 0.05)
+
+
+def is_neutral(c: Color, chroma_max: float) -> bool:
+    """Return ``True`` when ``c``'s OKLCH chroma is ``<= chroma_max``."""
+    return c.chroma <= chroma_max
+
+
+def to_hex(c: Color) -> str:
+    """Return the normalized lowercase opaque sRGB hex string for ``c``."""
+    return _to_coloraide(c).convert("srgb").fit().to_string(hex=True, alpha=False).lower()
+
+
+def nudge_lightness(c: Color, toward: str, amount: float) -> Color:
+    """Return a new :class:`Color` with OKLCH lightness shifted by ``amount``.
+
+    ``toward`` is ``"light"`` (increase L) or ``"dark"`` (decrease L). The resulting
+    lightness is clamped to the valid OKLCH range ``[0, 1]`` and hex / OKLCH are
+    recomputed. ``alpha`` is preserved.
+    """
+    if toward not in ("light", "dark"):
+        raise ValueError(f"toward must be 'light' or 'dark', got {toward!r}")
+
+    delta = amount if toward == "light" else -amount
+    new_l = min(_L_MAX, max(_L_MIN, c.lightness + delta))
+
+    oklch = CAColor("oklch", [new_l, c.chroma, c.hue]).set("alpha", c.alpha)
+    return _from_coloraide(oklch)
