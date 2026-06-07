@@ -1,0 +1,60 @@
+{
+  "fit_score": 0.8562,
+  "per_theme": {
+    "dark": {
+      "recommendation": {
+        "cta_bg": "#f59e0b",
+        "cta_hover_bg": "#d97706",
+        "cta_text": "#000000",
+        "heading_bg": "#2563eb",
+        "heading_text": "#ffffff"
+      },
+      "role_tops": {
+        "accent": "#f59e0b",
+        "neutral_dark": "#111827",
+        "neutral_light": "#64748b",
+        "primary": "#111827",
+        "secondary": "#2563eb"
+      }
+    },
+    "light": {
+      "recommendation": {
+        "cta_bg": "#7c3aed",
+        "cta_hover_bg": "#d97706",
+        "cta_text": "#ffffff",
+        "heading_bg": "#2563eb",
+        "heading_text": "#ffffff"
+      },
+      "role_tops": {
+        "accent": "#7c3aed",
+        "neutral_dark": "#ffffff",
+        "neutral_light": "#ffffff",
+        "primary": "#ffffff",
+        "secondary": "#2563eb"
+      }
+    }
+  },
+  "single_theme": "false",
+  "status_colors": [
+    "#16a34a",
+    "#dc2626"
+  ],
+  "themes": [
+    "dark",
+    "light"
+  ],
+  "third_party_colors": [],
+  "tokens": {
+    "--color-accent": "brand_accent",
+    "--color-bg": "surface_base",
+    "--color-border": "border",
+    "--color-danger": "status",
+    "--color-neutral": "neutral",
+    "--color-on-primary": "text_on",
+    "--color-primary": "brand_primary",
+    "--color-secondary": "brand_secondary",
+    "--color-success": "status",
+    "--color-surface": "surface_raised",
+    "--color-text": "text_body"
+  }
+}

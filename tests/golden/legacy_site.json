@@ -1,0 +1,28 @@
+{
+  "fit_score": 0.803,
+  "per_theme": {
+    "light": {
+      "recommendation": {
+        "cta_bg": "#1f6f54",
+        "cta_hover_bg": "#185943",
+        "cta_text": "#ffffff",
+        "heading_bg": "#c0492f",
+        "heading_text": "#ffffff"
+      },
+      "role_tops": {
+        "accent": "#1f6f54",
+        "neutral_dark": "#2b2b2b",
+        "neutral_light": "#ffffff",
+        "primary": "#ffffff",
+        "secondary": "#c0492f"
+      }
+    }
+  },
+  "single_theme": "true",
+  "status_colors": [],
+  "themes": [
+    "light"
+  ],
+  "third_party_colors": [],
+  "tokens": {}
+}
