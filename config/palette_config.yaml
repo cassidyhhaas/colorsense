@@ -1,0 +1,351 @@
+# =============================================================================
+# palette_config.yaml
+# Configuration for website color-palette analysis.
+#
+# Two config domains:
+#   1. token_vocabulary  — maps CSS custom-property NAMES -> semantic token roles,
+#                          then semantic roles -> 60/30/10 palette-role priors.
+#   2. component_classifier — rule-based scorer weights for classifying DOM
+#                          elements by visual COMPONENT (source).
+#
+# All numeric weights are unnormalized votes summed per target, then softmaxed.
+# These are calibrated starting points, not ground truth — tune against labels.
+# =============================================================================
+
+token_vocabulary:
+
+  # --- Namespace prefixes stripped from a token name before matching. --------
+  # Longest match wins. Presence of a known system prefix also confirms a design
+  # system is in use and applies `known_system_confidence_boost` to the match.
+  namespace_prefixes:
+    - "md-sys-color-"      # Material 3
+    - "md-ref-palette-"    # Material 3 reference
+    - "wp--preset--color--"# WordPress
+    - "chakra-colors-"     # Chakra
+    - "ion-color-"         # Ionic
+    - "sl-color-"          # Shoelace
+    - "bs-"                # Bootstrap
+    - "ant-"               # Ant Design
+    - "mui-"               # MUI
+    - "mantine-"           # Mantine
+    - "chakra-"
+    - "ion-"
+    - "sl-"
+    - "ui-"
+    - "color-"             # Tailwind v4 (--color-*) and generic namespacing
+    - "colour-"
+    - "c-"
+  # Trailing noise suffixes also stripped (e.g. --theme-color -> theme).
+  strip_trailing: ["-color", "-colour"]
+  known_system_confidence_boost: 1.25   # multiplier on weight when a system prefix matched
+
+  # --- Name rules: token-name substring -> semantic token role + weight. -----
+  # match_type: substring (default) | exact | regex. Matching is case-insensitive
+  # on the post-strip remainder. First-listed higher-specificity rules should win
+  # ties; the loader checks `exact` then `regex` then `substring` longest-match.
+  name_rules:
+    # brand / role names ------------------------------------------------------
+    - {match: "primary",    role: brand_primary,   weight: 5.0}
+    - {match: "brand",      role: brand_primary,   weight: 5.0}
+    - {match: "theme",      role: brand_primary,   weight: 3.0}
+    - {match: "main",       role: brand_primary,   weight: 2.5}
+    - {match: "secondary",  role: brand_secondary, weight: 4.0}
+    - {match: "tertiary",   role: brand_secondary, weight: 2.5}
+    - {match: "accent",     role: brand_accent,    weight: 5.0}
+    - {match: "highlight",  role: brand_accent,    weight: 3.5}
+    - {match: "ring",       role: brand_accent,    weight: 3.0}  # focus ring ~ accent
+    # interactive -------------------------------------------------------------
+    - {match: "cta",        role: interactive,     weight: 5.0}
+    - {match: "link",       role: interactive,     weight: 4.5}
+    - {match: "action",     role: interactive,     weight: 4.0}
+    - {match: "button",     role: interactive,     weight: 3.5}
+    - {match: "btn",        role: interactive,     weight: 3.5}
+    # surfaces ----------------------------------------------------------------
+    - {match: "background", role: surface_base,    weight: 4.0}
+    - {match: "bg",         role: surface_base,    weight: 3.5}
+    - {match: "page",       role: surface_base,    weight: 3.5}
+    - {match: "body",       role: surface_base,    weight: 3.5}
+    - {match: "canvas",     role: surface_base,    weight: 3.0}
+    - {match: "base",       role: surface_base,    weight: 2.5}
+    - {match: "surface",    role: surface_raised,  weight: 3.5}
+    - {match: "card",       role: surface_raised,  weight: 4.5}
+    - {match: "panel",      role: surface_raised,  weight: 3.5}
+    - {match: "popover",    role: surface_raised,  weight: 3.5}
+    - {match: "modal",      role: surface_raised,  weight: 3.5}
+    - {match: "dialog",     role: surface_raised,  weight: 3.5}
+    - {match: "sheet",      role: surface_raised,  weight: 3.0}
+    - {match: "tooltip",    role: surface_raised,  weight: 3.0}
+    - {match: "menu",       role: surface_raised,  weight: 2.5}
+    - {match: "dropdown",   role: surface_raised,  weight: 2.5}
+    - {match: "header",     role: surface_raised,  weight: 3.5}  # header bg
+    - {match: "masthead",   role: surface_raised,  weight: 3.5}
+    - {match: "topbar",     role: surface_raised,  weight: 3.0}
+    - {match: "footer",     role: surface_raised,  weight: 3.0}
+    - {match: "nav",        role: surface_raised,  weight: 3.0}
+    - {match: "sidebar",    role: surface_raised,  weight: 3.0}
+    - {match: "hero",       role: surface_raised,  weight: 3.5}  # often brand-colored
+    - {match: "banner",     role: surface_raised,  weight: 3.0}
+    - {match: "jumbotron",  role: surface_raised,  weight: 3.0}
+    # text / foreground -------------------------------------------------------
+    - {match: "foreground", role: text_body,       weight: 4.5}
+    - {match: "text",       role: text_body,       weight: 4.5}
+    - {match: "fg",         role: text_body,       weight: 4.0}
+    - {match: "ink",        role: text_body,       weight: 3.5}
+    - {match: "copy",       role: text_body,       weight: 3.0}
+    - {match: "content",    role: text_body,       weight: 2.5}
+    - {match: "heading",    role: text_body,       weight: 3.0}
+    - {match: "title",      role: text_body,       weight: 2.5}
+    # neutrals ----------------------------------------------------------------
+    - {match: "gray",       role: neutral,         weight: 4.5}
+    - {match: "grey",       role: neutral,         weight: 4.5}
+    - {match: "neutral",    role: neutral,         weight: 4.5}
+    - {match: "slate",      role: neutral,         weight: 4.0}
+    - {match: "zinc",       role: neutral,         weight: 4.0}
+    - {match: "stone",      role: neutral,         weight: 4.0}
+    - {match: "silver",     role: neutral,         weight: 3.0}
+    - {match: "muted",      role: neutral,         weight: 3.5}
+    - {match: "subtle",     role: neutral,         weight: 3.5}
+    - {match: "dim",        role: neutral,         weight: 2.5}
+    - {match: "faint",      role: neutral,         weight: 2.5}
+    - {match: "placeholder",role: neutral,         weight: 3.0}
+    - {match: "disabled",   role: neutral,         weight: 3.0}
+    - {match: "hint",       role: neutral,         weight: 2.5}
+    - {match: "light",      role: neutral,         weight: 2.5}  # lightness decides L/D
+    - {match: "dark",       role: neutral,         weight: 2.5}
+    - {match: "white",      role: neutral,         weight: 2.5}
+    - {match: "black",      role: neutral,         weight: 2.5}
+    # borders -----------------------------------------------------------------
+    - {match: "border",     role: border,          weight: 4.0}
+    - {match: "divider",    role: border,          weight: 4.0}
+    - {match: "outline",    role: border,          weight: 3.5}
+    - {match: "separator",  role: border,          weight: 3.5}
+    - {match: "stroke",     role: border,          weight: 3.0}
+    - {match: "input",      role: border,          weight: 2.5}
+    - {match: "field",      role: border,          weight: 2.0}
+    # status (segregated — see status handling below) ------------------------
+    - {match: "success",    role: status,          weight: 5.0}
+    - {match: "positive",   role: status,          weight: 4.0}
+    - {match: "error",      role: status,          weight: 5.0}
+    - {match: "danger",     role: status,          weight: 5.0}
+    - {match: "destructive",role: status,          weight: 5.0}
+    - {match: "negative",   role: status,          weight: 4.0}
+    - {match: "warning",    role: status,          weight: 5.0}
+    - {match: "caution",    role: status,          weight: 4.0}
+    - {match: "info",       role: status,          weight: 4.0}
+    - {match: "alert",      role: status,          weight: 3.0}
+    - {match: "invalid",    role: status,          weight: 3.5}
+    # ignore (no palette signal) ---------------------------------------------
+    - {match: "shadow",     role: ignore,          weight: 5.0}
+    - {match: "overlay",    role: ignore,          weight: 3.0}
+    - {match: "scrim",      role: ignore,          weight: 3.0}
+    - {match: "backdrop",   role: ignore,          weight: 3.0}
+
+  # --- Relational modifiers: reroute a token to "text-on-<base>". ------------
+  # e.g. --primary-foreground / --md-sys-color-on-primary / --card-foreground.
+  # The token's value is a TEXT color paired with the referenced surface; this
+  # feeds the recommendation engine's heading/CTA text pairing directly.
+  relational_modifiers:
+    - {pattern: "^on-(?P<base>.+)$",     type: text_on, weight: 4.5}  # Material
+    - {pattern: "^(?P<base>.+)-fore$",   type: text_on, weight: 3.0}
+    - {pattern: "^(?P<base>.+)-foreground$", type: text_on, weight: 4.5}  # shadcn
+    - {pattern: "^(?P<base>.+)-fg$",     type: text_on, weight: 4.0}
+    - {pattern: "^(?P<base>.+)-text$",   type: text_on, weight: 3.5}
+  # Interaction-state shades (resting accent vs hover/active step).
+  state_modifiers:
+    - {pattern: "hover",  type: state_hover}
+    - {pattern: "active", type: state_active}
+    - {pattern: "focus",  type: state_focus}
+    - {pattern: "pressed",type: state_active}
+
+  # --- Numbered scale detection. ---------------------------------------------
+  # Lightness L/D is decided by the MEASURED resolved color, not the number.
+  # The number is used only to (a) confirm an intentional scale exists
+  # (confidence boost) and (b) pick the brand "anchor" step among chromatic
+  # members. Neutral-named families are neutral candidates regardless of number.
+  scale_detection:
+    enabled: true
+    number_pattern: "(?:^|[-_/.])(\\d{1,3})$"   # captures -500, /9, .50, _100
+    chromatic_families: [red, orange, amber, yellow, lime, green, emerald, teal,
+                         cyan, sky, blue, indigo, violet, purple, fuchsia, pink,
+                         rose, brand, primary, accent]
+    neutral_families:   [gray, grey, neutral, slate, zinc, stone, gunmetal, mauve, sand, sage]
+    # Anchor ranges by scale convention; loader picks whichever family is present.
+    anchor_ranges:
+      tailwind: [500, 700]   # 50..950
+      radix:    [9, 10]      # 1..12
+    scale_present_confidence_boost: 1.3
+
+  # --- Semantic token role -> prior distribution over 60/30/10 palette roles. -
+  # *** This is the most consequential table. *** Distributions need not sum to
+  # 1 exactly; loader normalizes. `_text` / `_on` channels are not 60/30/10
+  # roles — they feed recommendation, not palette ranking.
+  role_to_palette_prior:
+    brand_primary:   {accent: 0.55, secondary: 0.35, primary: 0.10}
+    brand_secondary: {secondary: 0.60, accent: 0.25, primary: 0.15}
+    brand_accent:    {accent: 0.85, secondary: 0.15}
+    interactive:     {accent: 0.90, secondary: 0.10}
+    surface_base:    {primary: 0.85, secondary: 0.15}
+    surface_raised:  {secondary: 0.70, primary: 0.20, neutral_light: 0.10}
+    text_body:       {primary: 0.70, neutral_dark: 0.30}
+    neutral:         {neutral_light: 0.50, neutral_dark: 0.50}  # measured L reassigns
+    border:          {neutral_dark: 0.40, neutral_light: 0.30, secondary: 0.30}
+    text_on:         {channel: text_on}     # recommendation only
+    status:          {channel: status}      # excluded from palette, reported separately
+    ignore:          {channel: ignore}      # dropped
+
+  status_excluded_from_palette: true
+
+
+# =============================================================================
+component_classifier:
+
+  # Final component label of an element; background-color -> <component>_bg,
+  # color -> <component>_text, border-color -> border.
+  component_types:
+    [page_bg, page_text, header_bg, header_text, nav_bg, nav_text,
+     footer_bg, footer_text, hero_bg, hero_text, card_bg, card_text,
+     cta_bg, cta_text, link, button_secondary, modal_bg, input_bg,
+     border, badge, third_party]
+
+  softmax_temperature: 0.5
+  min_component_prob: 0.05
+
+  # --- Color-channel routing: which CSS property feeds which target suffix. ---
+  channel_routing:
+    background-color: "_bg"
+    color:            "_text"
+    border-color:     border
+    box-shadow:       ignore
+
+  # --- Feature family 1: semantic tag / ARIA role (highest precision). -------
+  semantic_tags:
+    - {match: "header",            votes: {header_bg: 4.5}}
+    - {match: "role=banner",       votes: {header_bg: 4.0, hero_bg: 1.5}}
+    - {match: "nav",               votes: {nav_bg: 4.5}}
+    - {match: "role=navigation",   votes: {nav_bg: 4.0}}
+    - {match: "footer",            votes: {footer_bg: 4.5}}
+    - {match: "role=contentinfo",  votes: {footer_bg: 4.0}}
+    - {match: "main",              votes: {page_bg: 3.0, page_text: 3.0}}
+    - {match: "role=main",         votes: {page_bg: 3.0, page_text: 3.0}}
+    - {match: "article",           votes: {page_bg: 2.5, page_text: 2.5}}
+    - {match: "body",              votes: {page_bg: 5.0, page_text: 4.0}}
+    - {match: "a",                 votes: {link: 4.5}}
+    - {match: "button",            votes: {cta_bg: 3.5}}
+    - {match: "role=button",       votes: {cta_bg: 3.0}}
+    - {match: "input[submit]",     votes: {cta_bg: 3.5}}
+    - {match: "dialog",            votes: {modal_bg: 4.0}}
+    - {match: "role=dialog",       votes: {modal_bg: 3.5}}
+    - {match: "aside",             votes: {nav_bg: 2.5}}
+    - {match: "input",             votes: {input_bg: 3.0, border: 2.0}}
+
+  # --- Feature family 2: geometry / position. --------------------------------
+  geometry:
+    thresholds:
+      top_band: 0.15        # fraction of viewport height
+      bottom_band: 0.85
+      full_width: 0.90      # fraction of viewport width
+      short_h: 0.25
+      hero_min_h: 0.35
+      sticky_top_px: 80
+      small_area: 0.02      # fraction of viewport area
+    rules:
+      - {when: "full_width & top<top_band & h<short_h", votes: {header_bg: 2.5, nav_bg: 1.5}}
+      - {when: "position in (fixed,sticky) & top<sticky_top_px", votes: {nav_bg: 3.0}}
+      - {when: "full_width & top<top_band & h>=hero_min_h", votes: {hero_bg: 3.0, hero_text: 1.5}}
+      - {when: "top>=bottom_band & full_width", votes: {footer_bg: 2.5}}
+      - {when: "area<=small_area & clickable", votes: {link: 1.5, badge: 1.0}}
+
+  # --- Feature family 3: class / id token match (fuzzy substring). -----------
+  class_tokens:
+    - {match: "card",          votes: {card_bg: 3.0}}
+    - {match: "tile",          votes: {card_bg: 2.5}}
+    - {match: "product-card",  votes: {card_bg: 3.5}}
+    - {match: "hero",          votes: {hero_bg: 3.0}}
+    - {match: "masthead",      votes: {hero_bg: 2.5, header_bg: 1.5}}
+    - {match: "jumbotron",     votes: {hero_bg: 3.0}}
+    - {match: "splash",        votes: {hero_bg: 2.5}}
+    - {match: "cover",         votes: {hero_bg: 2.0}}
+    - {match: "site-header",   votes: {header_bg: 3.5}}
+    - {match: "page-header",   votes: {header_bg: 3.0}}
+    - {match: "topbar",        votes: {header_bg: 2.5, nav_bg: 1.5}}
+    - {match: "header",        votes: {header_bg: 2.5}}
+    - {match: "navbar",        votes: {nav_bg: 3.0}}
+    - {match: "navigation",    votes: {nav_bg: 2.8}}
+    - {match: "nav",           votes: {nav_bg: 2.5}}
+    - {match: "menu",          votes: {nav_bg: 1.5}}
+    - {match: "footer",        votes: {footer_bg: 3.0}}
+    - {match: "colophon",      votes: {footer_bg: 2.5}}
+    - {match: "cta",           votes: {cta_bg: 3.5}}
+    - {match: "call-to-action",votes: {cta_bg: 3.5}}
+    - {match: "btn-primary",   votes: {cta_bg: 4.0}}
+    - {match: "primary-button",votes: {cta_bg: 4.0}}
+    - {match: "get-started",   votes: {cta_bg: 3.0}}
+    - {match: "signup",        votes: {cta_bg: 2.5}}
+    - {match: "subscribe",     votes: {cta_bg: 2.5}}
+    - {match: "btn",           votes: {cta_bg: 2.5}}
+    - {match: "button",        votes: {cta_bg: 2.5}}
+    - {match: "btn-secondary", votes: {button_secondary: 3.5}}
+    - {match: "btn-outline",   votes: {button_secondary: 3.0}}
+    - {match: "ghost",         votes: {button_secondary: 2.5}}
+    - {match: "link",          votes: {link: 2.5}}
+    - {match: "read-more",     votes: {link: 2.0}}
+    - {match: "modal",         votes: {modal_bg: 3.0}}
+    - {match: "dialog",        votes: {modal_bg: 3.0}}
+    - {match: "popover",       votes: {modal_bg: 2.5}}
+    - {match: "lightbox",      votes: {modal_bg: 2.5}}
+    - {match: "drawer",        votes: {modal_bg: 2.0, nav_bg: 1.0}}
+    - {match: "badge",         votes: {badge: 3.0}}
+    - {match: "chip",          votes: {badge: 2.5}}
+    - {match: "pill",          votes: {badge: 2.5}}
+    - {match: "tag",           votes: {badge: 2.0}}
+    - {match: "sidebar",       votes: {nav_bg: 2.5}}
+    - {match: "panel",         votes: {card_bg: 2.0}}
+    - {match: "well",          votes: {card_bg: 1.5}}
+    - {match: "input",         votes: {input_bg: 2.5}}
+    - {match: "form-control",  votes: {input_bg: 2.5}}
+    # Layout noise — explicitly near-zero so wrappers don't pollute palette.
+    - {match: "container",     votes: {page_bg: 0.5}}
+    - {match: "wrapper",       votes: {page_bg: 0.5}}
+    - {match: "row",           votes: {page_bg: 0.3}}
+    - {match: "col",           votes: {page_bg: 0.3}}
+    - {match: "grid",          votes: {page_bg: 0.3}}
+    - {match: "layout",        votes: {page_bg: 0.4}}
+    - {match: "inner",         votes: {page_bg: 0.3}}
+
+  # --- Feature family 4: interactivity. --------------------------------------
+  interactivity:
+    - {when: "clickable",               votes: {cta_bg: 1.5, link: 1.0}}
+    - {when: "input[submit|button]",    votes: {cta_bg: 2.0}}
+    - {when: "has_hover_color_change",  votes: {cta_bg: 1.5}}   # strong accent signal
+    - {when: "has_focus_ring",          votes: {cta_bg: 0.5}}
+
+  # --- Feature family 5: repetition (the card detector). ---------------------
+  repetition:
+    min_siblings: 3
+    structural_similarity: 0.80
+    requires_any: [box_shadow, border, distinct_bg_from_parent]
+    votes: {card_bg: 3.5, card_text: 2.0}
+
+  # --- Feature family 6: origin / third-party. -------------------------------
+  third_party:
+    votes_iframe: {third_party: 5.0}
+    votes_cross_origin: {third_party: 4.0}
+    votes_shadow_host: {third_party: 2.5}
+    votes_vendor_match: {third_party: 5.0}
+    vendor_prefixes:
+      [intercom, drift, zendesk, hubspot, hs-, crisp, tawk, livechat, freshchat,
+       freshworks, usercentrics, onetrust, cookiebot, osano, cookieyes, klaro,
+       hotjar, _hj, fb-, fbcdn, twitter-widget, addthis, sharethis, disqus,
+       recaptcha, grecaptcha, g-recaptcha, stripe, paypal, trustpilot, yotpo,
+       mailchimp, klaviyo, optinmonster, typeform, calendly, gtm, doubleclick,
+       adsbygoogle, advert, ad-]
+
+  # --- Vetoes / suppressors (multiplicative, applied after summing). ---------
+  suppressors:
+    third_party_present:        {factor: 0.05, applies_to: brand_components}
+    aria_hidden:                {factor: 0.0,  applies_to: all}
+    zero_area_or_hidden:        {factor: 0.0,  applies_to: all}
+    consent_masked_region:      {factor: 0.0,  applies_to: all}
+  brand_components:
+    [header_bg, header_text, hero_bg, hero_text, cta_bg, cta_text, link,
+     card_bg, card_text, page_bg, page_text]
