@@ -1,0 +1,54 @@
+# Pre-commit hooks mirroring the CI gates (.github/workflows/ci.yml).
+#
+# Install (one time):
+#   uv run pre-commit install            # ruff + mypy run on every commit
+#   uv run pre-commit install -t pre-push # browserless tests run on every push
+# Run against everything on demand:
+#   uv run pre-commit run --all-files
+#
+# ruff / ruff-format / mypy are `local` hooks invoked through `uv run`, so they
+# use the exact versions pinned in uv.lock — no drift between the hook and CI.
+default_install_hook_types: [pre-commit, pre-push]
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-toml
+      - id: check-merge-conflict
+      - id: check-added-large-files
+
+  - repo: local
+    hooks:
+      - id: ruff-check
+        name: ruff (lint, autofix)
+        entry: uv run ruff check --fix --force-exclude
+        language: system
+        types_or: [python, pyi]
+        require_serial: true
+
+      - id: ruff-format
+        name: ruff format
+        entry: uv run ruff format --force-exclude
+        language: system
+        types_or: [python, pyi]
+        require_serial: true
+
+      - id: mypy
+        name: mypy (strict)
+        entry: uv run mypy src
+        language: system
+        types: [python]
+        pass_filenames: false
+        require_serial: true
+
+      # Fast (browserless) test subset, gated at push time rather than per-commit.
+      - id: pytest-browserless
+        name: pytest (browserless)
+        entry: uv run pytest -m "not browser"
+        language: system
+        pass_filenames: false
+        stages: [pre-push]
