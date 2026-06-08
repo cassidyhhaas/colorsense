@@ -142,8 +142,8 @@ token_vocabulary:
 
   # --- Relational modifiers: reroute a token to "text-on-<base>". ------------
   # e.g. --primary-foreground / --md-sys-color-on-primary / --card-foreground.
-  # The token's value is a TEXT color paired with the referenced surface; this
-  # feeds the recommendation engine's heading/CTA text pairing directly.
+  # The token's value is a TEXT color paired with the referenced surface; the
+  # pairing is surfaced on the classified token (``text_on_base``) for consumers.
   relational_modifiers:
     - {pattern: "^on-(?P<base>.+)$",     type: text_on, weight: 4.5}  # Material
     - {pattern: "^(?P<base>.+)-fore$",   type: text_on, weight: 3.0}
@@ -178,7 +178,7 @@ token_vocabulary:
   # --- Semantic token role -> prior distribution over 60/30/10 palette roles. -
   # *** This is the most consequential table. *** Distributions need not sum to
   # 1 exactly; loader normalizes. `_text` / `_on` channels are not 60/30/10
-  # roles — they feed recommendation, not palette ranking.
+  # roles — they are reported on the classified token, not used in palette ranking.
   role_to_palette_prior:
     brand_primary:   {accent: 0.55, secondary: 0.35, primary: 0.10}
     brand_secondary: {secondary: 0.60, accent: 0.25, primary: 0.15}
@@ -189,7 +189,7 @@ token_vocabulary:
     text_body:       {primary: 0.70, neutral_dark: 0.30}
     neutral:         {neutral_light: 0.50, neutral_dark: 0.50}  # measured L reassigns
     border:          {neutral_dark: 0.40, neutral_light: 0.30, secondary: 0.30}
-    text_on:         {channel: text_on}     # recommendation only
+    text_on:         {channel: text_on}     # reported on token, not palette-ranked
     status:          {channel: status}      # excluded from palette, reported separately
     ignore:          {channel: ignore}      # dropped
 

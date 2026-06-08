@@ -12,7 +12,6 @@ from colorsense.models import (
     HarvestedElement,
     PaletteCandidate,
     PaletteRole,
-    Recommendation,
     Rect,
     RoleResults,
     ScreenshotBin,
@@ -34,17 +33,6 @@ def _dummy_result() -> AnalysisResult:
     white = _color("#ffffff", 0.99)
     dark = _color("#111111", 0.1)
 
-    recommendation = Recommendation(
-        theme=Theme.light,
-        page_bg=white,
-        heading_bg=brand,
-        heading_text=white,
-        cta_bg=brand,
-        cta_text=white,
-        cta_hover_bg=_color("#2a52a3", 0.45),
-        cta_hover_text=white,
-        contrast={"heading": 7.2, "cta": 7.2},
-    )
     roles = RoleResults(
         mapping={
             PaletteRole.primary: [
@@ -55,7 +43,7 @@ def _dummy_result() -> AnalysisResult:
             ],
         }
     )
-    theme_palette = ThemePalette(theme=Theme.light, roles=roles, recommendation=recommendation)
+    theme_palette = ThemePalette(theme=Theme.light, roles=roles)
 
     token = ClassifiedToken(
         record=TokenRecord(
@@ -142,6 +130,6 @@ def test_analysis_result_json_round_trip() -> None:
     assert restored == original
     # Enum-keyed dicts survive the round trip.
     assert Theme.light in restored.themes
-    assert restored.themes[Theme.light].recommendation.contrast["cta"] == 7.2
+    assert restored.themes[Theme.light].roles.mapping[PaletteRole.accent][0].color.hex == "#3366cc"
     assert restored.tokens[0].palette_prior[PaletteRole.accent] == 0.55
     assert restored.metadata["engine"] == "colorsense"
