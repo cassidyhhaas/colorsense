@@ -24,12 +24,24 @@ from typing import Any
 import pytest
 
 from colorsense import analyze
-from colorsense.models import AnalysisResult, RoleResults, TokenSemanticRole
+from colorsense.color.primitives import delta_e, parse_css_color
+from colorsense.models import (
+    AnalysisResult,
+    Color,
+    PaletteRole,
+    RoleResults,
+    Theme,
+    TokenSemanticRole,
+)
 
 CONFIG_PATH = str(Path(__file__).resolve().parents[1] / "config" / "palette_config.yaml")
 GOLDEN_DIR = Path(__file__).parent / "golden"
 CONTRAST_EPS = 1e-6
 FIT_SCORE_TOL = 0.05
+# OKLab ΔE tolerance for rendered/screenshot-derived colors. Anti-aliasing and gamma
+# differ across OSes (≈0.06 observed between macOS and Linux Chromium), so these colors
+# are matched perceptually, never by exact hex. Well below cross-hue distances (~0.37).
+COLOR_MATCH_TOL = 0.10
 
 # Every test here drives a real Chromium render; skip in browserless CI.
 pytestmark = pytest.mark.browser
@@ -44,45 +56,41 @@ def _analyze(fixture: Path) -> AnalysisResult:
 # ---------------------------------------------------------------------------
 
 
-def _role_tops(roles: RoleResults) -> dict[str, str]:
-    """The argmax (dominant) candidate hex per role — stable ordering/dominance signal."""
-    return {
-        str(role): candidates[0].color.hex
-        for role, candidates in roles.mapping.items()
-        if candidates
-    }
+def _dominant_role_colors(roles: RoleResults) -> list[Color]:
+    """The argmax (dominant) candidate color per role."""
+    return [candidates[0].color for candidates in roles.mapping.values() if candidates]
+
+
+def _color_near(colors: list[Color], target_hex: str) -> bool:
+    """Whether any of ``colors`` is within :data:`COLOR_MATCH_TOL` ΔE of ``target_hex``."""
+    target = parse_css_color(target_hex)
+    assert target is not None, target_hex
+    return any(delta_e(color, target) <= COLOR_MATCH_TOL for color in colors)
 
 
 def _digest(result: AnalysisResult) -> dict[str, Any]:
-    """A deterministic, comparison-friendly summary of an AnalysisResult."""
+    """A deterministic, *platform-stable* summary of an AnalysisResult.
+
+    Only fields that derive from computed style or structure are captured: token
+    classifications, token-resolved status colors, theme set, and fit_score. Rendered
+    (screenshot-derived) colors — role candidates and recommendations — are NOT portable
+    across OSes, so they are excluded here and asserted perceptually in each test instead.
+    """
     return {
         "themes": sorted(str(theme) for theme in result.themes),
         "single_theme": result.metadata["single_theme"],
         "tokens": {ct.record.name: str(ct.semantic_role) for ct in result.tokens},
         "status_colors": sorted(c.hex for c in result.status_colors),
-        "third_party_colors": sorted(c.hex for c in result.third_party_colors),
         "fit_score": round(result.fit_score, 4),
-        "per_theme": {
-            str(theme): {
-                "role_tops": _role_tops(palette.roles),
-                "recommendation": {
-                    "heading_bg": palette.recommendation.heading_bg.hex,
-                    "heading_text": palette.recommendation.heading_text.hex,
-                    "cta_bg": palette.recommendation.cta_bg.hex,
-                    "cta_text": palette.recommendation.cta_text.hex,
-                    "cta_hover_bg": palette.recommendation.cta_hover_bg.hex,
-                },
-            }
-            for theme, palette in result.themes.items()
-        },
     }
 
 
 def _check_golden(name: str, digest: dict[str, Any]) -> None:
     """Assert ``digest`` matches the stored golden, regenerating it on demand.
 
-    ``fit_score`` is compared within :data:`FIT_SCORE_TOL`; every other field (themes,
-    token classifications, color hexes, role dominance, recommendation) must match exactly.
+    ``fit_score`` is compared within :data:`FIT_SCORE_TOL`; the remaining fields (themes,
+    token classifications, token-resolved status colors) are computed-style/structural and
+    compared exactly.
     """
     path = GOLDEN_DIR / f"{name}.json"
     if os.environ.get("UPDATE_GOLDEN") or not path.exists():
@@ -139,6 +147,14 @@ def test_design_system_site(fixtures_dir: Path) -> None:
     # A token-driven site agrees well between declared intent and measured usage.
     assert result.fit_score > 0.6
 
+    # Dominance (perceptual, platform-robust): the accent role is led by a declared
+    # brand color, and the recommended CTA is chromatic rather than a neutral.
+    accent = result.themes[Theme.light].roles.mapping.get(PaletteRole.accent, [])
+    assert accent, "expected accent candidates"
+    brand_hexes = ("#2563eb", "#7c3aed", "#f59e0b")
+    assert any(_color_near([accent[0].color], h) for h in brand_hexes)
+    assert result.themes[Theme.light].recommendation.cta_bg.chroma > 0.05
+
     _assert_recommendation_safe(result)
 
     # The result is a clean Pydantic round-trip.
@@ -181,14 +197,13 @@ def test_cards_site(fixtures_dir: Path) -> None:
     assert len(result.themes) == 1
 
     # The vendor-prefixed `intercom-*` widget is tagged third-party and kept out of
-    # the palette, but its color is surfaced separately.
-    assert "#1f8ded" in {c.hex for c in result.third_party_colors}
+    # the palette, but its color (~#1f8ded) is surfaced separately.
+    assert _color_near(result.third_party_colors, "#1f8ded")
 
     # Six repeated `.product-card` siblings are detected and their shared surface
-    # (#f1f5f9) becomes a dominant palette color.
+    # (~#f1f5f9) becomes a dominant palette color.
     (palette,) = result.themes.values()
-    dominant_hexes = set(_role_tops(palette.roles).values())
-    assert "#f1f5f9" in dominant_hexes
+    assert _color_near(_dominant_role_colors(palette.roles), "#f1f5f9")
 
     _assert_recommendation_safe(result)
     _check_golden("cards_site", _digest(result))
