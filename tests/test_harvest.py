@@ -12,12 +12,9 @@ from pathlib import Path
 
 import pytest
 
-from colorsense.config import Config, load_config
+from colorsense.config import Config, load_default_config
 from colorsense.harvest import RenderSession, harvest_page
 from colorsense.models import Harvest, Theme, Viewport
-
-REPO_ROOT = Path(__file__).resolve().parents[1]
-CONFIG_PATH = REPO_ROOT / "config" / "palette_config.yaml"
 
 VIEWPORT = Viewport(w=1280, h=800, device_scale_factor=1.0)
 
@@ -28,7 +25,7 @@ pytestmark = pytest.mark.browser
 @pytest.fixture(scope="module")
 def config() -> Config:
     """The real palette config (vendor prefixes drive vendor_match)."""
-    return load_config(CONFIG_PATH)
+    return load_default_config()
 
 
 async def _harvest(fixture: Path, config: Config, theme: Theme = Theme.light) -> Harvest:

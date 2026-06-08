@@ -3,11 +3,10 @@
 from __future__ import annotations
 
 import math
-from pathlib import Path
 
 from colorsense.classify.tokens import classify_tokens
 from colorsense.color.primitives import parse_css_color
-from colorsense.config import load_config
+from colorsense.config import load_default_config
 from colorsense.models import (
     ClassifiedToken,
     Color,
@@ -16,8 +15,7 @@ from colorsense.models import (
     TokenSemanticRole,
 )
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
-CONFIG = load_config(REPO_ROOT / "config" / "palette_config.yaml")
+CONFIG = load_default_config()
 
 
 def _record(

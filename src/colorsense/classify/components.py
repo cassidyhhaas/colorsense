@@ -2,8 +2,8 @@
 
 Scores each harvested DOM element into a probability distribution over
 :class:`~colorsense.models.ComponentType`. Every weight, threshold, predicate,
-and vocabulary entry is read from :class:`~colorsense.config.Config` (loaded from
-``config/palette_config.yaml``); nothing is hard-coded here.
+and vocabulary entry is read from :class:`~colorsense.config.Config` (the palette
+configuration YAML); nothing is hard-coded here.
 
 Scoring pipeline (per element):
 

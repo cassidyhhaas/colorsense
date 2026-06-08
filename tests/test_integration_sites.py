@@ -34,7 +34,6 @@ from colorsense.models import (
     TokenSemanticRole,
 )
 
-CONFIG_PATH = str(Path(__file__).resolve().parents[1] / "config" / "palette_config.yaml")
 GOLDEN_DIR = Path(__file__).parent / "golden"
 FIT_SCORE_TOL = 0.05
 # OKLab ΔE tolerance for rendered/screenshot-derived colors. Anti-aliasing and gamma
@@ -49,7 +48,7 @@ pytestmark = pytest.mark.browser
 async def _analyze(fixture: Path) -> AnalysisResult:
     # These fixtures exercise the full light+dark path (ds_site has a real dark-mode block;
     # the goldens pin both themes), so request dark explicitly — analyze defaults to light.
-    return await analyze(fixture.as_uri(), config_path=CONFIG_PATH, themes=LIGHT_AND_DARK)
+    return await analyze(fixture.as_uri(), themes=LIGHT_AND_DARK)
 
 
 # ---------------------------------------------------------------------------

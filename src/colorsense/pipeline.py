@@ -18,11 +18,12 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Iterable
 from dataclasses import dataclass
+from pathlib import Path
 
 from colorsense.classify.components import classify_components
 from colorsense.classify.tokens import classify_tokens
 from colorsense.color.primitives import delta_e
-from colorsense.config import Config, load_config
+from colorsense.config import Config, load_config, load_default_config
 from colorsense.models import (
     AnalysisResult,
     ClassifiedToken,
@@ -41,7 +42,6 @@ from colorsense.palette.inventory import build_inventory
 from colorsense.palette.reconcile import reconcile
 from colorsense.palette.roles import assign_roles
 
-DEFAULT_CONFIG_PATH = "config/palette_config.yaml"
 DEFAULT_VIEWPORT = Viewport(w=1280, h=800, device_scale_factor=1.0)
 
 # Light only by default: most sites ship no dark mode, and a second theme roughly doubles
@@ -72,7 +72,7 @@ class _ThemeOutput:
 async def analyze(
     url: str,
     *,
-    config_path: str = DEFAULT_CONFIG_PATH,
+    config_path: str | Path | None = None,
     viewport: Viewport = DEFAULT_VIEWPORT,
     themes: tuple[Theme, ...] = DEFAULT_THEMES,
     politeness: PolitenessPolicy | None = None,
@@ -89,8 +89,9 @@ async def analyze(
         Page to analyze. ``file://`` URLs are supported (and used by the test suite); any
         ``http(s)`` fetch is gated by ``politeness``.
     config_path:
-        Path to the palette config YAML (defaults to the bundled config, resolved relative
-        to the current working directory).
+        Path to a palette config YAML to override the default. When ``None`` (the default)
+        the configuration bundled with the package is used, so no file needs to exist on
+        disk. Copy the bundled ``data/palette_config.yaml`` and pass its path here to tune.
     viewport:
         Render viewport; defaults to 1280x800 at 1x scale.
     themes:
@@ -110,7 +111,7 @@ async def analyze(
     colorsense.net.politeness.RobotsDisallowedError
         If ``robots.txt`` disallows the fetch and the policy respects it.
     """
-    config = load_config(config_path)
+    config = load_default_config() if config_path is None else load_config(config_path)
     policy = politeness if politeness is not None else PolitenessPolicy()
 
     ordered_themes = list(dict.fromkeys(themes))

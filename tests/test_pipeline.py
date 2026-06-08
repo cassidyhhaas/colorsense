@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 
 from colorsense import LIGHT_AND_DARK, analyze
-from colorsense.config import Config, load_config
+from colorsense.config import Config, load_default_config
 from colorsense.models import (
     AnalysisResult,
     Harvest,
@@ -22,14 +22,12 @@ from colorsense.models import (
 )
 from colorsense.net.politeness import PolitenessPolicy, RobotsDisallowedError
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
-CONFIG_PATH = str(REPO_ROOT / "config" / "palette_config.yaml")
 VIEWPORT = Viewport(w=1280, h=800, device_scale_factor=1.0)
 
 
 @pytest.fixture(scope="module")
 def config() -> Config:
-    return load_config(CONFIG_PATH)
+    return load_default_config()
 
 
 # ---------------------------------------------------------------------------
@@ -150,7 +148,7 @@ async def test_analyze_propagates_robots_block(config: Config) -> None:
         robots_loader=_disallow_all,
     )
     with pytest.raises(RobotsDisallowedError):
-        await analyze("https://example.test/", config_path=CONFIG_PATH, politeness=policy)
+        await analyze("https://example.test/", politeness=policy)
 
 
 # ---------------------------------------------------------------------------
@@ -160,7 +158,7 @@ async def test_analyze_propagates_robots_block(config: Config) -> None:
 
 async def _analyze_fixture(name: str, fixtures_dir: Path, **kwargs: object) -> AnalysisResult:
     url = (fixtures_dir / name).as_uri()
-    return await analyze(url, config_path=CONFIG_PATH, viewport=VIEWPORT, **kwargs)  # type: ignore[arg-type]
+    return await analyze(url, viewport=VIEWPORT, **kwargs)  # type: ignore[arg-type]
 
 
 @pytest.mark.browser
@@ -223,4 +221,4 @@ async def test_explicit_single_theme_request(fixtures_dir: Path) -> None:
 async def test_empty_themes_rejected(fixtures_dir: Path) -> None:
     url = (fixtures_dir / "tokens.html").as_uri()
     with pytest.raises(ValueError, match="at least one theme"):
-        await analyze(url, config_path=CONFIG_PATH, themes=())
+        await analyze(url, themes=())

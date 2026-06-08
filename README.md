@@ -13,12 +13,21 @@ widget is left to the consumer.
 ## Install
 
 ```bash
+pip install colorsense
+playwright install chromium
+```
+
+Rendering uses a headless Chromium via Playwright. The browser binary is **not** a Python
+package, so it cannot be pulled in as a pip dependency — run `playwright install chromium`
+once after installing to download it (and `playwright install-deps chromium` on Linux to
+pull the OS libraries Chromium needs).
+
+For development from a checkout, use [uv](https://docs.astral.sh/uv/):
+
+```bash
 uv sync
 uv run playwright install chromium
 ```
-
-Rendering uses a headless Chromium via Playwright; the `playwright install` step is
-required once.
 
 ## Usage
 
@@ -65,7 +74,7 @@ from colorsense.models import Viewport
 result = asyncio.run(
     analyze(
         "https://example.com",
-        config_path="config/palette_config.yaml",      # token vocab + classifier weights
+        config_path="my_palette_config.yaml",          # override the bundled token vocab + weights
         viewport=Viewport(w=1440, h=900, device_scale_factor=2.0),
         themes=LIGHT_AND_DARK,                          # opt in to dark mode; default is light only
         politeness=PolitenessPolicy(min_interval=2.0),  # see below
@@ -114,12 +123,21 @@ considerately once you have decided.
 
 ## Configuration
 
-All tunable behavior lives in [`config/palette_config.yaml`](config/palette_config.yaml) —
-the single source of truth for the **token vocabulary** (CSS custom-property names →
-semantic roles → 60/30/10 palette-role priors) and the **component-classifier** weights
-(how rendered elements are scored into headers, cards, CTAs, …). The weights are calibrated
-starting points, not ground truth: tune values there against your own labeled sites rather
-than hard-coding thresholds in Python.
+All tunable behavior lives in
+[`palette_config.yaml`](src/colorsense/data/palette_config.yaml), which **ships bundled with
+the package** and is loaded automatically — the single source of truth for the **token
+vocabulary** (CSS custom-property names → semantic roles → 60/30/10 palette-role priors) and
+the **component-classifier** weights (how rendered elements are scored into headers, cards,
+CTAs, …). The weights are calibrated starting points, not ground truth.
+
+To tune them, copy the bundled file, edit your copy, and pass its path as `config_path=` to
+`analyze` (or load it with `load_config`). To inspect the defaults programmatically:
+
+```python
+from colorsense import load_default_config
+
+config = load_default_config()
+```
 
 ## Development
 

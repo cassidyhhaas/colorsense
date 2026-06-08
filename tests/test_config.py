@@ -14,17 +14,15 @@ from colorsense.config import (
     RelationalInfo,
     ScaleInfo,
     load_config,
+    load_default_config,
 )
 from colorsense.models import TokenSemanticRole
-
-REPO_ROOT = Path(__file__).resolve().parent.parent
-CONFIG_PATH = REPO_ROOT / "config" / "palette_config.yaml"
 
 
 @pytest.fixture
 def config() -> Config:
-    """The real, loaded palette config."""
-    return load_config(CONFIG_PATH)
+    """The real, loaded palette config (the one bundled with the package)."""
+    return load_default_config()
 
 
 def test_load_returns_typed_config(config: Config) -> None:
@@ -109,6 +107,14 @@ def test_layout_noise_class_tokens_present(config: Config) -> None:
     container = next((r for r in rules if r.match == "container"), None)
     assert container is not None
     assert container.votes.get("page_bg") == pytest.approx(0.5)
+
+
+def test_default_config_loads_from_package() -> None:
+    """The bundled config resolves via the package, independent of the working dir."""
+    config = load_default_config()
+    assert isinstance(config, Config)
+    # A representative value proves the YAML was actually parsed, not just located.
+    assert config.token_vocabulary.name_rules
 
 
 def test_invalid_config_raises_clear_error(tmp_path: Path) -> None:
