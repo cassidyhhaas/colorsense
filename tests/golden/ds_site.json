@@ -1,6 +1,6 @@
 {
-  "divergence_count": 3,
   "fit_score": 0.8617,
+  "has_divergence": true,
   "single_theme": false,
   "status_colors": [
     "#16a34a",

@@ -1,6 +1,6 @@
 {
-  "divergence_count": 7,
   "fit_score": 0.8,
+  "has_divergence": true,
   "single_theme": true,
   "status_colors": [],
   "theme_structure": {
