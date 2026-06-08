@@ -30,8 +30,16 @@ jobs:
       - name: Mypy (strict)
         run: uv run mypy src
 
-      # Browser tests (real Chromium renders) are excluded: this job installs no
-      # browser binary. They run locally via `uv run playwright install chromium`
-      # followed by `uv run pytest`. See the `browser` marker in pyproject.toml.
+      # Browserless gates run first for fast failure on lint/type/logic errors
+      # before paying for the Chromium download.
       - name: Pytest (browserless)
         run: uv run pytest -m "not browser"
+
+      # Install Chromium (and its OS dependencies) so the real render/harvest and
+      # end-to-end pipeline tests can run. `--with-deps` pulls the apt packages
+      # Playwright needs on the Ubuntu runner.
+      - name: Install Chromium for Playwright
+        run: uv run playwright install --with-deps chromium
+
+      - name: Pytest (browser / end-to-end)
+        run: uv run pytest -m browser
