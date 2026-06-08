@@ -1,0 +1,37 @@
+name: Publish to PyPI
+
+# Build the sdist + wheel and publish them to PyPI when a GitHub Release is
+# published. Authentication uses PyPI Trusted Publishing (OIDC) — no API token
+# or secret is stored; PyPI verifies the workflow identity instead.
+#
+# One-time PyPI setup (Trusted Publisher, "pending" until first publish):
+#   Owner:        cassidyhhaas
+#   Repository:   colorsense
+#   Workflow:     publish.yml          # the name of THIS file
+#   Environment:  pypi                  # matches `environment:` below
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  build-and-publish:
+    name: Build and publish
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write  # required for Trusted Publishing (OIDC)
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+          enable-cache: true
+
+      - name: Build sdist and wheel
+        run: uv build
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
