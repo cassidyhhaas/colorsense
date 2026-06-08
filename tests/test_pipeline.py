@@ -176,11 +176,8 @@ async def test_end_to_end_light_and_dark(fixtures_dir: Path) -> None:
 
     for theme, palette in result.themes.items():
         assert palette.theme is theme
-        contrast = palette.recommendation.contrast
-        # recommendation guarantees: text pairs >= 4.5, surfaces vs page >= 3.0.
-        assert contrast["heading_text_on_heading_bg"] >= 4.5 - 1e-6
-        assert contrast["cta_text_on_cta_bg"] >= 4.5 - 1e-6
-        assert contrast["cta_bg_on_page"] >= 3.0 - 1e-6
+        # Each surviving theme carries reconciled palette roles for consumers to use.
+        assert palette.roles.mapping
 
     # Declared tokens were classified and carried onto the result.
     assert result.tokens
@@ -214,19 +211,6 @@ async def test_default_is_light_only(fixtures_dir: Path) -> None:
     assert result.metadata["themes_requested"] == "light"
     assert result.metadata["themes_analyzed"] == "light"
     assert result.metadata["single_theme"] == "true"
-
-
-@pytest.mark.browser
-async def test_hover_hint_feeds_recommendation(fixtures_dir: Path) -> None:
-    # hover.html's #cta flips to #ff6600 on hover; that hint reaches recommend() and is
-    # reported as a distinct hover background (the recommender does not enforce a contrast floor on
-    # the hover color, only on the heading/cta surfaces and text pairs).
-    result = await _analyze_fixture("hover.html", fixtures_dir)
-
-    (palette,) = result.themes.values()
-    rec = palette.recommendation
-    assert "cta_hover_bg_on_page" in rec.contrast
-    assert rec.cta_hover_bg.hex != rec.cta_bg.hex
 
 
 @pytest.mark.browser

@@ -36,7 +36,6 @@ from colorsense.models import (
 
 CONFIG_PATH = str(Path(__file__).resolve().parents[1] / "config" / "palette_config.yaml")
 GOLDEN_DIR = Path(__file__).parent / "golden"
-CONTRAST_EPS = 1e-6
 FIT_SCORE_TOL = 0.05
 # OKLab ΔE tolerance for rendered/screenshot-derived colors. Anti-aliasing and gamma
 # differ across OSes (≈0.06 observed between macOS and Linux Chromium), so these colors
@@ -75,7 +74,7 @@ def _digest(result: AnalysisResult) -> dict[str, Any]:
 
     Only fields that derive from computed style or structure are captured: token
     classifications, token-resolved status colors, theme set, and fit_score. Rendered
-    (screenshot-derived) colors — role candidates and recommendations — are NOT portable
+    (screenshot-derived) colors — the role candidates — are NOT portable
     across OSes, so they are excluded here and asserted perceptually in each test instead.
     """
     return {
@@ -110,16 +109,6 @@ def _check_golden(name: str, digest: dict[str, Any]) -> None:
     assert digest == expected, f"{name}: digest diverged from golden (run UPDATE_GOLDEN=1)"
 
 
-def _assert_recommendation_safe(result: AnalysisResult) -> None:
-    """Every theme's recommendation meets the recommendation engine's WCAG guarantees."""
-    for palette in result.themes.values():
-        contrast = palette.recommendation.contrast
-        assert contrast["heading_text_on_heading_bg"] >= 4.5 - CONTRAST_EPS
-        assert contrast["cta_text_on_cta_bg"] >= 4.5 - CONTRAST_EPS
-        assert contrast["heading_bg_on_page"] >= 3.0 - CONTRAST_EPS
-        assert contrast["cta_bg_on_page"] >= 3.0 - CONTRAST_EPS
-
-
 # ---------------------------------------------------------------------------
 # Fixture 1 — token-driven design system (light + dark)
 # ---------------------------------------------------------------------------
@@ -150,14 +139,11 @@ async def test_design_system_site(fixtures_dir: Path) -> None:
     assert result.fit_score > 0.6
 
     # Dominance (perceptual, platform-robust): the accent role is led by a declared
-    # brand color, and the recommended CTA is chromatic rather than a neutral.
+    # brand color.
     accent = result.themes[Theme.light].roles.mapping.get(PaletteRole.accent, [])
     assert accent, "expected accent candidates"
     brand_hexes = ("#2563eb", "#7c3aed", "#f59e0b")
     assert any(_color_near([accent[0].color], h) for h in brand_hexes)
-    assert result.themes[Theme.light].recommendation.cta_bg.chroma > 0.05
-
-    _assert_recommendation_safe(result)
 
     # The result is a clean Pydantic round-trip.
     assert AnalysisResult.model_validate_json(result.model_dump_json()) == result
@@ -184,7 +170,6 @@ async def test_legacy_site(fixtures_dir: Path) -> None:
     assert result.divergence  # used-but-undeclared discrepancies are reported
     assert all("undeclared" in item.note.lower() for item in result.divergence)
 
-    _assert_recommendation_safe(result)
     _check_golden("legacy_site", _digest(result))
 
 
@@ -207,5 +192,4 @@ async def test_cards_site(fixtures_dir: Path) -> None:
     (palette,) = result.themes.values()
     assert _color_near(_dominant_role_colors(palette.roles), "#f1f5f9")
 
-    _assert_recommendation_safe(result)
     _check_golden("cards_site", _digest(result))

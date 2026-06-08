@@ -28,7 +28,7 @@ from colorsense.models import Color, Rect, ScreenshotBin
 # capture far faster (~0.3-0.65s/render saved on real sites). Quality is kept high (92) so
 # the introduced error stays perceptually negligible: measured bin shifts are <=0.012 OKLab
 # ΔE — well under the cross-platform rendering drift the pipeline already tolerates — and
-# the recommended palette is unchanged. Coverage is unaffected (still ``full_page=True``).
+# the extracted palette is unchanged. Coverage is unaffected (still ``full_page=True``).
 _SCREENSHOT_TYPE: Literal["jpeg"] = "jpeg"
 _SCREENSHOT_QUALITY: int = 92
 

@@ -2,9 +2,9 @@
 
 ``analyze`` wires every stage into one typed call: render each requested
 theme (gated by :class:`~colorsense.net.politeness.PolitenessPolicy`), classify tokens
-and components, build a color inventory, assign palette roles,
-reconcile usage against declared intent, and recommend WCAG-safe widget colors
-— per theme. Sites that ignore ``prefers-color-scheme`` (near-identical light/dark renders)
+and components, build a color inventory, assign palette roles, and
+reconcile usage against declared intent — per theme. Sites that ignore
+``prefers-color-scheme`` (near-identical light/dark renders)
 are collapsed to a single theme. The whole thing is assembled into a frozen
 :class:`~colorsense.models.AnalysisResult`.
 
@@ -40,7 +40,6 @@ from colorsense.net.politeness import PolitenessPolicy
 from colorsense.palette.inventory import build_inventory
 from colorsense.palette.reconcile import reconcile
 from colorsense.palette.roles import assign_roles
-from colorsense.recommend import recommend
 
 DEFAULT_CONFIG_PATH = "config/palette_config.yaml"
 DEFAULT_VIEWPORT = Viewport(w=1280, h=800, device_scale_factor=1.0)
@@ -151,7 +150,7 @@ async def analyze(
 
 
 def _analyze_theme(harvest: Harvest, config: Config, viewport: Viewport) -> _ThemeOutput:
-    """Run the per-theme classify → inventory → roles → reconcile → recommend chain."""
+    """Run the per-theme classify → inventory → roles → reconcile chain."""
     classified_tokens, status_colors = classify_tokens(harvest.tokens, config)
     classified_elements = classify_components(harvest.elements, config, viewport)
     clusters = build_inventory(harvest, classified_elements)
@@ -159,13 +158,7 @@ def _analyze_theme(harvest: Harvest, config: Config, viewport: Viewport) -> _The
     usage_roles, fit_score = assign_roles(clusters)
     reconciled_roles, divergence = reconcile(usage_roles, classified_tokens)
 
-    recommendation = recommend(reconciled_roles, harvest.theme, _hover_hint(harvest))
-
-    palette = ThemePalette(
-        theme=harvest.theme,
-        roles=reconciled_roles,
-        recommendation=recommendation,
-    )
+    palette = ThemePalette(theme=harvest.theme, roles=reconciled_roles)
     return _ThemeOutput(
         palette=palette,
         tokens=classified_tokens,
@@ -203,19 +196,6 @@ def _near_identical(a: Harvest, b: Harvest) -> bool:
     return all(
         min(delta_e(sb.color, ob.color) for ob in top_b) <= _COLLAPSE_DELTA_E for sb in top_a
     )
-
-
-def _hover_hint(harvest: Harvest) -> Color | None:
-    """The hover background of the largest hover-changing clickable element, if any."""
-    best: Color | None = None
-    best_area = 0.0
-    for element in harvest.elements:
-        if element.has_hover_color_change and element.hover_bg is not None:
-            area = element.rect.w * element.rect.h
-            if area > best_area:
-                best_area = area
-                best = element.hover_bg
-    return best
 
 
 def _third_party_colors(clusters: list[ColorCluster]) -> list[Color]:

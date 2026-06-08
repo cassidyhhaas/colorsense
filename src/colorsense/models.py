@@ -245,26 +245,11 @@ class DivergenceItem(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-class Recommendation(BaseModel):
-    """WCAG-enforced widget color recommendation for one theme."""
-
-    theme: Theme
-    page_bg: Color
-    heading_bg: Color
-    heading_text: Color
-    cta_bg: Color
-    cta_text: Color
-    cta_hover_bg: Color
-    cta_hover_text: Color
-    contrast: dict[str, float] = Field(default_factory=dict)
-
-
 class ThemePalette(BaseModel):
-    """Reconciled roles plus the recommendation for a single theme."""
+    """Reconciled palette roles for a single theme."""
 
     theme: Theme
     roles: RoleResults
-    recommendation: Recommendation
 
 
 class AnalysisResult(BaseModel):

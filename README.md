@@ -1,13 +1,14 @@
 # colorsense
 
 Extract the rendered color palette from any website and return a structured, typed result
-intended for downstream consumers — including AI models — that build embedded widgets
-matching a site's theme.
+intended for downstream consumers — including AI models — that need to understand a site's
+color identity (for example, to derive their own theme-matched colors).
 
-colorsense renders a page under both light and dark color schemes, harvests its design
-tokens and computed element colors, classifies them into a 60/30/10 palette, reconciles
-what the site *declares* (CSS custom properties) against what it actually *uses*, and emits
-WCAG-safe widget color recommendations per theme.
+colorsense renders a page under light (and, on request, dark) color schemes, harvests its
+design tokens and computed element colors, classifies them into a 60/30/10 palette, and
+reconciles what the site *declares* (CSS custom properties) against what it actually *uses*.
+It returns the palette roles and scoring; producing concrete color choices for a given
+widget is left to the consumer.
 
 ## Install
 
@@ -27,12 +28,14 @@ themes concurrently), so await it from an event loop:
 ```python
 import asyncio
 from colorsense import analyze
+from colorsense.models import PaletteRole
 
 result = asyncio.run(analyze("https://example.com"))
 
 for theme, palette in result.themes.items():
-    rec = palette.recommendation
-    print(theme, rec.cta_bg.hex, rec.cta_text.hex)   # WCAG-enforced widget colors
+    roles = palette.roles                            # 60/30/10 palette roles + candidates
+    primary = roles.mapping[PaletteRole.primary][0]  # top candidate for the primary role
+    print(theme, primary.color.hex, primary.probability)
 
 print(result.fit_score)          # how well declared intent matches measured usage
 print(result.status_colors)      # success/error/warning colors, kept out of the palette
@@ -44,8 +47,9 @@ Inside an async application (e.g. a FastAPI `async def` endpoint) just
 `analyze` returns a fully typed [`AnalysisResult`](src/colorsense/models.py) (a Pydantic
 model — `result.model_dump_json()` round-trips). Key fields:
 
-- `themes` — per-theme reconciled `roles` and a `recommendation`. Sites that ignore
-  `prefers-color-scheme` (near-identical light/dark renders) collapse to a single theme.
+- `themes` — per-theme reconciled palette `roles` (each role with ranked, scored color
+  candidates). Sites that ignore `prefers-color-scheme` (near-identical light/dark renders)
+  collapse to a single theme.
 - `tokens` — declared design tokens with their inferred semantic roles.
 - `divergence` — declared-but-unused and used-but-undeclared discrepancies.
 - `third_party_colors` / `status_colors` — colors deliberately excluded from the palette.
