@@ -22,7 +22,7 @@ from colorsense.models import (
 )
 from colorsense.net.politeness import PolitenessPolicy, RobotsDisallowedError
 
-VIEWPORT = Viewport(w=1280, h=800, device_scale_factor=1.0)
+VIEWPORT = Viewport(width=1280, height=800, device_scale_factor=1.0)
 
 
 @pytest.fixture(scope="module")
@@ -169,7 +169,7 @@ async def test_end_to_end_light_and_dark(fixtures_dir: Path) -> None:
 
     assert isinstance(result, AnalysisResult)
     assert set(result.themes) == {Theme.light, Theme.dark}
-    assert result.metadata["single_theme"] == "false"
+    assert result.metadata.single_theme is False
     assert 0.0 <= result.fit_score <= 1.0
 
     for theme, palette in result.themes.items():
@@ -194,9 +194,9 @@ async def test_single_theme_site_collapses(fixtures_dir: Path) -> None:
     result = await _analyze_fixture("hover.html", fixtures_dir, themes=LIGHT_AND_DARK)
 
     assert len(result.themes) == 1
-    assert result.metadata["single_theme"] == "true"
-    assert result.metadata["themes_requested"] == "light,dark"
-    assert result.metadata["themes_analyzed"] == "light"
+    assert result.metadata.single_theme is True
+    assert result.metadata.themes_requested == [Theme.light, Theme.dark]
+    assert result.metadata.themes_analyzed == [Theme.light]
 
 
 @pytest.mark.browser
@@ -206,16 +206,16 @@ async def test_default_is_light_only(fixtures_dir: Path) -> None:
     result = await _analyze_fixture("tokens.html", fixtures_dir)
 
     assert set(result.themes) == {Theme.light}
-    assert result.metadata["themes_requested"] == "light"
-    assert result.metadata["themes_analyzed"] == "light"
-    assert result.metadata["single_theme"] == "true"
+    assert result.metadata.themes_requested == [Theme.light]
+    assert result.metadata.themes_analyzed == [Theme.light]
+    assert result.metadata.single_theme is True
 
 
 @pytest.mark.browser
 async def test_explicit_single_theme_request(fixtures_dir: Path) -> None:
     result = await _analyze_fixture("tokens.html", fixtures_dir, themes=(Theme.light,))
     assert set(result.themes) == {Theme.light}
-    assert result.metadata["themes_requested"] == "light"
+    assert result.metadata.themes_requested == [Theme.light]
 
 
 async def test_empty_themes_rejected(fixtures_dir: Path) -> None:

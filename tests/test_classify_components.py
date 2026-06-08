@@ -14,7 +14,7 @@ from colorsense.models import (
 
 CONFIG = load_default_config()
 
-VIEWPORT = Viewport(w=1280, h=800, device_scale_factor=1.0)
+VIEWPORT = Viewport(width=1280, height=800, device_scale_factor=1.0)
 
 
 def _color(hex_value: str = "#123456") -> Color:
@@ -49,7 +49,7 @@ def _element(
         role=role,
         id=element_id,
         class_tokens=class_tokens if class_tokens is not None else [],
-        rect=rect if rect is not None else Rect(x=0.0, y=0.0, w=100.0, h=100.0),
+        rect=rect if rect is not None else Rect(x=0.0, y=0.0, width=100.0, height=100.0),
         position=position,
         bg=bg,
         text=text,
@@ -74,7 +74,7 @@ def test_header_top_bar_is_argmax_header_bg() -> None:
     """A full-width short top-bar <header> classifies dominantly as header_bg."""
     header = _element(
         tag="header",
-        rect=Rect(x=0.0, y=0.0, w=1280.0, h=80.0),
+        rect=Rect(x=0.0, y=0.0, width=1280.0, height=80.0),
     )
     [result] = classify_components([header], CONFIG, VIEWPORT)
     assert result.component_dist
@@ -89,7 +89,7 @@ def test_four_card_siblings_get_card_bg_via_repetition() -> None:
             class_tokens=["card"],
             border=_color("#cccccc"),
             bg=_color("#ffffff"),
-            rect=Rect(x=float(i * 200), y=300.0, w=180.0, h=180.0),
+            rect=Rect(x=float(i * 200), y=300.0, width=180.0, height=180.0),
         )
         for i in range(4)
     ]
@@ -131,7 +131,7 @@ def test_container_wrapper_has_no_confident_brand_component() -> None:
     container = _element(
         tag="div",
         class_tokens=["container"],
-        rect=Rect(x=0.0, y=200.0, w=1200.0, h=600.0),
+        rect=Rect(x=0.0, y=200.0, width=1200.0, height=600.0),
     )
     [result] = classify_components([container], CONFIG, VIEWPORT)
     # Only the near-zero page_bg noise vote contributes; no brand component
@@ -147,7 +147,7 @@ def test_container_wrapper_has_no_confident_brand_component() -> None:
 
 def test_distributions_sum_to_one_and_aria_hidden_is_empty() -> None:
     """Non-empty distributions sum to ~1.0; aria_hidden yields an empty dist."""
-    header = _element(tag="header", rect=Rect(x=0.0, y=0.0, w=1280.0, h=80.0))
+    header = _element(tag="header", rect=Rect(x=0.0, y=0.0, width=1280.0, height=80.0))
     anchor = _element(tag="a", clickable=True)
     hidden = _element(tag="header", aria_hidden=True)
 
@@ -163,7 +163,7 @@ def test_distributions_sum_to_one_and_aria_hidden_is_empty() -> None:
 
 def test_no_viewport_uses_default() -> None:
     """Calling without a viewport still computes geometry-driven results."""
-    header = _element(tag="header", rect=Rect(x=0.0, y=0.0, w=1280.0, h=80.0))
+    header = _element(tag="header", rect=Rect(x=0.0, y=0.0, width=1280.0, height=80.0))
     [result] = classify_components([header], CONFIG)
     assert result.component_dist
     assert _argmax(result.component_dist) is ComponentType.header_bg

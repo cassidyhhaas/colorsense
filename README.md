@@ -43,8 +43,10 @@ result = asyncio.run(analyze("https://example.com"))
 
 for theme, palette in result.themes.items():
     roles = palette.roles                            # 60/30/10 palette roles + candidates
-    primary = roles.mapping[PaletteRole.primary][0]  # top candidate for the primary role
-    print(theme, primary.color.hex, primary.probability)
+    cands = roles.mapping[PaletteRole.primary]       # always present; [] if none detected
+    if cands:
+        primary = cands[0]                           # top candidate for the primary role
+        print(theme, primary.color.hex, primary.probability)
 
 print(result.fit_score)          # how well declared intent matches measured usage
 print(result.status_colors)      # success/error/warning colors, kept out of the palette
@@ -63,6 +65,8 @@ model — `result.model_dump_json()` round-trips). Key fields:
 - `divergence` — declared-but-unused and used-but-undeclared discrepancies.
 - `third_party_colors` / `status_colors` — colors deliberately excluded from the palette.
 - `fit_score` — agreement between declared intent and measured usage, in `[0, 1]`.
+- `metadata` — a typed [`RunMetadata`](src/colorsense/models.py): themes requested vs.
+  analyzed, whether the run collapsed to a single theme, and the fetch policy in effect.
 
 ### Options
 
@@ -75,7 +79,7 @@ result = asyncio.run(
     analyze(
         "https://example.com",
         config_path="my_palette_config.yaml",          # override the bundled token vocab + weights
-        viewport=Viewport(w=1440, h=900, device_scale_factor=2.0),
+        viewport=Viewport(width=1440, height=900, device_scale_factor=2.0),
         themes=LIGHT_AND_DARK,                          # opt in to dark mode; default is light only
         politeness=PolitenessPolicy(min_interval=2.0),  # see below
     )

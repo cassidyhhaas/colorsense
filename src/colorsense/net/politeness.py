@@ -31,6 +31,18 @@ DEFAULT_USER_AGENT = (
 )
 """A real browser-engine base token plus an identifiable ``colorsense`` token and a URL."""
 
+DEFAULT_ROBOTS_AGENT = "colorsense"
+"""The product token matched against ``robots.txt`` ``User-agent:`` groups.
+
+This is deliberately distinct from :data:`DEFAULT_USER_AGENT`. ``RobotFileParser`` matches a
+robots ``User-agent`` group by checking whether the group name is a case-insensitive prefix
+of the agent string passed to :meth:`RobotFileParser.can_fetch`. Passing the full
+descriptive UA (which begins with ``"Mozilla/5.0 ..."``) would only ever match the wire
+browser token, so a site-specific ``User-agent: colorsense`` group would be silently ignored.
+Matching on the bare product token honors those agent-specific rules while the full
+:data:`DEFAULT_USER_AGENT` is still what is sent on the wire.
+"""
+
 DEFAULT_MIN_INTERVAL = 1.0
 """Seconds enforced between consecutive fetches to the same host."""
 
@@ -84,7 +96,7 @@ async def _default_robots_loader(robots_url: str) -> str | None:
 
 def _cache_key(url: str, theme: Theme, viewport: Viewport) -> tuple[str, str, int, int, float]:
     """A render is identified by URL + theme + viewport geometry."""
-    return (url, str(theme), viewport.w, viewport.h, viewport.device_scale_factor)
+    return (url, str(theme), viewport.width, viewport.height, viewport.device_scale_factor)
 
 
 class PolitenessPolicy:
@@ -93,8 +105,13 @@ class PolitenessPolicy:
     Parameters
     ----------
     user_agent:
-        Identifiable User-Agent sent when reading ``robots.txt`` (the renderer's own UA is
-        set elsewhere). Defaults to :data:`DEFAULT_USER_AGENT`.
+        Identifiable User-Agent sent on the wire when reading ``robots.txt`` (the renderer's
+        own UA is set elsewhere). Defaults to :data:`DEFAULT_USER_AGENT`.
+    robots_agent:
+        The product token matched against ``robots.txt`` ``User-agent:`` groups by
+        :meth:`can_fetch`. Kept separate from ``user_agent`` because the descriptive wire UA
+        begins with a browser token, so matching on it would ignore agent-specific rules.
+        Defaults to :data:`DEFAULT_ROBOTS_AGENT` (``"colorsense"``).
     respect_robots:
         When ``True`` (default), :meth:`can_fetch` consults ``robots.txt`` and
         :meth:`fetch` raises :class:`RobotsDisallowedError` on a disallow. Set ``False`` to
@@ -114,6 +131,7 @@ class PolitenessPolicy:
         self,
         *,
         user_agent: str = DEFAULT_USER_AGENT,
+        robots_agent: str = DEFAULT_ROBOTS_AGENT,
         respect_robots: bool = True,
         min_interval: float = DEFAULT_MIN_INTERVAL,
         harvester: Harvester = harvest_page,
@@ -122,6 +140,7 @@ class PolitenessPolicy:
         sleeper: Sleeper = asyncio.sleep,
     ) -> None:
         self.user_agent = user_agent
+        self.robots_agent = robots_agent
         self.respect_robots = respect_robots
         self.min_interval = min_interval
         self._harvester = harvester
@@ -166,7 +185,10 @@ class PolitenessPolicy:
         parser = await self._robots_parser(robots_url)
         if parser is None:
             return True
-        return parser.can_fetch(self.user_agent, url)
+        # Match on the bare product token, not the descriptive wire UA: RobotFileParser
+        # matches a ``User-agent`` group by prefix, and the wire UA starts with "Mozilla/5.0",
+        # which would mask any site-specific ``User-agent: colorsense`` rule.
+        return parser.can_fetch(self.robots_agent, url)
 
     # -- rate limiting -------------------------------------------------------
 

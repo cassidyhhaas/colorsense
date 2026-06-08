@@ -24,13 +24,9 @@ dependencies = [
   "httpx",
   "coloraide",
   "pydantic>=2",
-  "pydantic-settings",
   "pyyaml",
   "numpy",
   "pillow",
-  "scikit-learn",
-  "scikit-image",
-  "tinycss2",
 ]
 
 [project.urls]
@@ -68,7 +64,7 @@ plugins = ["pydantic.mypy"]
 
 # Libraries without bundled type stubs: silence missing-import only, no Any spill.
 [[tool.mypy.overrides]]
-module = ["coloraide.*", "tinycss2.*", "skimage.*", "sklearn.*"]
+module = ["coloraide.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

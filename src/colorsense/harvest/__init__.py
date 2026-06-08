@@ -12,6 +12,8 @@ from __future__ import annotations
 
 import asyncio
 
+from playwright.async_api import Error as PlaywrightError
+
 from colorsense.config import Config
 from colorsense.harvest.dom import harvest_elements
 from colorsense.harvest.render import RenderSession
@@ -20,7 +22,26 @@ from colorsense.harvest.states import probe_hover_states
 from colorsense.harvest.tokens import harvest_tokens
 from colorsense.models import Harvest, Theme, Viewport
 
-__all__ = ["RenderSession", "harvest_page"]
+__all__ = ["RenderError", "RenderSession", "harvest_page"]
+
+
+class RenderError(Exception):
+    """A page failed to render or navigate.
+
+    Raised when the underlying browser engine cannot load the target URL — e.g. DNS
+    resolution failure, connection refused, TLS error, navigation timeout, or any other
+    Playwright navigation/render failure. The version-private Playwright exception is wrapped
+    so consumers have a single, stable, documented type to catch instead of reaching into
+    ``playwright._impl``.
+
+    The offending URL is available as :attr:`url`; the original Playwright error is chained
+    via ``__cause__`` (``raise ... from err``).
+    """
+
+    def __init__(self, url: str, message: str | None = None) -> None:
+        detail = message or "render/navigation failed"
+        super().__init__(f"{detail} for {url!r}")
+        self.url = url
 
 
 async def harvest_page(
@@ -45,20 +66,28 @@ async def harvest_page(
     """
     vendor_prefixes = config.component_classifier.third_party.vendor_prefixes
 
-    async with RenderSession(theme, viewport) as session:
-        await session.goto(url)
-        page = session.page
+    # The whole render body is wrapped so any Playwright navigation/render failure (DNS,
+    # timeout, TLS, connection refused, evaluation error) surfaces as a public ``RenderError``
+    # rather than the version-private ``playwright._impl`` type. The ``async with`` still
+    # exits and tears the browser down on exception. ``RobotsDisallowedError`` is raised in
+    # the politeness layer above this call, so it is never caught here.
+    try:
+        async with RenderSession(theme, viewport) as session:
+            await session.goto(url)
+            page = session.page
 
-        tokens, (elements, selectors) = await asyncio.gather(
-            harvest_tokens(page),
-            harvest_elements(page, vendor_prefixes),
-        )
-        # Isolated: forces :hover per element, which would pollute a concurrent screenshot.
-        elements = await probe_hover_states(page, elements, selectors)
-        screenshot_bins, logo_colors = await asyncio.gather(
-            harvest_screenshot(page, session.consent_rects, viewport.device_scale_factor),
-            harvest_logo_colors(page),
-        )
+            tokens, (elements, selectors) = await asyncio.gather(
+                harvest_tokens(page),
+                harvest_elements(page, vendor_prefixes),
+            )
+            # Isolated: forces :hover per element, which would pollute a concurrent screenshot.
+            elements = await probe_hover_states(page, elements, selectors)
+            screenshot_bins, logo_colors = await asyncio.gather(
+                harvest_screenshot(page, session.consent_rects, viewport.device_scale_factor),
+                harvest_logo_colors(page),
+            )
+    except PlaywrightError as err:
+        raise RenderError(url, str(err).splitlines()[0] if str(err) else None) from err
 
     return Harvest(
         url=url,

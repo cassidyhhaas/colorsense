@@ -79,8 +79,8 @@ async def harvest_screenshot(
     for rect in consent_rects:
         x0 = max(0, int(rect.x * device_scale_factor))
         y0 = max(0, int(rect.y * device_scale_factor))
-        x1 = min(width, int((rect.x + rect.w) * device_scale_factor))
-        y1 = min(height, int((rect.y + rect.h) * device_scale_factor))
+        x1 = min(width, int((rect.x + rect.width) * device_scale_factor))
+        y1 = min(height, int((rect.y + rect.height) * device_scale_factor))
         if x1 > x0 and y1 > y0:
             keep[y0:y1, x0:x1] = False
 

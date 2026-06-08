@@ -147,11 +147,12 @@ def reconcile(
     posterior_mapping: dict[PaletteRole, list[PaletteCandidate]] = {}
 
     for role in PaletteRole:  # iterate in enum order for determinism
-        if role not in roles:
-            continue
-        candidates = _pool_role(role, usage, groups, intents, alpha)
-        if candidates:
-            posterior_mapping[role] = candidates
+        if role in roles:
+            posterior_mapping[role] = _pool_role(role, usage, groups, intents, alpha)
+        else:
+            # Backfill: the mapping always contains every PaletteRole, even with no
+            # candidates, so callers can index any role without a KeyError.
+            posterior_mapping[role] = []
 
     posterior = RoleResults(mapping=posterior_mapping)
     divergence = _build_divergence(usage, groups, intents)

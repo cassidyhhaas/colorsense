@@ -109,8 +109,8 @@ class Rect(BaseModel):
 
     x: float
     y: float
-    w: float
-    h: float
+    width: float
+    height: float
 
 
 class Viewport(BaseModel):
@@ -118,8 +118,8 @@ class Viewport(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    w: int
-    h: int
+    width: int
+    height: int
     device_scale_factor: float
 
 
@@ -227,7 +227,11 @@ class PaletteCandidate(BaseModel):
 
 
 class RoleResults(BaseModel):
-    """Per-role ranked candidate lists."""
+    """Per-role ranked candidate lists.
+
+    ``mapping`` always contains every :class:`PaletteRole`; a role with no detected
+    candidates maps to an empty list.
+    """
 
     mapping: dict[PaletteRole, list[PaletteCandidate]] = Field(default_factory=dict)
 
@@ -252,6 +256,21 @@ class ThemePalette(BaseModel):
     roles: RoleResults
 
 
+class RunMetadata(BaseModel):
+    """Provenance for a single ``analyze`` run.
+
+    Records which themes were requested versus actually analyzed (later themes whose
+    render is perceptually identical to the primary are collapsed away), whether the run
+    reduced to a single theme, and the fetch policy in effect.
+    """
+
+    themes_requested: list[Theme] = Field(default_factory=list)
+    themes_analyzed: list[Theme] = Field(default_factory=list)
+    single_theme: bool = True
+    user_agent: str = ""
+    respect_robots: bool = True
+
+
 class AnalysisResult(BaseModel):
     """The top-level typed result returned by ``analyze``."""
 
@@ -263,4 +282,4 @@ class AnalysisResult(BaseModel):
     status_colors: list[Color] = Field(default_factory=list)
     divergence: list[DivergenceItem] = Field(default_factory=list)
     fit_score: float = 0.0
-    metadata: dict[str, str] = Field(default_factory=dict)
+    metadata: RunMetadata = Field(default_factory=RunMetadata)

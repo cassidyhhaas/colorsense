@@ -131,7 +131,7 @@ class RenderSession:
         self._playwright = await async_playwright().start()
         self._browser = await self._playwright.chromium.launch(headless=True)
         self._context = await self._browser.new_context(
-            viewport={"width": self._viewport.w, "height": self._viewport.h},
+            viewport={"width": self._viewport.width, "height": self._viewport.height},
             device_scale_factor=self._viewport.device_scale_factor,
             color_scheme=_COLOR_SCHEME[self._theme],
         )
@@ -222,8 +222,8 @@ class RenderSession:
                 Rect(
                     x=float(item["x"]),
                     y=float(item["y"]),
-                    w=float(item["w"]),
-                    h=float(item["h"]),
+                    width=float(item["w"]),
+                    height=float(item["h"]),
                 )
             )
         return rects

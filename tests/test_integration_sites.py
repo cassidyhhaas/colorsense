@@ -78,7 +78,7 @@ def _digest(result: AnalysisResult) -> dict[str, Any]:
     """
     return {
         "themes": sorted(str(theme) for theme in result.themes),
-        "single_theme": result.metadata["single_theme"],
+        "single_theme": result.metadata.single_theme,
         "tokens": {ct.record.name: str(ct.semantic_role) for ct in result.tokens},
         "status_colors": sorted(c.hex for c in result.status_colors),
         "fit_score": round(result.fit_score, 4),
@@ -118,7 +118,7 @@ async def test_design_system_site(fixtures_dir: Path) -> None:
 
     # A real dark-mode block: both themes survive (no collapse).
     assert {str(t) for t in result.themes} == {"light", "dark"}
-    assert result.metadata["single_theme"] == "false"
+    assert result.metadata.single_theme is False
 
     # Tokens classify by name, with the `--color-` namespace stripped first.
     semantic = {ct.record.name: ct.semantic_role for ct in result.tokens}
@@ -160,7 +160,7 @@ async def test_legacy_site(fixtures_dir: Path) -> None:
 
     # No dark-mode block -> identical renders -> single theme.
     assert len(result.themes) == 1
-    assert result.metadata["single_theme"] == "true"
+    assert result.metadata.single_theme is True
 
     # No custom properties: nothing to declare, so the palette is usage-driven and
     # every prominent color is "used but undeclared".

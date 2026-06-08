@@ -14,6 +14,7 @@ from colorsense.models import (
     PaletteRole,
     Rect,
     RoleResults,
+    RunMetadata,
     ScreenshotBin,
     Theme,
     ThemePalette,
@@ -28,7 +29,7 @@ def _color(hex_: str = "#3366cc", lum: float = 0.5) -> Color:
 
 
 def _dummy_result() -> AnalysisResult:
-    viewport = Viewport(w=1280, h=800, device_scale_factor=1.0)
+    viewport = Viewport(width=1280, height=800, device_scale_factor=1.0)
     brand = _color("#3366cc", 0.55)
     white = _color("#ffffff", 0.99)
     dark = _color("#111111", 0.1)
@@ -75,7 +76,13 @@ def _dummy_result() -> AnalysisResult:
             DivergenceItem(role=PaletteRole.primary, color=dark, note="declared but unused")
         ],
         fit_score=0.82,
-        metadata={"engine": "colorsense", "version": "0.1.0"},
+        metadata=RunMetadata(
+            themes_requested=[Theme.light, Theme.dark],
+            themes_analyzed=[Theme.light],
+            single_theme=True,
+            user_agent="colorsense",
+            respect_robots=True,
+        ),
     )
 
 
@@ -95,7 +102,7 @@ def test_harvest_models_construct() -> None:
         role=None,
         id="cta",
         class_tokens=["btn", "btn-primary"],
-        rect=Rect(x=10, y=20, w=120, h=40),
+        rect=Rect(x=10, y=20, width=120, height=40),
         position="static",
         bg=_color("#3366cc"),
         text=_color("#ffffff", 0.99),
@@ -132,4 +139,6 @@ def test_analysis_result_json_round_trip() -> None:
     assert Theme.light in restored.themes
     assert restored.themes[Theme.light].roles.mapping[PaletteRole.accent][0].color.hex == "#3366cc"
     assert restored.tokens[0].palette_prior[PaletteRole.accent] == 0.55
-    assert restored.metadata["engine"] == "colorsense"
+    assert restored.metadata.user_agent == "colorsense"
+    assert restored.metadata.single_theme is True
+    assert restored.metadata.themes_requested == [Theme.light, Theme.dark]

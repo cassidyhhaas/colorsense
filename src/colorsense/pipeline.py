@@ -5,7 +5,7 @@ theme (gated by :class:`~colorsense.net.politeness.PolitenessPolicy`), classify 
 and components, build a color inventory, assign palette roles, and
 reconcile usage against declared intent — per theme. Sites that ignore
 ``prefers-color-scheme`` (near-identical light/dark renders)
-are collapsed to a single theme. The whole thing is assembled into a frozen
+are collapsed to a single theme. The whole thing is assembled into a typed
 :class:`~colorsense.models.AnalysisResult`.
 
 Networking lives entirely behind ``PolitenessPolicy``/``harvest_page``; everything else is
@@ -33,6 +33,7 @@ from colorsense.models import (
     DivergenceItem,
     Harvest,
     RoleResults,
+    RunMetadata,
     Theme,
     ThemePalette,
     Viewport,
@@ -42,7 +43,7 @@ from colorsense.palette.inventory import build_inventory
 from colorsense.palette.reconcile import reconcile
 from colorsense.palette.roles import assign_roles
 
-DEFAULT_VIEWPORT = Viewport(w=1280, h=800, device_scale_factor=1.0)
+DEFAULT_VIEWPORT = Viewport(width=1280, height=800, device_scale_factor=1.0)
 
 # Light only by default: most sites ship no dark mode, and a second theme roughly doubles
 # render cost (a whole extra headless render). A consumer analyzing their own (or a client's)
@@ -110,6 +111,8 @@ async def analyze(
     ------
     colorsense.net.politeness.RobotsDisallowedError
         If ``robots.txt`` disallows the fetch and the policy respects it.
+    colorsense.harvest.RenderError
+        If the page fails to render or navigate (DNS, timeout, TLS, or navigation error).
     """
     config = load_default_config() if config_path is None else load_config(config_path)
     policy = politeness if politeness is not None else PolitenessPolicy()
@@ -225,15 +228,15 @@ def _dedupe_colors(colors: Iterable[Color]) -> list[Color]:
 
 def _build_metadata(
     requested: list[Theme], kept: list[Theme], policy: PolitenessPolicy
-) -> dict[str, str]:
+) -> RunMetadata:
     """Provenance for the run: themes requested vs analyzed, collapse flag, fetch policy."""
-    return {
-        "themes_requested": ",".join(str(theme) for theme in requested),
-        "themes_analyzed": ",".join(str(theme) for theme in kept),
-        "single_theme": str(len(kept) == 1).lower(),
-        "user_agent": policy.user_agent,
-        "respect_robots": str(policy.respect_robots).lower(),
-    }
+    return RunMetadata(
+        themes_requested=list(requested),
+        themes_analyzed=list(kept),
+        single_theme=len(kept) == 1,
+        user_agent=policy.user_agent,
+        respect_robots=policy.respect_robots,
+    )
 
 
 # ``RoleResults`` is re-exported for callers that build/inspect palettes without importing
