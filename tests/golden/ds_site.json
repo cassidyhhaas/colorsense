@@ -1,10 +1,45 @@
 {
-  "fit_score": 0.8562,
-  "single_theme": "false",
+  "fit_score": 0.8617,
+  "has_divergence": true,
+  "single_theme": false,
   "status_colors": [
     "#16a34a",
     "#dc2626"
   ],
+  "theme_structure": {
+    "dark": {
+      "populated_roles": [
+        "accent",
+        "neutral_dark",
+        "neutral_light",
+        "primary",
+        "secondary"
+      ],
+      "top_role_colors": {
+        "accent": "#f59e0b",
+        "neutral_dark": "#111828",
+        "neutral_light": "#64748b",
+        "primary": "#111828",
+        "secondary": "#2563ea"
+      }
+    },
+    "light": {
+      "populated_roles": [
+        "accent",
+        "neutral_dark",
+        "neutral_light",
+        "primary",
+        "secondary"
+      ],
+      "top_role_colors": {
+        "accent": "#5943ce",
+        "neutral_dark": "#ffffff",
+        "neutral_light": "#ffffff",
+        "primary": "#ffffff",
+        "secondary": "#2563ea"
+      }
+    }
+  },
   "themes": [
     "dark",
     "light"

@@ -162,7 +162,12 @@ def test_every_role_distribution_normalized() -> None:
     ]
     posterior, _ = reconcile(usage, tokens, alpha=0.4)
 
+    # Every PaletteRole is always present (roles with no candidates map to []); a
+    # non-empty role's candidate probabilities form a normalized distribution.
+    assert set(posterior.mapping) == set(PaletteRole)
     for role, cands in posterior.mapping.items():
+        if not cands:
+            continue
         total = sum(c.probability for c in cands)
         assert math.isclose(total, 1.0, abs_tol=1e-6), (role, total)
 

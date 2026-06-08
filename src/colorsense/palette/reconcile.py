@@ -144,14 +144,15 @@ def reconcile(
     for intent in intents:
         roles.update(intent.keys())
 
-    posterior_mapping: dict[PaletteRole, list[PaletteCandidate]] = {}
+    posterior_mapping: dict[PaletteRole, tuple[PaletteCandidate, ...]] = {}
 
     for role in PaletteRole:  # iterate in enum order for determinism
-        if role not in roles:
-            continue
-        candidates = _pool_role(role, usage, groups, intents, alpha)
-        if candidates:
-            posterior_mapping[role] = candidates
+        if role in roles:
+            posterior_mapping[role] = tuple(_pool_role(role, usage, groups, intents, alpha))
+        else:
+            # Backfill: the mapping always contains every PaletteRole, even with no
+            # candidates, so callers can index any role without a KeyError.
+            posterior_mapping[role] = ()
 
     posterior = RoleResults(mapping=posterior_mapping)
     divergence = _build_divergence(usage, groups, intents)
@@ -166,7 +167,7 @@ def _pool_role(
     alpha: float,
 ) -> list[PaletteCandidate]:
     """STEPS 2-3 — build the color universe for ``role``, pool, prune, renormalize."""
-    usage_cands = usage.mapping.get(role, [])
+    usage_cands = usage.mapping.get(role, ())
 
     # Color universe entries: (representative_color, p_usage, area, p_intent).
     rep_colors: list[Color] = []

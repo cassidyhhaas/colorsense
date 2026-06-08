@@ -16,7 +16,7 @@ from colorsense.config import Config, load_default_config
 from colorsense.harvest import RenderSession, harvest_page
 from colorsense.models import Harvest, Theme, Viewport
 
-VIEWPORT = Viewport(w=1280, h=800, device_scale_factor=1.0)
+VIEWPORT = Viewport(width=1280, height=800, device_scale_factor=1.0)
 
 # Every test here drives a real Chromium render; skip in browserless CI.
 pytestmark = pytest.mark.browser

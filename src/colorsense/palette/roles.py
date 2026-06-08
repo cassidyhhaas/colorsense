@@ -190,7 +190,7 @@ def _build_candidates(
     return candidates
 
 
-def _fit_score(mapping: dict[PaletteRole, list[PaletteCandidate]]) -> float:
+def _fit_score(mapping: dict[PaletteRole, tuple[PaletteCandidate, ...]]) -> float:
     """Score how well the measured palette matches the 60/30/10 target.
 
     Reads the top (most-probable) candidate's ``area`` for primary/secondary/accent,
@@ -204,7 +204,7 @@ def _fit_score(mapping: dict[PaletteRole, list[PaletteCandidate]]) -> float:
     """
     areas: list[float] = []
     for role in (PaletteRole.primary, PaletteRole.secondary, PaletteRole.accent):
-        cands = mapping.get(role, [])
+        cands = mapping.get(role, ())
         areas.append(cands[0].area if cands else 0.0)
 
     total = sum(areas)
@@ -332,12 +332,12 @@ def assign_roles(clusters: list[ColorCluster]) -> tuple[RoleResults, float]:
         )
 
     # --- Step 4: per-role softmax -> prune -> renormalize -> rank. ---
-    mapping: dict[PaletteRole, list[PaletteCandidate]] = {
-        PaletteRole.primary: _build_candidates(feats, primary_scores, primary_ev),
-        PaletteRole.secondary: _build_candidates(feats, secondary_scores, secondary_ev),
-        PaletteRole.accent: _build_candidates(feats, accent_scores, accent_ev),
-        PaletteRole.neutral_light: _build_candidates(feats, nlight_scores, nlight_ev),
-        PaletteRole.neutral_dark: _build_candidates(feats, ndark_scores, ndark_ev),
+    mapping: dict[PaletteRole, tuple[PaletteCandidate, ...]] = {
+        PaletteRole.primary: tuple(_build_candidates(feats, primary_scores, primary_ev)),
+        PaletteRole.secondary: tuple(_build_candidates(feats, secondary_scores, secondary_ev)),
+        PaletteRole.accent: tuple(_build_candidates(feats, accent_scores, accent_ev)),
+        PaletteRole.neutral_light: tuple(_build_candidates(feats, nlight_scores, nlight_ev)),
+        PaletteRole.neutral_dark: tuple(_build_candidates(feats, ndark_scores, ndark_ev)),
     }
 
     # --- Step 5: fit_score. ---

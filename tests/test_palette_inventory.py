@@ -30,7 +30,7 @@ def _color(value: str) -> Color:
 
 
 def _viewport() -> Viewport:
-    return Viewport(w=1280, h=720, device_scale_factor=1.0)
+    return Viewport(width=1280, height=720, device_scale_factor=1.0)
 
 
 def _harvest(bins: list[ScreenshotBin]) -> Harvest:
@@ -47,7 +47,7 @@ def _element(bg: Color | None) -> HarvestedElement:
         tag="div",
         role=None,
         id=None,
-        rect=Rect(x=0.0, y=0.0, w=10.0, h=10.0),
+        rect=Rect(x=0.0, y=0.0, width=10.0, height=10.0),
         position="static",
         bg=bg,
         text=None,

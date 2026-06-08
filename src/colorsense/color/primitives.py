@@ -37,13 +37,30 @@ def _normalize_hue(hue: float) -> float:
     return float(hue % 360.0)
 
 
-def _from_coloraide(ca: CAColor) -> Color:
+def _from_coloraide(ca: CAColor, *, clamp_srgb: bool = False) -> Color:
     """Build the frozen :class:`Color` contract from a coloraide color.
 
-    The input is gamut-fit into sRGB before extracting hex, and OKLCH coordinates are
-    read from the ``oklch`` conversion of the (alpha-stripped) sRGB color.
+    The input is brought into sRGB before extracting hex, and OKLCH coordinates are read
+    from the ``oklch`` conversion of the (alpha-stripped) sRGB color.
+
+    ``clamp_srgb`` selects how out-of-gamut sRGB coordinates are reduced into ``[0, 1]``:
+
+    * ``False`` (default): perceptual gamut-mapping via :meth:`coloraide.Color.fit`, which
+      preserves hue/lightness while pulling chroma in — appropriate for colors that arrive
+      from a wide-gamut/OKLCH computation (e.g. compositing, lightness nudges).
+    * ``True``: a plain per-channel clamp of each sRGB coordinate to ``[0, 1]``, matching how
+      browsers treat out-of-range ``rgb()``/hex inputs (``rgb(300,0,0)`` -> ``#ff0000``).
+
+    Either way, in-gamut colors are unchanged (clamping a value already in ``[0, 1]`` is a
+    no-op).
     """
-    srgb = ca.convert("srgb").fit()
+    srgb = ca.convert("srgb")
+    if clamp_srgb:
+        # Per-channel clamp of the color coordinates (not alpha) — CSS/browser behavior.
+        for channel in ("red", "green", "blue"):
+            srgb[channel] = min(1.0, max(0.0, float(srgb[channel])))
+    else:
+        srgb = srgb.fit()
     alpha_raw = srgb[-1]
     alpha = 1.0 if math.isnan(alpha_raw) else float(alpha_raw)
 
@@ -84,8 +101,12 @@ def parse_css_color(value: str) -> Color | None:
     # Reject trailing garbage (match may parse a valid prefix of a longer string).
     if match.end != len(value.strip()):
         return None
+    # sRGB-defined inputs (rgb()/rgba()/hex/named) clamp per-channel like a browser; other
+    # spaces (hsl()) keep perceptual fit. hsl() values are in-gamut by construction, so the
+    # distinction only matters for out-of-range rgb()/hex.
+    clamp_srgb = match.color.space() == "srgb"
     try:
-        return _from_coloraide(match.color)
+        return _from_coloraide(match.color, clamp_srgb=clamp_srgb)
     except (ValueError, KeyError):  # pragma: no cover - defensive
         return None
 

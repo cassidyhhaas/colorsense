@@ -43,8 +43,10 @@ result = asyncio.run(analyze("https://example.com"))
 
 for theme, palette in result.themes.items():
     roles = palette.roles                            # 60/30/10 palette roles + candidates
-    primary = roles.mapping[PaletteRole.primary][0]  # top candidate for the primary role
-    print(theme, primary.color.hex, primary.probability)
+    cands = roles.mapping[PaletteRole.primary]       # always present; [] if none detected
+    if cands:
+        primary = cands[0]                           # top candidate for the primary role
+        print(theme, primary.color.hex, primary.probability)
 
 print(result.fit_score)          # how well declared intent matches measured usage
 print(result.status_colors)      # success/error/warning colors, kept out of the palette
@@ -63,6 +65,8 @@ model — `result.model_dump_json()` round-trips). Key fields:
 - `divergence` — declared-but-unused and used-but-undeclared discrepancies.
 - `third_party_colors` / `status_colors` — colors deliberately excluded from the palette.
 - `fit_score` — agreement between declared intent and measured usage, in `[0, 1]`.
+- `metadata` — a typed [`RunMetadata`](src/colorsense/models.py): themes requested vs.
+  analyzed, whether the run collapsed to a single theme, and the fetch policy in effect.
 
 ### Options
 
@@ -75,7 +79,7 @@ result = asyncio.run(
     analyze(
         "https://example.com",
         config_path="my_palette_config.yaml",          # override the bundled token vocab + weights
-        viewport=Viewport(w=1440, h=900, device_scale_factor=2.0),
+        viewport=Viewport(width=1440, height=900, device_scale_factor=2.0),
         themes=LIGHT_AND_DARK,                          # opt in to dark mode; default is light only
         politeness=PolitenessPolicy(min_interval=2.0),  # see below
     )
@@ -121,14 +125,29 @@ Choose your posture by where colorsense runs:
 colorsense never decides whether a fetch is permitted; it only makes it easy to fetch
 considerately once you have decided.
 
+**Security (SSRF + local-file reads).** `analyze` fetches and renders whatever URL it is
+given, so passing **untrusted** URLs exposes a server-side request forgery and local-file-read
+surface. `file://` URLs read arbitrary local files (intentional, for the test fixtures), and
+`http(s)://` URLs can reach internal hosts and cloud metadata endpoints (e.g.
+`169.254.169.254`, `localhost`). This is by design — the politeness controls above gate
+*network* schemes for robots/rate-limiting, but nothing validates the destination host. If
+you accept user-supplied URLs, validate the scheme and host **before** calling `analyze`:
+allowlist public hosts, and reject `file://` and private / link-local IP ranges. As above,
+this is the consumer's responsibility — the library provides mechanism, not policy.
+
 ## Configuration
 
-All tunable behavior lives in
-[`palette_config.yaml`](src/colorsense/data/palette_config.yaml), which **ships bundled with
-the package** and is loaded automatically — the single source of truth for the **token
+[`palette_config.yaml`](src/colorsense/data/palette_config.yaml) **ships bundled with
+the package** and is loaded automatically. It is the single source of truth for the **token
 vocabulary** (CSS custom-property names → semantic roles → 60/30/10 palette-role priors) and
 the **component-classifier** weights (how rendered elements are scored into headers, cards,
 CTAs, …). The weights are calibrated starting points, not ground truth.
+
+Not everything is in the YAML, though: the usage-side role-scoring weights and the
+component→palette-role affinity map are documented module-level constants in
+[`palette/roles.py`](src/colorsense/palette/roles.py) (e.g. `W_AREA`, `W_NEUTRAL`,
+`SOFTMAX_T`, `TARGET_SPLIT`, `COMPONENT_AFFINITY`) — `assign_roles` takes no `Config`, so
+those are tuned in code, not via `config_path=`.
 
 To tune them, copy the bundled file, edit your copy, and pass its path as `config_path=` to
 `analyze` (or load it with `load_config`). To inspect the defaults programmatically:

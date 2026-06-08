@@ -1,7 +1,26 @@
 {
-  "fit_score": 0.803,
-  "single_theme": "true",
+  "fit_score": 0.8029,
+  "has_divergence": true,
+  "single_theme": true,
   "status_colors": [],
+  "theme_structure": {
+    "light": {
+      "populated_roles": [
+        "accent",
+        "neutral_dark",
+        "neutral_light",
+        "primary",
+        "secondary"
+      ],
+      "top_role_colors": {
+        "accent": "#6a5e45",
+        "neutral_dark": "#2b2b2b",
+        "neutral_light": "#ffffff",
+        "primary": "#ffffff",
+        "secondary": "#c14930"
+      }
+    }
+  },
   "themes": [
     "light"
   ],

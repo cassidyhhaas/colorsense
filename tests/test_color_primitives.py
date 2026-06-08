@@ -97,6 +97,30 @@ def test_parse_hsl_and_rgba() -> None:
     assert half.hex == "#000000"
 
 
+@pytest.mark.parametrize(
+    ("value", "expected_hex"),
+    [
+        ("rgb(300,0,0)", "#ff0000"),  # over-range channel clamps to 255
+        ("rgb(-5,0,0)", "#000000"),  # negative channel clamps to 0
+        ("rgb(0,300,0)", "#00ff00"),
+        ("rgb(300,300,300)", "#ffffff"),
+    ],
+)
+def test_parse_out_of_range_rgb_clamps(value: str, expected_hex: str) -> None:
+    # Browsers clamp out-of-gamut rgb() per-channel rather than perceptually gamut-mapping
+    # (which would yield e.g. #ff6c5b for rgb(300,0,0)).
+    c = parse_css_color(value)
+    assert c is not None
+    assert c.hex == expected_hex
+
+
+def test_parse_in_gamut_rgb_unchanged() -> None:
+    # The clamp must not perturb a normal in-range color.
+    c = parse_css_color("rgb(10,20,30)")
+    assert c is not None
+    assert c.hex == "#0a141e"
+
+
 def test_relative_luminance_endpoints() -> None:
     assert relative_luminance(WHITE) == pytest.approx(1.0, abs=1e-6)
     assert relative_luminance(BLACK) == pytest.approx(0.0, abs=1e-6)

@@ -5,8 +5,19 @@ These models are the single shared-contract surface for the pipeline. This file 
 must be made centrally and re-validated against every dependent module, never patched
 locally by a consumer.
 
-Value objects (``Color``, ``Rect``, ``Viewport``) are immutable. Aggregate records carry
-lists/dicts and are kept mutable for ergonomic assembly during the pipeline.
+Value objects (``Color``, ``Rect``, ``Viewport``) are immutable. The **public result
+tree** reachable from :class:`AnalysisResult` is also immutable: every output model is
+``frozen=True`` and its sequence fields are ``tuple`` (not ``list``), so neither attribute
+reassignment nor in-place ``.append()`` works. ``dict`` fields stay regular dicts —
+``frozen`` blocks reassigning them, but their contents are intentionally not deep-frozen
+(deep-freezing needs exotic types and breaks JSON round-trip). Tuples serialize to JSON
+arrays and re-parse into tuples, so ``model_dump_json()`` / ``model_validate_json()``
+round-trips cleanly.
+
+The **internal-only** assembly models (``Harvest``, ``HarvestedElement``,
+``ScreenshotBin``, ``ClassifiedElement``, ``ColorCluster``) remain mutable: they are
+scratch structures the pipeline mutates while building the result and never escape to the
+caller.
 """
 
 from __future__ import annotations
@@ -109,8 +120,8 @@ class Rect(BaseModel):
 
     x: float
     y: float
-    w: float
-    h: float
+    width: float
+    height: float
 
 
 class Viewport(BaseModel):
@@ -118,8 +129,8 @@ class Viewport(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    w: int
-    h: int
+    width: int
+    height: int
     device_scale_factor: float
 
 
@@ -130,6 +141,8 @@ class Viewport(BaseModel):
 
 class TokenRecord(BaseModel):
     """A declared CSS custom property and its resolved color (if any)."""
+
+    model_config = ConfigDict(frozen=True)
 
     name: str
     raw_value: str
@@ -189,6 +202,8 @@ class Harvest(BaseModel):
 class ClassifiedToken(BaseModel):
     """A token tagged with its semantic role and a prior over palette roles."""
 
+    model_config = ConfigDict(frozen=True)
+
     record: TokenRecord
     semantic_role: TokenSemanticRole
     weight: float
@@ -220,6 +235,8 @@ class ColorCluster(BaseModel):
 class PaletteCandidate(BaseModel):
     """A candidate color for a palette role with a probability and evidence trail."""
 
+    model_config = ConfigDict(frozen=True)
+
     color: Color
     probability: float
     area: float
@@ -227,13 +244,21 @@ class PaletteCandidate(BaseModel):
 
 
 class RoleResults(BaseModel):
-    """Per-role ranked candidate lists."""
+    """Per-role ranked candidate lists.
 
-    mapping: dict[PaletteRole, list[PaletteCandidate]] = Field(default_factory=dict)
+    ``mapping`` always contains every :class:`PaletteRole`; a role with no detected
+    candidates maps to an empty tuple.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    mapping: dict[PaletteRole, tuple[PaletteCandidate, ...]] = Field(default_factory=dict)
 
 
 class DivergenceItem(BaseModel):
     """A declared-but-unused or used-but-undeclared palette discrepancy."""
+
+    model_config = ConfigDict(frozen=True)
 
     role: PaletteRole
     color: Color
@@ -248,19 +273,47 @@ class DivergenceItem(BaseModel):
 class ThemePalette(BaseModel):
     """Reconciled palette roles for a single theme."""
 
+    model_config = ConfigDict(frozen=True)
+
     theme: Theme
     roles: RoleResults
 
 
+class RunMetadata(BaseModel):
+    """Provenance for a single ``analyze`` run.
+
+    Records which themes were requested versus actually analyzed (later themes whose
+    render is perceptually identical to the primary are collapsed away), whether the run
+    reduced to a single theme, and the fetch policy in effect.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    themes_requested: tuple[Theme, ...] = Field(default_factory=tuple)
+    themes_analyzed: tuple[Theme, ...] = Field(default_factory=tuple)
+    single_theme: bool = True
+    user_agent: str = ""
+    respect_robots: bool = True
+
+
 class AnalysisResult(BaseModel):
-    """The top-level typed result returned by ``analyze``."""
+    """The top-level typed result returned by ``analyze``.
+
+    This aggregate is **immutable**: it is ``frozen=True`` and its sequence fields
+    (``tokens``, ``third_party_colors``, ``status_colors``, ``divergence``) are tuples, so
+    neither reassigning an attribute (``result.fit_score = ...``) nor mutating a sequence in
+    place (``result.tokens.append(...)``) is possible. The ``themes`` dict is protected from
+    reassignment by ``frozen`` but its contents are not deep-frozen.
+    """
+
+    model_config = ConfigDict(frozen=True)
 
     url: str
     viewport: Viewport
     themes: dict[Theme, ThemePalette] = Field(default_factory=dict)
-    tokens: list[ClassifiedToken] = Field(default_factory=list)
-    third_party_colors: list[Color] = Field(default_factory=list)
-    status_colors: list[Color] = Field(default_factory=list)
-    divergence: list[DivergenceItem] = Field(default_factory=list)
+    tokens: tuple[ClassifiedToken, ...] = Field(default_factory=tuple)
+    third_party_colors: tuple[Color, ...] = Field(default_factory=tuple)
+    status_colors: tuple[Color, ...] = Field(default_factory=tuple)
+    divergence: tuple[DivergenceItem, ...] = Field(default_factory=tuple)
     fit_score: float = 0.0
-    metadata: dict[str, str] = Field(default_factory=dict)
+    metadata: RunMetadata = Field(default_factory=RunMetadata)

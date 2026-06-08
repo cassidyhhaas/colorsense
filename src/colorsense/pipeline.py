@@ -5,7 +5,7 @@ theme (gated by :class:`~colorsense.net.politeness.PolitenessPolicy`), classify 
 and components, build a color inventory, assign palette roles, and
 reconcile usage against declared intent — per theme. Sites that ignore
 ``prefers-color-scheme`` (near-identical light/dark renders)
-are collapsed to a single theme. The whole thing is assembled into a frozen
+are collapsed to a single theme. The whole thing is assembled into a typed
 :class:`~colorsense.models.AnalysisResult`.
 
 Networking lives entirely behind ``PolitenessPolicy``/``harvest_page``; everything else is
@@ -33,6 +33,7 @@ from colorsense.models import (
     DivergenceItem,
     Harvest,
     RoleResults,
+    RunMetadata,
     Theme,
     ThemePalette,
     Viewport,
@@ -42,7 +43,7 @@ from colorsense.palette.inventory import build_inventory
 from colorsense.palette.reconcile import reconcile
 from colorsense.palette.roles import assign_roles
 
-DEFAULT_VIEWPORT = Viewport(w=1280, h=800, device_scale_factor=1.0)
+DEFAULT_VIEWPORT = Viewport(width=1280, height=800, device_scale_factor=1.0)
 
 # Light only by default: most sites ship no dark mode, and a second theme roughly doubles
 # render cost (a whole extra headless render). A consumer analyzing their own (or a client's)
@@ -110,6 +111,8 @@ async def analyze(
     ------
     colorsense.net.politeness.RobotsDisallowedError
         If ``robots.txt`` disallows the fetch and the policy respects it.
+    colorsense.harvest.RenderError
+        If the page fails to render or navigate (DNS, timeout, TLS, or navigation error).
     """
     config = load_default_config() if config_path is None else load_config(config_path)
     policy = politeness if politeness is not None else PolitenessPolicy()
@@ -137,14 +140,14 @@ async def analyze(
         url=url,
         viewport=viewport,
         themes={theme: out.palette for theme, out in outputs.items()},
-        tokens=primary.tokens,
-        third_party_colors=_dedupe_colors(
-            color for out in outputs.values() for color in out.third_party_colors
+        tokens=tuple(primary.tokens),
+        third_party_colors=tuple(
+            _dedupe_colors(color for out in outputs.values() for color in out.third_party_colors)
         ),
-        status_colors=_dedupe_colors(
-            color for out in outputs.values() for color in out.status_colors
+        status_colors=tuple(
+            _dedupe_colors(color for out in outputs.values() for color in out.status_colors)
         ),
-        divergence=primary.divergence,
+        divergence=tuple(primary.divergence),
         fit_score=primary.fit_score,
         metadata=_build_metadata(ordered_themes, kept_themes, policy),
     )
@@ -187,16 +190,29 @@ def _collapse_themes(ordered_themes: list[Theme], harvests: dict[Theme, Harvest]
 
 
 def _near_identical(a: Harvest, b: Harvest) -> bool:
-    """Whether two renders' dominant screenshot colors all match within the OKLab threshold."""
-    bins_a = sorted(a.screenshot_bins, key=lambda s: s.area_fraction, reverse=True)
-    bins_b = sorted(b.screenshot_bins, key=lambda s: s.area_fraction, reverse=True)
+    """Whether two renders' dominant screenshot colors mutually match within the threshold.
+
+    The two top-bin sets must agree *symmetrically*: every dominant bin of ``a`` has a close
+    perceptual match in ``b`` **and** vice versa. The one-directional form would wrongly
+    collapse a theme whose dominant colors are a superset of the primary's (e.g. a dark mode
+    that keeps the light background somewhere on the page) — symmetry guards against that.
+
+    Sorting and the inner matching break ``area_fraction`` ties deterministically on the
+    color hex so the result never depends on incidental bin insertion order.
+    """
+    bins_a = sorted(a.screenshot_bins, key=lambda s: (-s.area_fraction, s.color.hex))
+    bins_b = sorted(b.screenshot_bins, key=lambda s: (-s.area_fraction, s.color.hex))
     top_a = bins_a[:_COLLAPSE_TOP_BINS]
     top_b = bins_b[:_COLLAPSE_TOP_BINS]
     if not top_a or not top_b:
         return False
-    return all(
+    a_matches_b = all(
         min(delta_e(sb.color, ob.color) for ob in top_b) <= _COLLAPSE_DELTA_E for sb in top_a
     )
+    b_matches_a = all(
+        min(delta_e(sb.color, ob.color) for ob in top_a) <= _COLLAPSE_DELTA_E for sb in top_b
+    )
+    return a_matches_b and b_matches_a
 
 
 def _third_party_colors(clusters: list[ColorCluster]) -> list[Color]:
@@ -206,7 +222,8 @@ def _third_party_colors(clusters: list[ColorCluster]) -> list[Color]:
         mix = cluster.component_mix
         if not mix:
             continue
-        dominant = max(mix, key=lambda key: mix[key])
+        # Stable secondary key (the component-type value) so ties don't depend on dict order.
+        dominant = max(mix, key=lambda key: (mix[key], key.value))
         if dominant is ComponentType.third_party:
             out.append(cluster.color)
     return _dedupe_colors(out)
@@ -225,15 +242,15 @@ def _dedupe_colors(colors: Iterable[Color]) -> list[Color]:
 
 def _build_metadata(
     requested: list[Theme], kept: list[Theme], policy: PolitenessPolicy
-) -> dict[str, str]:
+) -> RunMetadata:
     """Provenance for the run: themes requested vs analyzed, collapse flag, fetch policy."""
-    return {
-        "themes_requested": ",".join(str(theme) for theme in requested),
-        "themes_analyzed": ",".join(str(theme) for theme in kept),
-        "single_theme": str(len(kept) == 1).lower(),
-        "user_agent": policy.user_agent,
-        "respect_robots": str(policy.respect_robots).lower(),
-    }
+    return RunMetadata(
+        themes_requested=tuple(requested),
+        themes_analyzed=tuple(kept),
+        single_theme=len(kept) == 1,
+        user_agent=policy.user_agent,
+        respect_robots=policy.respect_robots,
+    )
 
 
 # ``RoleResults`` is re-exported for callers that build/inspect palettes without importing

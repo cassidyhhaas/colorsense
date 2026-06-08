@@ -42,7 +42,7 @@ from colorsense.models import (
 
 __all__ = ["classify_components"]
 
-_DEFAULT_VIEWPORT = Viewport(w=1280, h=800, device_scale_factor=1.0)
+_DEFAULT_VIEWPORT = Viewport(width=1280, height=800, device_scale_factor=1.0)
 
 # channel_routing sentinels that are NOT ComponentType values.
 _NON_COMPONENT_VOTE_KEYS = frozenset({"ignore"})
@@ -101,15 +101,15 @@ def _matches_geometry(
 ) -> bool:
     """Dispatch the known geometry ``when`` predicates; unknown ones are False."""
     rect = element.rect
-    vp_w = float(viewport.w)
-    vp_h = float(viewport.h)
+    vp_w = float(viewport.width)
+    vp_h = float(viewport.height)
     if vp_w <= 0.0 or vp_h <= 0.0:
         return False
 
-    full_width = (rect.w / vp_w) >= thresholds.full_width
+    full_width = (rect.width / vp_w) >= thresholds.full_width
     top = rect.y / vp_h
-    height = rect.h / vp_h
-    area = (rect.w * rect.h) / (vp_w * vp_h)
+    height = rect.height / vp_h
+    area = (rect.width * rect.height) / (vp_w * vp_h)
 
     if when == "full_width & top<top_band & h<short_h":
         return full_width and top < thresholds.top_band and height < thresholds.short_h
@@ -191,7 +191,7 @@ def _apply_suppressors(
             if key == "aria_hidden":
                 triggered = element.aria_hidden
             elif key == "zero_area_or_hidden":
-                triggered = (not element.visible) or rect.w <= 0.0 or rect.h <= 0.0
+                triggered = (not element.visible) or rect.width <= 0.0 or rect.height <= 0.0
             elif key == "consent_masked_region":
                 # No mask info available at this layer.
                 triggered = False

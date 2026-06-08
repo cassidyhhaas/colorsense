@@ -166,7 +166,7 @@ async def harvest_elements(
                 role=raw["role"],
                 id=raw["id"],
                 class_tokens=raw["class_tokens"],
-                rect=Rect(x=rect["x"], y=rect["y"], w=rect["w"], h=rect["h"]),
+                rect=Rect(x=rect["x"], y=rect["y"], width=rect["w"], height=rect["h"]),
                 position=raw["position"],
                 bg=parse_css_color(raw["bg"]),
                 text=parse_css_color(raw["text"]),
