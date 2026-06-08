@@ -107,7 +107,7 @@ def harvest_tokens(page: Page) -> list[TokenRecord]:
     """Collect declared CSS custom properties as :class:`TokenRecord` objects.
 
     Same-origin stylesheets only. Each record's ``resolved`` is the ``:root``-resolved
-    value parsed via WP2 :func:`parse_css_color` (``None`` if non-color/unresolvable), and
+    value parsed via :func:`parse_css_color` (``None`` if non-color/unresolvable), and
     ``alias_target`` is set (with leading ``--``) when the raw value is a ``var(--x)``
     reference.
     """

@@ -1,4 +1,4 @@
-"""WP4 harvest integration tests.
+"""Harvest integration tests.
 
 All tests run against LOCAL fixture HTML loaded via ``file://`` URLs (no public network).
 A single Chromium-backed harvest is reasonably cheap; each test harvests its own fixture

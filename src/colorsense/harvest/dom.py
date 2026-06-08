@@ -1,14 +1,14 @@
 """Visible-DOM element harvesting with computed colors and structural flags.
 
 Walks the rendered DOM in-page, capturing for each element its computed
-``background-color`` / ``color`` / ``border-color`` (parsed via WP2), bounding rect,
+``background-color`` / ``color`` / ``border-color`` (parsed to :class:`Color`), bounding rect,
 position, tag/role/id/class tokens, and structural flags (iframe, cross-origin, shadow
 host, clickable, vendor match, visible, aria-hidden). Hidden, zero-area, or aria-hidden
 elements are excluded from the returned list (their flags are still computed on what is
 returned).
 
-``has_hover_color_change`` / ``hover_bg`` are left at their defaults here; WP4 ``states``
-fills them.
+``has_hover_color_change`` / ``hover_bg`` are left at their defaults here; pseudo-state
+probing fills them.
 """
 
 from __future__ import annotations
@@ -152,7 +152,7 @@ def harvest_elements(
     """Harvest visible DOM elements with computed colors and structural flags.
 
     Returns the elements alongside a parallel list of CSS selectors (one per element) so
-    WP4 ``states`` can re-target the same elements for pseudo-state probing.
+    pseudo-state probing can re-target the same elements.
     """
     raw_elements = cast(list[_RawElement], page.evaluate(_COLLECT_DOM_JS))
 

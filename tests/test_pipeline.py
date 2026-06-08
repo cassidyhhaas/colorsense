@@ -1,7 +1,7 @@
-"""WP11 pipeline + politeness tests.
+"""Pipeline + politeness tests.
 
 The end-to-end cases render LOCAL fixture HTML via ``file://`` (no public network), the
-same approach WP4 uses. Politeness mechanics (robots gate, rate limiter, render cache) are
+same approach harvest uses. Politeness mechanics (robots gate, rate limiter, render cache) are
 exercised with an injected fake harvester so they need neither Playwright nor real network.
 """
 
@@ -167,7 +167,7 @@ def test_end_to_end_light_and_dark(fixtures_dir: Path) -> None:
     for theme, palette in result.themes.items():
         assert palette.theme is theme
         contrast = palette.recommendation.contrast
-        # WP10 guarantees: text pairs >= 4.5, surfaces vs page >= 3.0.
+        # recommendation guarantees: text pairs >= 4.5, surfaces vs page >= 3.0.
         assert contrast["heading_text_on_heading_bg"] >= 4.5 - 1e-6
         assert contrast["cta_text_on_cta_bg"] >= 4.5 - 1e-6
         assert contrast["cta_bg_on_page"] >= 3.0 - 1e-6
@@ -197,7 +197,7 @@ def test_single_theme_site_collapses(fixtures_dir: Path) -> None:
 @pytest.mark.browser
 def test_hover_hint_feeds_recommendation(fixtures_dir: Path) -> None:
     # hover.html's #cta flips to #ff6600 on hover; that hint reaches recommend() and is
-    # reported as a distinct hover background (WP10 does not enforce a contrast floor on
+    # reported as a distinct hover background (the recommender does not enforce a contrast floor on
     # the hover color, only on the heading/cta surfaces and text pairs).
     result = _analyze_fixture("hover.html", fixtures_dir)
 

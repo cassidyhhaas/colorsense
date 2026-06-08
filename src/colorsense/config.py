@@ -1,7 +1,8 @@
 """Typed loader for ``config/palette_config.yaml``.
 
 This module mirrors the palette configuration YAML into fully-typed Pydantic
-models and exposes the token-name matching helpers consumed by WP5/WP6. The
+models and exposes the token-name matching helpers consumed by the token and
+component classifiers. The
 single source of truth for every value is the YAML file itself — this module
 *models* and *loads* it, it does not hard-code config values.
 

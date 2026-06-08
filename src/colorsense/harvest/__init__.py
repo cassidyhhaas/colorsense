@@ -1,4 +1,4 @@
-"""WP4 — page rendering and design-token / color harvesting.
+"""Page rendering and design-token / color harvesting.
 
 Public interface
 ----------------

@@ -1,4 +1,4 @@
-"""Unit tests for WP5 — the token classifier."""
+"""Unit tests for the token classifier."""
 
 from __future__ import annotations
 

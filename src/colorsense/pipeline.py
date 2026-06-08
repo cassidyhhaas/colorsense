@@ -1,9 +1,9 @@
-"""WP11 — the end-to-end pipeline and public ``analyze`` entry point.
+"""The end-to-end pipeline and public ``analyze`` entry point.
 
-``analyze`` wires every prior work package into one typed call: render each requested
-theme (WP4, gated by :class:`~colorsense.net.politeness.PolitenessPolicy`), classify tokens
-(WP5) and components (WP6), build a color inventory (WP7), assign palette roles (WP8),
-reconcile usage against declared intent (WP9), and recommend WCAG-safe widget colors (WP10)
+``analyze`` wires every stage into one typed call: render each requested
+theme (gated by :class:`~colorsense.net.politeness.PolitenessPolicy`), classify tokens
+and components, build a color inventory, assign palette roles,
+reconcile usage against declared intent, and recommend WCAG-safe widget colors
 — per theme. Sites that ignore ``prefers-color-scheme`` (near-identical light/dark renders)
 are collapsed to a single theme. The whole thing is assembled into a frozen
 :class:`~colorsense.models.AnalysisResult`.

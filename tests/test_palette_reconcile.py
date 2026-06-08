@@ -1,4 +1,4 @@
-"""Unit tests for WP9 reconciliation (log-linear pooling of intent + usage)."""
+"""Unit tests for reconciliation (log-linear pooling of intent + usage)."""
 
 from __future__ import annotations
 

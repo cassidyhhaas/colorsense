@@ -42,7 +42,7 @@ class _LogoSource(TypedDict):
 
 
 def _rgb_to_color(r: int, g: int, b: int) -> Color | None:
-    """Convert an 8-bit RGB triple to a :class:`Color` via WP2 parsing."""
+    """Convert an 8-bit RGB triple to a :class:`Color`."""
     return parse_css_color(f"rgb({r}, {g}, {b})")
 
 

@@ -1,4 +1,4 @@
-"""WP12 — end-to-end integration tests over representative fixture sites.
+"""End-to-end integration tests over representative fixture sites.
 
 Three saved HTML pages stand in for real-world archetypes (no public network):
 
@@ -109,7 +109,7 @@ def _check_golden(name: str, digest: dict[str, Any]) -> None:
 
 
 def _assert_recommendation_safe(result: AnalysisResult) -> None:
-    """Every theme's recommendation meets WP10's WCAG guarantees."""
+    """Every theme's recommendation meets the recommendation engine's WCAG guarantees."""
     for palette in result.themes.values():
         contrast = palette.recommendation.contrast
         assert contrast["heading_text_on_heading_bg"] >= 4.5 - CONTRAST_EPS

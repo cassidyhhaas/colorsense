@@ -1,6 +1,6 @@
 """Shared pytest fixtures.
 
-Tests are network-free by default. Live-page work packages (WP4, WP11) run against
+Tests are network-free by default. Live-page tests (harvest and pipeline) run against
 saved fixture HTML under ``tests/fixtures/`` served locally (``file://`` or a localhost
 static server), never the public network.
 """

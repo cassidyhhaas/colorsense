@@ -1,4 +1,4 @@
-"""Unit tests for WP8 palette role assignment (:mod:`colorsense.palette.roles`)."""
+"""Unit tests for palette role assignment (:mod:`colorsense.palette.roles`)."""
 
 from __future__ import annotations
 

@@ -1,4 +1,4 @@
-"""Unit tests for WP6 — the rule-based component classifier."""
+"""Unit tests for the rule-based component classifier."""
 
 from __future__ import annotations
 

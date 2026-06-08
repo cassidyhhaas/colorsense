@@ -1,4 +1,4 @@
-"""Unit tests for the WP3 config loader."""
+"""Unit tests for the config loader."""
 
 from __future__ import annotations
 

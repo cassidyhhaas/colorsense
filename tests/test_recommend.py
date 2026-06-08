@@ -1,4 +1,4 @@
-"""Unit tests for WP10 — the recommendation engine.
+"""Unit tests for the recommendation engine.
 
 All inputs are built directly from :class:`RoleResults`; colors are made via
 :func:`parse_css_color`. Network-free and deterministic. Threshold assertions use

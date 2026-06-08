@@ -1,4 +1,4 @@
-"""WP8 — Palette role assignment (60/30/10 taxonomy).
+"""Palette role assignment (60/30/10 taxonomy).
 
 Assigns each :class:`~colorsense.models.ColorCluster` to the five palette roles
 (:class:`~colorsense.models.PaletteRole`) with a per-role probability distribution and an

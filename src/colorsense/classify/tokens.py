@@ -1,4 +1,4 @@
-"""WP5 — Token classifier.
+"""Token classifier.
 
 Classify declared design tokens (CSS custom properties) into semantic roles and
 produce, for each token, a prior distribution over the 60/30/10 palette roles.

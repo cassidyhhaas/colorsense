@@ -1,9 +1,9 @@
 """Shared contracts for the colorsense pipeline.
 
-These models are the single integration surface between work packages. They are
-**frozen** after WP1 validation: no downstream work package may modify this file. A
-package that believes a contract must change reports it to the orchestrator, who amends
-it centrally and re-validates every dependent package.
+These models are the single shared-contract surface for the pipeline. This file is
+**frozen** by design: downstream code must not modify it. A change to a contract here
+must be made centrally and re-validated against every dependent module, never patched
+locally by a consumer.
 
 Value objects (``Color``, ``Rect``, ``Viewport``) are immutable. Aggregate records carry
 lists/dicts and are kept mutable for ergonomic assembly during the pipeline.
@@ -124,7 +124,7 @@ class Viewport(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Harvest models (produced by WP4)
+# Harvest models (produced by the harvest stage)
 # ---------------------------------------------------------------------------
 
 

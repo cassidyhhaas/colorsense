@@ -3,9 +3,9 @@
 This module fuses two independent signals about a site's palette:
 
 * **usage** — the measured per-role likelihood over candidate *colors* produced by
-  WP8 (``assign_roles``); this is "what actually rendered".
-* **tokens** — the declared design-token *intent* produced by WP5
-  (``classify_tokens``); each token carries a resolved :class:`Color` and a
+  ``assign_roles``; this is "what actually rendered".
+* **tokens** — the declared design-token *intent* produced by
+  ``classify_tokens``; each token carries a resolved :class:`Color` and a
   ``palette_prior`` distribution over :class:`PaletteRole`; this is "what the author
   declared".
 

@@ -1,6 +1,6 @@
-"""WP10 — Recommendation engine.
+"""Recommendation engine.
 
-From reconciled palette roles (the WP9 reconcile output, a posterior
+From reconciled palette roles (the reconcile output, a posterior
 :class:`~colorsense.models.RoleResults`), produce a WCAG-enforced widget color
 recommendation for a single theme: a heading banner plus CTA colors whose every
 returned text/background pair meets a contrast minimum and whose surfaces are

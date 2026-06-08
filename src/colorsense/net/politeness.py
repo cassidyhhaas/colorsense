@@ -1,4 +1,4 @@
-"""WP11 — network politeness: *mechanism, not policy*.
+"""Network politeness: *mechanism, not policy*.
 
 This module gives a consumer the tools to fetch pages considerately — a configurable
 User-Agent, an opt-out ``robots.txt`` gate, a per-host rate limiter, and a render cache —

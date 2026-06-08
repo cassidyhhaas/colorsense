@@ -1,4 +1,4 @@
-"""WP1 contract tests: construction and JSON round-trip of the shared models."""
+"""Contract tests: construction and JSON round-trip of the shared models."""
 
 from __future__ import annotations
 

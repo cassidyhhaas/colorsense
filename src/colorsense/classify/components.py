@@ -1,4 +1,4 @@
-"""WP6 — rule-based component classifier.
+"""Rule-based component classifier.
 
 Scores each harvested DOM element into a probability distribution over
 :class:`~colorsense.models.ComponentType`. Every weight, threshold, predicate,
