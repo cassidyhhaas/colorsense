@@ -1,0 +1,25 @@
+{
+  "fit_score": 0.8562,
+  "single_theme": "false",
+  "status_colors": [
+    "#16a34a",
+    "#dc2626"
+  ],
+  "themes": [
+    "dark",
+    "light"
+  ],
+  "tokens": {
+    "--color-accent": "brand_accent",
+    "--color-bg": "surface_base",
+    "--color-border": "border",
+    "--color-danger": "status",
+    "--color-neutral": "neutral",
+    "--color-on-primary": "text_on",
+    "--color-primary": "brand_primary",
+    "--color-secondary": "brand_secondary",
+    "--color-success": "status",
+    "--color-surface": "surface_raised",
+    "--color-text": "text_body"
+  }
+}

@@ -1,0 +1,51 @@
+[project]
+name = "colorsense"
+version = "0.1.0"
+description = "Extracts the color palette from any website."
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+  "playwright",
+  "coloraide",
+  "pydantic>=2",
+  "pydantic-settings",
+  "pyyaml",
+  "numpy",
+  "pillow",
+  "scikit-learn",
+  "scikit-image",
+  "tinycss2",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[dependency-groups]
+dev = ["ruff", "mypy", "pytest", "pytest-asyncio", "types-pyyaml", "types-Pillow", "pre-commit"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+plugins = ["pydantic.mypy"]
+
+# Libraries without bundled type stubs: silence missing-import only, no Any spill.
+[[tool.mypy.overrides]]
+module = ["coloraide.*", "tinycss2.*", "skimage.*", "sklearn.*"]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q --strict-markers"
+markers = [
+  "browser: test renders a real page via Playwright/Chromium (skipped in browserless CI with -m 'not browser')",
+]

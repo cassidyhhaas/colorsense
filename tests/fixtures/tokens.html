@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Tokens fixture</title>
+<style>
+  :root {
+    --color-primary: #3366cc;
+    --accent: #e91e63;
+    --btn-bg: var(--accent);
+    --surface: #ffffff;
+    --not-a-color: 12px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --color-primary: #99bbff;
+      --surface: #101418;
+    }
+  }
+  body {
+    background: var(--surface);
+    color: #222222;
+    margin: 0;
+    padding: 16px;
+  }
+  .primary-box {
+    background: var(--color-primary);
+    color: #ffffff;
+    width: 200px;
+    height: 120px;
+  }
+  .btn {
+    background: var(--btn-bg);
+    color: #ffffff;
+    border: 2px solid #aa0044;
+    width: 160px;
+    height: 48px;
+  }
+  .hidden-box {
+    display: none;
+    background: #00ff00;
+  }
+  .zero-box {
+    width: 0;
+    height: 0;
+    background: #ff00ff;
+  }
+</style>
+</head>
+<body>
+  <header><h1>Tokens</h1></header>
+  <div class="primary-box">Primary</div>
+  <button class="btn">Buy now</button>
+  <div class="hidden-box">hidden</div>
+  <div class="zero-box"></div>
+  <div class="intercom-launcher" style="width:48px;height:48px;background:#0055ff;">IC</div>
+</body>
+</html>

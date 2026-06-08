@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Aurora — design-system fixture</title>
+<style>
+  /* A token-driven site: every component color comes from a custom property, so
+     declared intent (tokens) and measured usage should largely agree. The
+     `--color-` namespace is stripped before name matching, so `--color-primary`
+     classifies as brand_primary, `--color-on-primary` as text-on-primary, etc. */
+  :root {
+    --color-primary: #2563eb;
+    --color-secondary: #7c3aed;
+    --color-accent: #f59e0b;
+    --color-on-primary: #ffffff;
+    --color-bg: #f8fafc;
+    --color-surface: #ffffff;
+    --color-text: #0f172a;
+    --color-neutral: #64748b;
+    --color-border: #e2e8f0;
+    --color-success: #16a34a;
+    --color-danger: #dc2626;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --color-bg: #0b1120;
+      --color-surface: #111827;
+      --color-text: #e5e7eb;
+      --color-border: #1f2937;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: var(--color-bg);
+    color: var(--color-text);
+    font-family: sans-serif;
+  }
+  .site-header {
+    background: var(--color-surface);
+    color: var(--color-text);
+    border-bottom: 1px solid var(--color-border);
+    width: 1280px;
+    height: 64px;
+  }
+  .navbar {
+    background: var(--color-surface);
+    color: var(--color-text);
+    width: 1280px;
+    height: 48px;
+  }
+  .hero {
+    background: var(--color-primary);
+    color: var(--color-on-primary);
+    width: 1280px;
+    height: 320px;
+  }
+  .btn-primary {
+    background: var(--color-accent);
+    color: #1f2937;
+    border: none;
+    width: 200px;
+    height: 56px;
+    cursor: pointer;
+  }
+  .btn-primary:hover { background: #d97706; }
+  .btn-secondary {
+    background: var(--color-secondary);
+    color: #ffffff;
+    border: 1px solid var(--color-secondary);
+    width: 200px;
+    height: 56px;
+    cursor: pointer;
+  }
+  .card {
+    background: var(--color-surface);
+    color: var(--color-text);
+    border: 1px solid var(--color-border);
+    width: 360px;
+    height: 220px;
+    display: inline-block;
+  }
+  .site-footer {
+    background: var(--color-neutral);
+    color: #ffffff;
+    width: 1280px;
+    height: 200px;
+  }
+</style>
+</head>
+<body>
+  <header class="site-header"><h1>Aurora</h1></header>
+  <nav class="navbar">Home · Pricing · Docs</nav>
+  <section class="hero">
+    <h2>Build faster with Aurora</h2>
+    <button class="btn-primary">Get started</button>
+    <button class="btn-secondary">Learn more</button>
+  </section>
+  <main>
+    <div class="card">Feature one</div>
+    <div class="card">Feature two</div>
+    <div class="card">Feature three</div>
+  </main>
+  <footer class="site-footer">© Aurora</footer>
+</body>
+</html>

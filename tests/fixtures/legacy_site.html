@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Brick &amp; Mortar — legacy fixture</title>
+<style>
+  /* A legacy site: no CSS custom properties at all. There are no declared tokens,
+     so the palette is driven purely by measured usage (inventory -> roles), and
+     reconciliation has no intent to fold in. No dark-mode block, so the light and
+     dark renders are identical and the pipeline collapses to a single theme. */
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body { background: #fafaf7; color: #2b2b2b; font-family: Georgia, serif; }
+  .masthead {
+    background: #8b1e3f;
+    color: #ffffff;
+    width: 1280px;
+    height: 72px;
+  }
+  .hero {
+    background: #c0492f;
+    color: #ffffff;
+    width: 1280px;
+    height: 300px;
+  }
+  .buy-button {
+    background: #1f6f54;
+    color: #ffffff;
+    border: none;
+    width: 220px;
+    height: 56px;
+    cursor: pointer;
+  }
+  .buy-button:hover { background: #18594380; }
+  .panel {
+    background: #ffffff;
+    color: #2b2b2b;
+    border: 1px solid #d9d4c5;
+    width: 1100px;
+    height: 260px;
+  }
+  .colophon {
+    background: #2b2b2b;
+    color: #cfcfcf;
+    width: 1280px;
+    height: 200px;
+  }
+</style>
+</head>
+<body>
+  <header class="masthead"><h1>Brick &amp; Mortar</h1></header>
+  <div class="hero"><h2>Handmade since 1962</h2></div>
+  <main>
+    <div class="panel">
+      <p>Our story</p>
+      <button class="buy-button">Shop now</button>
+    </div>
+  </main>
+  <footer class="colophon">Visit our store</footer>
+</body>
+</html>
