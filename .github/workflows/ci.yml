@@ -5,9 +5,39 @@ on:
     branches: [main]
   pull_request:
 
+# Independent jobs run in parallel; each surfaces as its own status check so
+# branch protection can require build, lint, and test (or the aggregate `ci`
+# job below) before a PR is mergeable.
 jobs:
-  checks:
-    name: lint · types · tests
+  build:
+    name: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+          enable-cache: true
+
+      - name: Build sdist + wheel
+        run: uv build
+
+      - name: Verify the wheel bundles the config data file and py.typed
+        run: |
+          unzip -l dist/*.whl
+          unzip -l dist/*.whl | grep -q "colorsense/data/palette_config.yaml"
+          unzip -l dist/*.whl | grep -q "colorsense/py.typed"
+
+      - name: Upload built artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  lint:
+    name: lint (ruff · mypy)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -30,10 +60,27 @@ jobs:
       - name: Mypy (strict)
         run: uv run mypy src
 
-      # Browserless gates run first for fast failure on lint/type/logic errors
-      # before paying for the Chromium download.
-      - name: Pytest (browserless)
-        run: uv run pytest -m "not browser"
+  test:
+    name: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+          enable-cache: true
+
+      - name: Sync dependencies
+        run: uv sync
+
+      # Browserless gates run first for fast failure on logic errors before
+      # paying for the Chromium download. Coverage is collected here and
+      # appended to by the browser run so the floor reflects the whole suite
+      # (browserless alone leaves the harvest/render layers largely uncovered).
+      - name: Pytest (browserless, collect coverage)
+        run: uv run pytest -m "not browser" --cov=colorsense --cov-report=
 
       # Install Chromium (and its OS dependencies) so the real render/harvest and
       # end-to-end pipeline tests can run. `--with-deps` pulls the apt packages
@@ -41,5 +88,26 @@ jobs:
       - name: Install Chromium for Playwright
         run: uv run playwright install --with-deps chromium
 
-      - name: Pytest (browser / end-to-end)
-        run: uv run pytest -m browser
+      - name: Pytest (browser / end-to-end, append coverage)
+        run: uv run pytest -m browser --cov=colorsense --cov-append --cov-report=
+
+      - name: Coverage report + floor
+        run: uv run coverage report --show-missing --fail-under=90
+
+  # Aggregate gate: a single check that passes only when build, lint, and test
+  # all succeed. Set this as the lone required status check in branch protection
+  # to avoid having to update the list whenever a job is renamed.
+  ci:
+    name: ci
+    if: always()
+    needs: [build, lint, test]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require all upstream jobs to have succeeded
+        run: |
+          echo "build:  ${{ needs.build.result }}"
+          echo "lint:   ${{ needs.lint.result }}"
+          echo "test:   ${{ needs.test.result }}"
+          [ "${{ needs.build.result }}" = "success" ] \
+            && [ "${{ needs.lint.result }}" = "success" ] \
+            && [ "${{ needs.test.result }}" = "success" ]
