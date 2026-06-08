@@ -6,6 +6,7 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
   "playwright",
+  "httpx",
   "coloraide",
   "pydantic>=2",
   "pydantic-settings",
@@ -46,6 +47,7 @@ ignore_missing_imports = true
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q --strict-markers"
+asyncio_mode = "auto"
 markers = [
   "browser: test renders a real page via Playwright/Chromium (skipped in browserless CI with -m 'not browser')",
 ]

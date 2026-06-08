@@ -19,7 +19,7 @@ from __future__ import annotations
 import re
 from typing import TypedDict, cast
 
-from playwright.sync_api import Page
+from playwright.async_api import Page
 
 from colorsense.color.primitives import parse_css_color
 from colorsense.models import TokenRecord
@@ -103,7 +103,7 @@ def _alias_target(raw_value: str) -> str | None:
     return match.group(1)
 
 
-def harvest_tokens(page: Page) -> list[TokenRecord]:
+async def harvest_tokens(page: Page) -> list[TokenRecord]:
     """Collect declared CSS custom properties as :class:`TokenRecord` objects.
 
     Same-origin stylesheets only. Each record's ``resolved`` is the ``:root``-resolved
@@ -111,7 +111,7 @@ def harvest_tokens(page: Page) -> list[TokenRecord]:
     ``alias_target`` is set (with leading ``--``) when the raw value is a ``var(--x)``
     reference.
     """
-    raw_tokens = cast(list[_RawToken], page.evaluate(_COLLECT_TOKENS_JS))
+    raw_tokens = cast(list[_RawToken], await page.evaluate(_COLLECT_TOKENS_JS))
 
     records: list[TokenRecord] = []
     for token in raw_tokens:

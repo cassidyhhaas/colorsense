@@ -44,7 +44,7 @@ class _CountingHarvester:
         self.calls: list[tuple[str, Theme]] = []
         self._bins = bins or []
 
-    def __call__(self, url: str, theme: Theme, config: Config, viewport: Viewport) -> Harvest:
+    async def __call__(self, url: str, theme: Theme, config: Config, viewport: Viewport) -> Harvest:
         self.calls.append((url, theme))
         return Harvest(
             url=url,
@@ -62,85 +62,95 @@ class _Clock:
         return self.t
 
 
-def test_cache_returns_without_re_render(config: Config) -> None:
+# Async robots_loader seams (the policy awaits the loader). One permits all (no rules),
+# the other disallows everything.
+async def _no_robots(_url: str) -> str | None:
+    return None
+
+
+async def _disallow_all(_url: str) -> str | None:
+    return "User-agent: *\nDisallow: /"
+
+
+async def test_cache_returns_without_re_render(config: Config) -> None:
     harvester = _CountingHarvester()
-    policy = PolitenessPolicy(harvester=harvester, robots_loader=lambda _u: None)
+    policy = PolitenessPolicy(harvester=harvester, robots_loader=_no_robots)
     url = "https://example.test/page"
 
-    first = policy.fetch(url, Theme.light, config, VIEWPORT)
-    second = policy.fetch(url, Theme.light, config, VIEWPORT)
+    first = await policy.fetch(url, Theme.light, config, VIEWPORT)
+    second = await policy.fetch(url, Theme.light, config, VIEWPORT)
 
     assert second is first  # identical object straight from cache
     assert harvester.calls == [(url, Theme.light)]  # rendered exactly once
 
     # A different theme is a distinct cache key and re-renders.
-    policy.fetch(url, Theme.dark, config, VIEWPORT)
+    await policy.fetch(url, Theme.dark, config, VIEWPORT)
     assert harvester.calls == [(url, Theme.light), (url, Theme.dark)]
 
 
-def test_robots_disallow_blocks_fetch(config: Config) -> None:
-    disallow = lambda _u: "User-agent: *\nDisallow: /"  # noqa: E731
+async def test_robots_disallow_blocks_fetch(config: Config) -> None:
     harvester = _CountingHarvester()
-    policy = PolitenessPolicy(harvester=harvester, robots_loader=disallow)
+    policy = PolitenessPolicy(harvester=harvester, robots_loader=_disallow_all)
     url = "https://example.test/secret"
 
-    assert policy.can_fetch(url) is False
+    assert await policy.can_fetch(url) is False
     with pytest.raises(RobotsDisallowedError):
-        policy.fetch(url, Theme.light, config, VIEWPORT)
+        await policy.fetch(url, Theme.light, config, VIEWPORT)
     assert harvester.calls == []  # never rendered
 
 
-def test_respect_robots_false_bypasses_gate(config: Config) -> None:
-    disallow = lambda _u: "User-agent: *\nDisallow: /"  # noqa: E731
+async def test_respect_robots_false_bypasses_gate(config: Config) -> None:
     harvester = _CountingHarvester()
-    policy = PolitenessPolicy(harvester=harvester, robots_loader=disallow, respect_robots=False)
+    policy = PolitenessPolicy(
+        harvester=harvester, robots_loader=_disallow_all, respect_robots=False
+    )
     url = "https://example.test/secret"
 
-    assert policy.can_fetch(url) is True
-    policy.fetch(url, Theme.light, config, VIEWPORT)
+    assert await policy.can_fetch(url) is True
+    await policy.fetch(url, Theme.light, config, VIEWPORT)
     assert harvester.calls == [(url, Theme.light)]
 
 
-def test_file_url_bypasses_robots(config: Config) -> None:
+async def test_file_url_bypasses_robots(config: Config) -> None:
     # file:// has no host/robots concept: always fetchable even under a disallow loader.
     policy = PolitenessPolicy(
         harvester=_CountingHarvester(),
-        robots_loader=lambda _u: "User-agent: *\nDisallow: /",
+        robots_loader=_disallow_all,
     )
-    assert policy.can_fetch("file:///tmp/x.html") is True
+    assert await policy.can_fetch("file:///tmp/x.html") is True
 
 
-def test_rate_limiter_spaces_same_host(config: Config) -> None:
+async def test_rate_limiter_spaces_same_host(config: Config) -> None:
     harvester = _CountingHarvester()
     clock = _Clock()
     slept: list[float] = []
 
-    def sleeper(seconds: float) -> None:
+    async def sleeper(seconds: float) -> None:
         slept.append(seconds)
         clock.t += seconds
 
     policy = PolitenessPolicy(
         harvester=harvester,
-        robots_loader=lambda _u: None,
+        robots_loader=_no_robots,
         min_interval=2.0,
         clock=clock,
         sleeper=sleeper,
     )
 
-    policy.fetch("https://host.test/a", Theme.light, config, VIEWPORT)
+    await policy.fetch("https://host.test/a", Theme.light, config, VIEWPORT)
     clock.t += 0.5  # only 0.5s elapses before the next same-host fetch
-    policy.fetch("https://host.test/b", Theme.light, config, VIEWPORT)
+    await policy.fetch("https://host.test/b", Theme.light, config, VIEWPORT)
 
     assert slept == [pytest.approx(1.5)]  # waited the remaining 1.5s of the interval
 
 
-def test_analyze_propagates_robots_block(config: Config) -> None:
+async def test_analyze_propagates_robots_block(config: Config) -> None:
     policy = PolitenessPolicy(
         harvester=_CountingHarvester(),
-        robots_loader=lambda _u: "User-agent: *\nDisallow: /",
+        robots_loader=_disallow_all,
     )
     with pytest.raises(RobotsDisallowedError):
-        analyze("https://example.test/", config_path=CONFIG_PATH, politeness=policy)
+        await analyze("https://example.test/", config_path=CONFIG_PATH, politeness=policy)
 
 
 # ---------------------------------------------------------------------------
@@ -148,16 +158,16 @@ def test_analyze_propagates_robots_block(config: Config) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _analyze_fixture(name: str, fixtures_dir: Path, **kwargs: object) -> AnalysisResult:
+async def _analyze_fixture(name: str, fixtures_dir: Path, **kwargs: object) -> AnalysisResult:
     url = (fixtures_dir / name).as_uri()
-    return analyze(url, config_path=CONFIG_PATH, viewport=VIEWPORT, **kwargs)  # type: ignore[arg-type]
+    return await analyze(url, config_path=CONFIG_PATH, viewport=VIEWPORT, **kwargs)  # type: ignore[arg-type]
 
 
 @pytest.mark.browser
-def test_end_to_end_light_and_dark(fixtures_dir: Path) -> None:
+async def test_end_to_end_light_and_dark(fixtures_dir: Path) -> None:
     # tokens.html has a `prefers-color-scheme: dark` block, so the two renders differ
     # and both themes survive collapse.
-    result = _analyze_fixture("tokens.html", fixtures_dir)
+    result = await _analyze_fixture("tokens.html", fixtures_dir)
 
     assert isinstance(result, AnalysisResult)
     assert set(result.themes) == {Theme.light, Theme.dark}
@@ -183,10 +193,10 @@ def test_end_to_end_light_and_dark(fixtures_dir: Path) -> None:
 
 
 @pytest.mark.browser
-def test_single_theme_site_collapses(fixtures_dir: Path) -> None:
+async def test_single_theme_site_collapses(fixtures_dir: Path) -> None:
     # hover.html has no dark-mode block: light and dark renders are identical, so the
     # pipeline collapses to one theme.
-    result = _analyze_fixture("hover.html", fixtures_dir)
+    result = await _analyze_fixture("hover.html", fixtures_dir)
 
     assert len(result.themes) == 1
     assert result.metadata["single_theme"] == "true"
@@ -195,11 +205,11 @@ def test_single_theme_site_collapses(fixtures_dir: Path) -> None:
 
 
 @pytest.mark.browser
-def test_hover_hint_feeds_recommendation(fixtures_dir: Path) -> None:
+async def test_hover_hint_feeds_recommendation(fixtures_dir: Path) -> None:
     # hover.html's #cta flips to #ff6600 on hover; that hint reaches recommend() and is
     # reported as a distinct hover background (the recommender does not enforce a contrast floor on
     # the hover color, only on the heading/cta surfaces and text pairs).
-    result = _analyze_fixture("hover.html", fixtures_dir)
+    result = await _analyze_fixture("hover.html", fixtures_dir)
 
     (palette,) = result.themes.values()
     rec = palette.recommendation
@@ -208,13 +218,13 @@ def test_hover_hint_feeds_recommendation(fixtures_dir: Path) -> None:
 
 
 @pytest.mark.browser
-def test_explicit_single_theme_request(fixtures_dir: Path) -> None:
-    result = _analyze_fixture("tokens.html", fixtures_dir, themes=(Theme.light,))
+async def test_explicit_single_theme_request(fixtures_dir: Path) -> None:
+    result = await _analyze_fixture("tokens.html", fixtures_dir, themes=(Theme.light,))
     assert set(result.themes) == {Theme.light}
     assert result.metadata["themes_requested"] == "light"
 
 
-def test_empty_themes_rejected(fixtures_dir: Path) -> None:
+async def test_empty_themes_rejected(fixtures_dir: Path) -> None:
     url = (fixtures_dir / "tokens.html").as_uri()
     with pytest.raises(ValueError, match="at least one theme"):
-        analyze(url, config_path=CONFIG_PATH, themes=())
+        await analyze(url, config_path=CONFIG_PATH, themes=())

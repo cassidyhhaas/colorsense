@@ -1,13 +1,15 @@
-"""Playwright (sync API) render session.
+"""Playwright (async API) render session.
 
-:class:`RenderSession` is a context manager that launches a headless Chromium browser,
-opens a page at a fixed :class:`~colorsense.models.Viewport` and color scheme, navigates
-robustly to a URL (guarding ``networkidle`` so ``file://`` pages never hang), neutralizes
-transitions/animations, step-scrolls to trigger lazy content, and detects consent/overlay
-regions whose bounding rects can be masked out of the screenshot.
+:class:`RenderSession` is an async context manager that launches a headless Chromium
+browser, opens a page at a fixed :class:`~colorsense.models.Viewport` and color scheme,
+navigates robustly to a URL (guarding ``networkidle`` so ``file://`` pages never hang),
+neutralizes transitions/animations, step-scrolls to trigger lazy content, and detects
+consent/overlay regions whose bounding rects can be masked out of the screenshot.
 
-The Playwright :class:`~playwright.sync_api.Page` is exposed as :attr:`RenderSession.page`
-so the other harvest modules can run their own JS against the same live page.
+The Playwright :class:`~playwright.async_api.Page` is exposed as :attr:`RenderSession.page`
+so the other harvest modules can run their own JS against the same live page. Built on the
+**async** Playwright API so it runs natively on an asyncio event loop (e.g. inside a
+FastAPI ``async def`` endpoint) and so sibling theme renders can overlap.
 """
 
 from __future__ import annotations
@@ -16,12 +18,12 @@ import contextlib
 from types import TracebackType
 from typing import Literal, Self
 
-from playwright.sync_api import (
+from playwright.async_api import (
     Browser,
     BrowserContext,
     Page,
     Playwright,
-    sync_playwright,
+    async_playwright,
 )
 
 from colorsense.models import Rect, Theme, Viewport
@@ -103,8 +105,8 @@ class RenderSession:
 
     Usage::
 
-        with RenderSession(theme, viewport) as session:
-            session.goto(url)
+        async with RenderSession(theme, viewport) as session:
+            await session.goto(url)
             page = session.page  # run module JS against it
             consent = session.consent_rects
     """
@@ -120,18 +122,18 @@ class RenderSession:
 
     # -- context manager --------------------------------------------------
 
-    def __enter__(self) -> Self:
-        self._playwright = sync_playwright().start()
-        self._browser = self._playwright.chromium.launch(headless=True)
-        self._context = self._browser.new_context(
+    async def __aenter__(self) -> Self:
+        self._playwright = await async_playwright().start()
+        self._browser = await self._playwright.chromium.launch(headless=True)
+        self._context = await self._browser.new_context(
             viewport={"width": self._viewport.w, "height": self._viewport.h},
             device_scale_factor=self._viewport.device_scale_factor,
             color_scheme=_COLOR_SCHEME[self._theme],
         )
-        self._page = self._context.new_page()
+        self._page = await self._context.new_page()
         return self
 
-    def __exit__(
+    async def __aexit__(
         self,
         exc_type: type[BaseException] | None,
         exc: BaseException | None,
@@ -142,10 +144,10 @@ class RenderSession:
         for closer in (self._context, self._browser):
             if closer is not None:
                 with contextlib.suppress(Exception):
-                    closer.close()
+                    await closer.close()
         if self._playwright is not None:
             with contextlib.suppress(Exception):
-                self._playwright.stop()
+                await self._playwright.stop()
         self._page = None
         self._context = None
         self._browser = None
@@ -177,7 +179,7 @@ class RenderSession:
 
     # -- navigation -------------------------------------------------------
 
-    def goto(self, url: str) -> None:
+    async def goto(self, url: str) -> None:
         """Navigate to ``url`` and stabilize the page for harvesting.
 
         Performs ``goto(..., wait_until="load")``, a guarded ``networkidle`` wait, motion
@@ -186,23 +188,23 @@ class RenderSession:
         pages that never report idle do not hang.
         """
         page = self.page
-        page.goto(url, wait_until="load")
+        await page.goto(url, wait_until="load")
         # file:// pages may never report networkidle; guard with a timeout.
         with contextlib.suppress(Exception):
-            page.wait_for_load_state("networkidle", timeout=_NETWORKIDLE_TIMEOUT_MS)
+            await page.wait_for_load_state("networkidle", timeout=_NETWORKIDLE_TIMEOUT_MS)
 
-        page.add_style_tag(content=_DISABLE_MOTION_CSS)
+        await page.add_style_tag(content=_DISABLE_MOTION_CSS)
 
         # Step-scrolling is best-effort (triggers lazy content).
         with contextlib.suppress(Exception):
-            page.evaluate(_STEP_SCROLL_JS, _MAX_SCROLL_STEPS)
+            await page.evaluate(_STEP_SCROLL_JS, _MAX_SCROLL_STEPS)
 
-        self._consent_rects = self._detect_consent_rects()
+        self._consent_rects = await self._detect_consent_rects()
 
-    def _detect_consent_rects(self) -> list[Rect]:
+    async def _detect_consent_rects(self) -> list[Rect]:
         """Return bounding rects of consent/overlay banners without clicking them."""
         try:
-            raw = self.page.evaluate(_CONSENT_RECTS_JS)
+            raw = await self.page.evaluate(_CONSENT_RECTS_JS)
         except Exception:  # detection is best-effort
             return []
         rects: list[Rect] = []

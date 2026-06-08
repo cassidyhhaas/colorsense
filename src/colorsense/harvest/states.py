@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import contextlib
 
-from playwright.sync_api import Page
+from playwright.async_api import Page
 
 from colorsense.color.primitives import parse_css_color
 from colorsense.models import Color, HarvestedElement
@@ -21,7 +21,7 @@ from colorsense.models import Color, HarvestedElement
 _MAX_PROBE: int = 80
 
 
-def probe_hover_states(
+async def probe_hover_states(
     page: Page,
     elements: list[HarvestedElement],
     selectors: list[str],
@@ -46,7 +46,7 @@ def probe_hover_states(
             continue
         probed += 1
 
-        hover_bg = _read_hover_bg(page, selector)
+        hover_bg = await _read_hover_bg(page, selector)
         if hover_bg is None:
             continue
 
@@ -59,12 +59,12 @@ def probe_hover_states(
 
     # Reset interaction state (move mouse away) — best effort.
     with contextlib.suppress(Exception):
-        page.mouse.move(0, 0)
+        await page.mouse.move(0, 0)
 
     return updated
 
 
-def _read_hover_bg(page: Page, selector: str) -> Color | None:
+async def _read_hover_bg(page: Page, selector: str) -> Color | None:
     """Hover/focus the element at ``selector`` and return its parsed hover bg color.
 
     Returns ``None`` on any failure (element gone, detached, not hoverable) or if the
@@ -72,10 +72,10 @@ def _read_hover_bg(page: Page, selector: str) -> Color | None:
     """
     try:
         locator = page.locator(selector).first
-        locator.hover(timeout=1000)
+        await locator.hover(timeout=1000)
         with contextlib.suppress(Exception):
-            locator.focus(timeout=500)
-        raw = locator.evaluate("(el) => window.getComputedStyle(el).backgroundColor")
+            await locator.focus(timeout=500)
+        raw = await locator.evaluate("(el) => window.getComputedStyle(el).backgroundColor")
     except Exception:  # one bad element must not abort the harvest
         return None
     if not isinstance(raw, str):

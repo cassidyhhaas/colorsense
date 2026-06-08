@@ -17,7 +17,7 @@ from typing import TypedDict, cast
 
 import numpy as np
 from PIL import Image
-from playwright.sync_api import Page
+from playwright.async_api import Page
 
 from colorsense.color.primitives import parse_css_color
 from colorsense.models import Color, Rect, ScreenshotBin
@@ -46,7 +46,7 @@ def _rgb_to_color(r: int, g: int, b: int) -> Color | None:
     return parse_css_color(f"rgb({r}, {g}, {b})")
 
 
-def harvest_screenshot(
+async def harvest_screenshot(
     page: Page,
     consent_rects: list[Rect],
     device_scale_factor: float,
@@ -56,7 +56,7 @@ def harvest_screenshot(
     ``consent_rects`` are CSS-pixel rects (from :class:`RenderSession`); they are scaled by
     ``device_scale_factor`` and zeroed out of the raw screenshot before quantizing.
     """
-    png_bytes = page.screenshot(full_page=True)
+    png_bytes = await page.screenshot(full_page=True)
     image = Image.open(io.BytesIO(png_bytes)).convert("RGB")
     array = np.asarray(image, dtype=np.uint8).copy()
 
@@ -159,31 +159,31 @@ _LOGO_SOURCES_JS: str = r"""
 """
 
 
-def harvest_logo_colors(page: Page) -> list[Color]:
+async def harvest_logo_colors(page: Page) -> list[Color]:
     """Sample dominant colors from a discoverable logo/favicon image.
 
     Best-effort: returns an empty list if no logo is discoverable or fetching/decoding
     fails. Colors are ordered by coverage (most dominant first), opaque pixels only.
     """
     try:
-        sources = cast(list[_LogoSource], page.evaluate(_LOGO_SOURCES_JS))
+        sources = cast(list[_LogoSource], await page.evaluate(_LOGO_SOURCES_JS))
     except Exception:  # discovery is best-effort
         return []
 
     for source in sources:
-        colors = _sample_logo(page, source["url"])
+        colors = await _sample_logo(page, source["url"])
         if colors:
             return colors
     return []
 
 
-def _sample_logo(page: Page, url: str) -> list[Color]:
+async def _sample_logo(page: Page, url: str) -> list[Color]:
     """Fetch and quantize a single logo image URL into dominant colors."""
     try:
-        response = page.request.get(url)
+        response = await page.request.get(url)
         if not response.ok:
             return []
-        data = response.body()
+        data = await response.body()
         image = Image.open(io.BytesIO(data)).convert("RGBA")
     except Exception:  # fetch/decode best-effort
         return []

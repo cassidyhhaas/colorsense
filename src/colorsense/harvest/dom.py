@@ -16,7 +16,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import TypedDict, cast
 
-from playwright.sync_api import Page
+from playwright.async_api import Page
 
 from colorsense.color.primitives import parse_css_color
 from colorsense.models import HarvestedElement, Rect
@@ -145,7 +145,7 @@ def _vendor_match(blob: str, vendor_prefixes: Sequence[str]) -> bool:
     return any(prefix.lower() in blob for prefix in vendor_prefixes)
 
 
-def harvest_elements(
+async def harvest_elements(
     page: Page,
     vendor_prefixes: Sequence[str],
 ) -> tuple[list[HarvestedElement], list[str]]:
@@ -154,7 +154,7 @@ def harvest_elements(
     Returns the elements alongside a parallel list of CSS selectors (one per element) so
     pseudo-state probing can re-target the same elements.
     """
-    raw_elements = cast(list[_RawElement], page.evaluate(_COLLECT_DOM_JS))
+    raw_elements = cast(list[_RawElement], await page.evaluate(_COLLECT_DOM_JS))
 
     elements: list[HarvestedElement] = []
     selectors: list[str] = []
