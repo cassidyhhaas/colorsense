@@ -165,6 +165,10 @@ class PolitenessPolicy:
         # so it is the one cache that can leak in a long-running server. Most-recently-used
         # keys live at the end; overflow evicts from the front (``popitem(last=False)``).
         self._cache: OrderedDict[tuple[str, str, int, int, float], Harvest] = OrderedDict()
+        # In-flight render coalescing (single-flight): concurrent fetches for the *same*
+        # cache key share one render instead of each launching a redundant headless render.
+        # The leader registers a Future here before its first ``await``; followers await it.
+        self._inflight: dict[tuple[str, str, int, int, float], asyncio.Future[Harvest]] = {}
         # ``_robots_cache`` and ``_last_fetch`` are intentionally unbounded: they hold one
         # small entry per host, so their size is bounded by the number of distinct hosts a
         # consumer fetches (tiny in practice), not by request volume.
@@ -242,6 +246,14 @@ class PolitenessPolicy:
         entry most-recently-used. Otherwise the robots gate is enforced, the per-host rate
         limiter applied, and the harvester awaited; the result is cached (LRU-evicting the
         least-recently-used entry if the cache is bounded and now full) before return.
+
+        Concurrent misses for the *same* key are coalesced (single-flight): the first caller
+        becomes the leader and runs exactly one robots gate → throttle → render; any caller
+        that arrives while that render is in flight becomes a follower, awaiting the leader's
+        result instead of launching a redundant headless render. All followers receive the
+        leader's :class:`Harvest` — or, if the leader's gate/render fails, the *same*
+        exception (the failure is not cached, and the next fetch re-renders). Distinct keys
+        never share, so unrelated renders still run in parallel.
         """
         key = _cache_key(url, theme, viewport)
         cached = self._cache.get(key)
@@ -250,14 +262,46 @@ class PolitenessPolicy:
             # eviction. Safe under the single-threaded event loop (no await in between).
             self._cache.move_to_end(key)
             return cached
-        if not await self.can_fetch(url):
-            raise RobotsDisallowedError(url)
-        await self._throttle(url)
-        harvest = await self._harvester(url, theme, config, viewport)
-        self._cache[key] = harvest
-        self._cache.move_to_end(key)
-        # Evict least-recently-used entries once over the bound. ``0``/``None`` => unbounded.
-        if self.max_cache_entries:
-            while len(self._cache) > self.max_cache_entries:
-                self._cache.popitem(last=False)
-        return harvest
+        # Coalesce concurrent misses. The check-and-register below must have no ``await``
+        # between them so it is race-free under the single-threaded event loop: either we
+        # find an existing leader's Future (follower path) or we install our own (leader
+        # path) atomically.
+        existing = self._inflight.get(key)
+        if existing is not None:
+            # Follower: share the leader's single render; do not re-run robots/throttle/render.
+            return await existing
+        loop = asyncio.get_running_loop()
+        future: asyncio.Future[Harvest] = loop.create_future()
+        self._inflight[key] = future
+        try:
+            if not await self.can_fetch(url):
+                raise RobotsDisallowedError(url)
+            await self._throttle(url)
+            harvest = await self._harvester(url, theme, config, viewport)
+        except BaseException as err:  # re-raised after fanning out to followers
+            # Fan the failure out to every waiting follower, then re-raise to the leader.
+            # The failure is never cached. ``set_exception`` is skipped if the Future was
+            # already resolved/cancelled (e.g. leader cancellation) to avoid InvalidStateError.
+            if not future.done():
+                future.set_exception(err)
+            raise
+        else:
+            self._cache[key] = harvest
+            self._cache.move_to_end(key)
+            # Evict least-recently-used entries once over the bound. ``0``/``None`` => unbounded.
+            if self.max_cache_entries:
+                while len(self._cache) > self.max_cache_entries:
+                    self._cache.popitem(last=False)
+            if not future.done():
+                future.set_result(harvest)
+            return harvest
+        finally:
+            # Always release the slot so a later fetch can re-render (on failure) or the
+            # entry is served from cache (on success) — even under cancellation.
+            self._inflight.pop(key, None)
+            # If the Future carries an exception that no follower happened to await, retrieve
+            # it (the ``.exception()`` call marks it retrieved) so asyncio does not log a
+            # spurious "exception was never retrieved" warning. The leader re-raises the same
+            # error to its own caller regardless.
+            if future.done() and not future.cancelled():
+                future.exception()
