@@ -39,12 +39,12 @@ def _dummy_result() -> AnalysisResult:
 
     roles = RoleResults(
         mapping={
-            PaletteRole.primary: [
-                PaletteCandidate(color=white, probability=0.8, area=0.6, evidence={"area": 0.6})
-            ],
-            PaletteRole.accent: [
-                PaletteCandidate(color=brand, probability=0.7, area=0.05, evidence={"chroma": 0.9})
-            ],
+            PaletteRole.primary: (
+                PaletteCandidate(color=white, probability=0.8, area=0.6, evidence={"area": 0.6}),
+            ),
+            PaletteRole.accent: (
+                PaletteCandidate(color=brand, probability=0.7, area=0.05, evidence={"chroma": 0.9}),
+            ),
         }
     )
     theme_palette = ThemePalette(theme=Theme.light, roles=roles)
@@ -72,16 +72,16 @@ def _dummy_result() -> AnalysisResult:
         url="https://example.com",
         viewport=viewport,
         themes={Theme.light: theme_palette},
-        tokens=[token],
-        third_party_colors=[_color("#00ff00", 0.8)],
-        status_colors=[_color("#cc0000", 0.4)],
-        divergence=[
-            DivergenceItem(role=PaletteRole.primary, color=dark, note="declared but unused")
-        ],
+        tokens=(token,),
+        third_party_colors=(_color("#00ff00", 0.8),),
+        status_colors=(_color("#cc0000", 0.4),),
+        divergence=(
+            DivergenceItem(role=PaletteRole.primary, color=dark, note="declared but unused"),
+        ),
         fit_score=0.82,
         metadata=RunMetadata(
-            themes_requested=[Theme.light, Theme.dark],
-            themes_analyzed=[Theme.light],
+            themes_requested=(Theme.light, Theme.dark),
+            themes_analyzed=(Theme.light,),
             single_theme=True,
             user_agent="colorsense",
             respect_robots=True,
@@ -106,6 +106,39 @@ def test_value_objects_are_frozen() -> None:
     with pytest.raises(ValidationError):
         viewport.width = 640  # type: ignore[misc]
     assert viewport.width == 1280
+
+
+def test_output_models_are_frozen() -> None:
+    # The public result tree is immutable: reassigning any attribute on an output model
+    # raises pydantic's frozen-instance ValidationError, and the value is unchanged.
+    result = _dummy_result()
+    with pytest.raises(ValidationError):
+        result.fit_score = 1.0  # type: ignore[misc]
+    assert result.fit_score == 0.82
+
+    candidate = result.themes[Theme.light].roles.mapping[PaletteRole.accent][0]
+    with pytest.raises(ValidationError):
+        candidate.probability = 0.1  # type: ignore[misc]
+
+    role_results = result.themes[Theme.light].roles
+    with pytest.raises(ValidationError):
+        role_results.mapping = {}  # type: ignore[misc]
+
+
+def test_output_sequence_fields_are_tuples_not_appendable() -> None:
+    # Sequence fields are tuples, so in-place mutation (``.append``) is impossible: a tuple
+    # has no ``append``/``extend``, so the attempt raises AttributeError, not a silent edit.
+    result = _dummy_result()
+    assert isinstance(result.tokens, tuple)
+    with pytest.raises(AttributeError):
+        result.tokens.append(result.tokens[0])  # type: ignore[attr-defined]
+    with pytest.raises(AttributeError):
+        result.divergence.extend([])  # type: ignore[attr-defined]
+
+    candidates = result.themes[Theme.light].roles.mapping[PaletteRole.accent]
+    assert isinstance(candidates, tuple)
+    with pytest.raises(AttributeError):
+        candidates.append(candidates[0])  # type: ignore[attr-defined]
 
 
 def test_harvest_models_construct() -> None:
@@ -153,4 +186,9 @@ def test_analysis_result_json_round_trip() -> None:
     assert restored.tokens[0].palette_prior[PaletteRole.accent] == 0.55
     assert restored.metadata.user_agent == "colorsense"
     assert restored.metadata.single_theme is True
-    assert restored.metadata.themes_requested == [Theme.light, Theme.dark]
+    assert restored.metadata.themes_requested == (Theme.light, Theme.dark)
+    # Sequence fields round-trip as tuples (typed ``tuple[X, ...]``), not lists.
+    assert isinstance(restored.tokens, tuple)
+    assert isinstance(restored.divergence, tuple)
+    assert isinstance(restored.metadata.themes_requested, tuple)
+    assert isinstance(restored.themes[Theme.light].roles.mapping[PaletteRole.accent], tuple)

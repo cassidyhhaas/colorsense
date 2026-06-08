@@ -195,8 +195,8 @@ async def test_legacy_site(fixtures_dir: Path) -> None:
 
     # No custom properties: nothing to declare, so the palette is usage-driven and
     # every prominent color is "used but undeclared".
-    assert result.tokens == []
-    assert result.status_colors == []
+    assert result.tokens == ()
+    assert result.status_colors == ()
     assert result.divergence  # used-but-undeclared discrepancies are reported
     assert all("undeclared" in item.note.lower() for item in result.divergence)
 

@@ -251,8 +251,8 @@ async def test_single_theme_site_collapses(fixtures_dir: Path) -> None:
 
     assert len(result.themes) == 1
     assert result.metadata.single_theme is True
-    assert result.metadata.themes_requested == [Theme.light, Theme.dark]
-    assert result.metadata.themes_analyzed == [Theme.light]
+    assert result.metadata.themes_requested == (Theme.light, Theme.dark)
+    assert result.metadata.themes_analyzed == (Theme.light,)
 
 
 @pytest.mark.browser
@@ -262,8 +262,8 @@ async def test_default_is_light_only(fixtures_dir: Path) -> None:
     result = await _analyze_fixture("tokens.html", fixtures_dir)
 
     assert set(result.themes) == {Theme.light}
-    assert result.metadata.themes_requested == [Theme.light]
-    assert result.metadata.themes_analyzed == [Theme.light]
+    assert result.metadata.themes_requested == (Theme.light,)
+    assert result.metadata.themes_analyzed == (Theme.light,)
     assert result.metadata.single_theme is True
 
 
@@ -271,7 +271,7 @@ async def test_default_is_light_only(fixtures_dir: Path) -> None:
 async def test_explicit_single_theme_request(fixtures_dir: Path) -> None:
     result = await _analyze_fixture("tokens.html", fixtures_dir, themes=(Theme.light,))
     assert set(result.themes) == {Theme.light}
-    assert result.metadata.themes_requested == [Theme.light]
+    assert result.metadata.themes_requested == (Theme.light,)
 
 
 async def test_empty_themes_rejected(fixtures_dir: Path) -> None:

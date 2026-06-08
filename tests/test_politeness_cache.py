@@ -52,9 +52,7 @@ class _GatedHarvester:
         self.gate = asyncio.Event()
         self.entered = asyncio.Event()
 
-    async def __call__(
-        self, url: str, theme: Theme, config: Config, viewport: Viewport
-    ) -> Harvest:
+    async def __call__(self, url: str, theme: Theme, config: Config, viewport: Viewport) -> Harvest:
         self.calls += 1
         self.concurrent += 1
         self.max_concurrent = max(self.max_concurrent, self.concurrent)
@@ -74,9 +72,7 @@ class _FailingHarvester:
         self.gate = asyncio.Event()
         self.entered = asyncio.Event()
 
-    async def __call__(
-        self, url: str, theme: Theme, config: Config, viewport: Viewport
-    ) -> Harvest:
+    async def __call__(self, url: str, theme: Theme, config: Config, viewport: Viewport) -> Harvest:
         self.calls += 1
         self.entered.set()
         await self.gate.wait()
@@ -112,8 +108,7 @@ async def test_many_concurrent_same_key_single_render(config: Config) -> None:
     leader = asyncio.ensure_future(policy.fetch(URL, Theme.light, config, VIEWPORT))
     await harvester.entered.wait()
     followers = [
-        asyncio.ensure_future(policy.fetch(URL, Theme.light, config, VIEWPORT))
-        for _ in range(5)
+        asyncio.ensure_future(policy.fetch(URL, Theme.light, config, VIEWPORT)) for _ in range(5)
     ]
     await asyncio.sleep(0)
 

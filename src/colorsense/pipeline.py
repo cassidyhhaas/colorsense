@@ -140,14 +140,14 @@ async def analyze(
         url=url,
         viewport=viewport,
         themes={theme: out.palette for theme, out in outputs.items()},
-        tokens=primary.tokens,
-        third_party_colors=_dedupe_colors(
-            color for out in outputs.values() for color in out.third_party_colors
+        tokens=tuple(primary.tokens),
+        third_party_colors=tuple(
+            _dedupe_colors(color for out in outputs.values() for color in out.third_party_colors)
         ),
-        status_colors=_dedupe_colors(
-            color for out in outputs.values() for color in out.status_colors
+        status_colors=tuple(
+            _dedupe_colors(color for out in outputs.values() for color in out.status_colors)
         ),
-        divergence=primary.divergence,
+        divergence=tuple(primary.divergence),
         fit_score=primary.fit_score,
         metadata=_build_metadata(ordered_themes, kept_themes, policy),
     )
@@ -245,8 +245,8 @@ def _build_metadata(
 ) -> RunMetadata:
     """Provenance for the run: themes requested vs analyzed, collapse flag, fetch policy."""
     return RunMetadata(
-        themes_requested=list(requested),
-        themes_analyzed=list(kept),
+        themes_requested=tuple(requested),
+        themes_analyzed=tuple(kept),
         single_theme=len(kept) == 1,
         user_agent=policy.user_agent,
         respect_robots=policy.respect_robots,
