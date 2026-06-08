@@ -153,6 +153,7 @@ def _analyze_fixture(name: str, fixtures_dir: Path, **kwargs: object) -> Analysi
     return analyze(url, config_path=CONFIG_PATH, viewport=VIEWPORT, **kwargs)  # type: ignore[arg-type]
 
 
+@pytest.mark.browser
 def test_end_to_end_light_and_dark(fixtures_dir: Path) -> None:
     # tokens.html has a `prefers-color-scheme: dark` block, so the two renders differ
     # and both themes survive collapse.
@@ -181,6 +182,7 @@ def test_end_to_end_light_and_dark(fixtures_dir: Path) -> None:
     assert restored == result
 
 
+@pytest.mark.browser
 def test_single_theme_site_collapses(fixtures_dir: Path) -> None:
     # hover.html has no dark-mode block: light and dark renders are identical, so the
     # pipeline collapses to one theme.
@@ -192,6 +194,7 @@ def test_single_theme_site_collapses(fixtures_dir: Path) -> None:
     assert result.metadata["themes_analyzed"] == "light"
 
 
+@pytest.mark.browser
 def test_hover_hint_feeds_recommendation(fixtures_dir: Path) -> None:
     # hover.html's #cta flips to #ff6600 on hover; that hint reaches recommend() and is
     # reported as a distinct hover background (WP10 does not enforce a contrast floor on
@@ -204,6 +207,7 @@ def test_hover_hint_feeds_recommendation(fixtures_dir: Path) -> None:
     assert rec.cta_hover_bg.hex != rec.cta_bg.hex
 
 
+@pytest.mark.browser
 def test_explicit_single_theme_request(fixtures_dir: Path) -> None:
     result = _analyze_fixture("tokens.html", fixtures_dir, themes=(Theme.light,))
     assert set(result.themes) == {Theme.light}

@@ -45,4 +45,7 @@ ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-q"
+addopts = "-q --strict-markers"
+markers = [
+  "browser: test renders a real page via Playwright/Chromium (skipped in browserless CI with -m 'not browser')",
+]

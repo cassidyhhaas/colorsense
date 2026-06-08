@@ -31,6 +31,9 @@ GOLDEN_DIR = Path(__file__).parent / "golden"
 CONTRAST_EPS = 1e-6
 FIT_SCORE_TOL = 0.05
 
+# Every test here drives a real Chromium render; skip in browserless CI.
+pytestmark = pytest.mark.browser
+
 
 def _analyze(fixture: Path) -> AnalysisResult:
     return analyze(fixture.as_uri(), config_path=CONFIG_PATH)

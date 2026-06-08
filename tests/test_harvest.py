@@ -21,6 +21,9 @@ CONFIG_PATH = REPO_ROOT / "config" / "palette_config.yaml"
 
 VIEWPORT = Viewport(w=1280, h=800, device_scale_factor=1.0)
 
+# Every test here drives a real Chromium render; skip in browserless CI.
+pytestmark = pytest.mark.browser
+
 
 @pytest.fixture(scope="module")
 def config() -> Config:
