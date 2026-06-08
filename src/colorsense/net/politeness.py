@@ -14,12 +14,13 @@ than in the shared contracts surface.
 
 from __future__ import annotations
 
+import asyncio
 import time
-import urllib.error
-import urllib.request
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from urllib.parse import urlsplit, urlunsplit
 from urllib.robotparser import RobotFileParser
+
+import httpx
 
 from colorsense.config import Config
 from colorsense.harvest import harvest_page
@@ -37,10 +38,13 @@ DEFAULT_MIN_INTERVAL = 1.0
 # test suite) carry no host and no robots concept, so they bypass both gates.
 _NETWORK_SCHEMES = frozenset({"http", "https"})
 
-Harvester = Callable[[str, Theme, Config, Viewport], Harvest]
-RobotsLoader = Callable[[str], str | None]
+# All I/O seams are async: the harvester renders via async Playwright and the robots
+# loader fetches over async httpx. The clock stays synchronous (a plain time source);
+# only the sleeper is awaited so rate-limit waits yield the event loop.
+Harvester = Callable[[str, Theme, Config, Viewport], Awaitable[Harvest]]
+RobotsLoader = Callable[[str], Awaitable[str | None]]
 Clock = Callable[[], float]
-Sleeper = Callable[[float], None]
+Sleeper = Callable[[float], Awaitable[None]]
 
 
 class RobotsDisallowedError(RuntimeError):
@@ -59,19 +63,22 @@ def _robots_url_for(url: str) -> str | None:
     return urlunsplit((parts.scheme, parts.netloc, "/robots.txt", "", ""))
 
 
-def _default_robots_loader(robots_url: str) -> str | None:
+async def _default_robots_loader(robots_url: str) -> str | None:
     """Fetch ``robots.txt`` text over http(s); return ``None`` on any failure.
 
     A missing or unreachable ``robots.txt`` is treated by callers as "no rules", which
     permits fetching — the conventional interpretation.
     """
-    request = urllib.request.Request(robots_url, headers={"User-Agent": DEFAULT_USER_AGENT})
     try:
-        with urllib.request.urlopen(request, timeout=10) as response:
-            charset = response.headers.get_content_charset() or "utf-8"
-            text: str = response.read().decode(charset, errors="replace")
-            return text
-    except (urllib.error.URLError, ValueError, TimeoutError, OSError):
+        async with httpx.AsyncClient(
+            timeout=10.0,
+            headers={"User-Agent": DEFAULT_USER_AGENT},
+            follow_redirects=True,
+        ) as client:
+            response = await client.get(robots_url)
+            response.raise_for_status()
+            return response.text
+    except (httpx.HTTPError, ValueError):
         return None
 
 
@@ -98,8 +105,9 @@ class PolitenessPolicy:
         The render function, injectable for testing. Defaults to
         :func:`colorsense.harvest.harvest_page`.
     robots_loader / clock / sleeper:
-        Injectable seams for ``robots.txt`` retrieval, time source, and sleeping — swapped
-        out by the test suite so no real network or wall-clock delay is incurred.
+        Injectable async seams for ``robots.txt`` retrieval and sleeping, plus a sync time
+        source — swapped out by the test suite so no real network or wall-clock delay is
+        incurred.
     """
 
     def __init__(
@@ -111,7 +119,7 @@ class PolitenessPolicy:
         harvester: Harvester = harvest_page,
         robots_loader: RobotsLoader = _default_robots_loader,
         clock: Clock = time.monotonic,
-        sleeper: Sleeper = time.sleep,
+        sleeper: Sleeper = asyncio.sleep,
     ) -> None:
         self.user_agent = user_agent
         self.respect_robots = respect_robots
@@ -123,14 +131,18 @@ class PolitenessPolicy:
         self._cache: dict[tuple[str, str, int, int, float], Harvest] = {}
         self._robots_cache: dict[str, RobotFileParser | None] = {}
         self._last_fetch: dict[str, float] = {}
+        # Serializes the rate-limiter's read-wait-stamp sequence so concurrent fetches
+        # (e.g. light + dark renders gathered by analyze()) still honor min_interval
+        # instead of all racing through on a stale timestamp.
+        self._throttle_lock = asyncio.Lock()
 
     # -- robots --------------------------------------------------------------
 
-    def _robots_parser(self, robots_url: str) -> RobotFileParser | None:
+    async def _robots_parser(self, robots_url: str) -> RobotFileParser | None:
         """Load and memoize a parser for ``robots_url``; ``None`` when no rules apply."""
         if robots_url in self._robots_cache:
             return self._robots_cache[robots_url]
-        text = self._robots_loader(robots_url)
+        text = await self._robots_loader(robots_url)
         parser: RobotFileParser | None
         if text is None:
             parser = None
@@ -140,7 +152,7 @@ class PolitenessPolicy:
         self._robots_cache[robots_url] = parser
         return parser
 
-    def can_fetch(self, url: str) -> bool:
+    async def can_fetch(self, url: str) -> bool:
         """Whether ``url`` may be fetched under this policy.
 
         Non-network URLs (e.g. ``file://`` fixtures) and a disabled robots check always
@@ -151,44 +163,50 @@ class PolitenessPolicy:
         robots_url = _robots_url_for(url)
         if robots_url is None:
             return True
-        parser = self._robots_parser(robots_url)
+        parser = await self._robots_parser(robots_url)
         if parser is None:
             return True
         return parser.can_fetch(self.user_agent, url)
 
     # -- rate limiting -------------------------------------------------------
 
-    def _throttle(self, url: str) -> None:
-        """Block until ``min_interval`` has elapsed since the last fetch to this host."""
+    async def _throttle(self, url: str) -> None:
+        """Wait until ``min_interval`` has elapsed since the last fetch to this host.
+
+        The read-wait-stamp sequence is guarded by an :class:`asyncio.Lock` so concurrent
+        callers serialize correctly; the (potentially long) render then runs outside the
+        lock, so distinct fetches still overlap once spaced by ``min_interval``.
+        """
         parts = urlsplit(url)
         if parts.scheme not in _NETWORK_SCHEMES or not parts.netloc:
             return
         host = parts.netloc
-        last = self._last_fetch.get(host)
-        now = self._clock()
-        if last is not None:
-            wait = self.min_interval - (now - last)
-            if wait > 0:
-                self._sleeper(wait)
-                now = self._clock()
-        self._last_fetch[host] = now
+        async with self._throttle_lock:
+            last = self._last_fetch.get(host)
+            now = self._clock()
+            if last is not None:
+                wait = self.min_interval - (now - last)
+                if wait > 0:
+                    await self._sleeper(wait)
+                    now = self._clock()
+            self._last_fetch[host] = now
 
     # -- fetch ---------------------------------------------------------------
 
-    def fetch(self, url: str, theme: Theme, config: Config, viewport: Viewport) -> Harvest:
+    async def fetch(self, url: str, theme: Theme, config: Config, viewport: Viewport) -> Harvest:
         """Return a :class:`Harvest` for ``url``/``theme``/``viewport``, politely.
 
         Cache hits return immediately (no robots check, no throttle, no render). Otherwise
         the robots gate is enforced, the per-host rate limiter applied, and the harvester
-        invoked; the result is cached before return.
+        awaited; the result is cached before return.
         """
         key = _cache_key(url, theme, viewport)
         cached = self._cache.get(key)
         if cached is not None:
             return cached
-        if not self.can_fetch(url):
+        if not await self.can_fetch(url):
             raise RobotsDisallowedError(url)
-        self._throttle(url)
-        harvest = self._harvester(url, theme, config, viewport)
+        await self._throttle(url)
+        harvest = await self._harvester(url, theme, config, viewport)
         self._cache[key] = harvest
         return harvest

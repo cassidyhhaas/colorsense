@@ -2,7 +2,8 @@
 
 Public API
 ----------
-* :func:`analyze` — the one-call pipeline: ``from colorsense import analyze``.
+* :func:`analyze` — the one-call **async** pipeline: ``from colorsense import analyze``;
+  ``result = await analyze(url)``.
 * :class:`AnalysisResult` — the typed result it returns.
 * :class:`Config` / :func:`load_config` — load and inspect the palette config.
 * :class:`PolitenessPolicy` — opt-in fetch policy (robots, rate limit, cache); the consumer

@@ -31,8 +31,8 @@ def config() -> Config:
     return load_config(CONFIG_PATH)
 
 
-def _harvest(fixture: Path, config: Config, theme: Theme = Theme.light) -> Harvest:
-    return harvest_page(fixture.as_uri(), theme, config, VIEWPORT)
+async def _harvest(fixture: Path, config: Config, theme: Theme = Theme.light) -> Harvest:
+    return await harvest_page(fixture.as_uri(), theme, config, VIEWPORT)
 
 
 # ---------------------------------------------------------------------------
@@ -40,8 +40,8 @@ def _harvest(fixture: Path, config: Config, theme: Theme = Theme.light) -> Harve
 # ---------------------------------------------------------------------------
 
 
-def test_tokens_extracted_and_alias_graph(fixtures_dir: Path, config: Config) -> None:
-    harvest = _harvest(fixtures_dir / "tokens.html", config)
+async def test_tokens_extracted_and_alias_graph(fixtures_dir: Path, config: Config) -> None:
+    harvest = await _harvest(fixtures_dir / "tokens.html", config)
 
     by_name = {token.name: token for token in harvest.tokens}
 
@@ -72,8 +72,10 @@ def test_tokens_extracted_and_alias_graph(fixtures_dir: Path, config: Config) ->
 # ---------------------------------------------------------------------------
 
 
-def test_elements_extracted_with_colors_and_exclusions(fixtures_dir: Path, config: Config) -> None:
-    harvest = _harvest(fixtures_dir / "tokens.html", config)
+async def test_elements_extracted_with_colors_and_exclusions(
+    fixtures_dir: Path, config: Config
+) -> None:
+    harvest = await _harvest(fixtures_dir / "tokens.html", config)
 
     classes = {tuple(el.class_tokens) for el in harvest.elements}
     assert ("primary-box",) in classes
@@ -94,8 +96,8 @@ def test_elements_extracted_with_colors_and_exclusions(fixtures_dir: Path, confi
     assert all(el.visible and not el.aria_hidden for el in harvest.elements)
 
 
-def test_vendor_match_detected(fixtures_dir: Path, config: Config) -> None:
-    harvest = _harvest(fixtures_dir / "tokens.html", config)
+async def test_vendor_match_detected(fixtures_dir: Path, config: Config) -> None:
+    harvest = await _harvest(fixtures_dir / "tokens.html", config)
     intercom = next(el for el in harvest.elements if "intercom-launcher" in el.class_tokens)
     assert intercom.vendor_match is True
 
@@ -105,8 +107,8 @@ def test_vendor_match_detected(fixtures_dir: Path, config: Config) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_hover_color_change_detected(fixtures_dir: Path, config: Config) -> None:
-    harvest = _harvest(fixtures_dir / "hover.html", config)
+async def test_hover_color_change_detected(fixtures_dir: Path, config: Config) -> None:
+    harvest = await _harvest(fixtures_dir / "hover.html", config)
 
     cta = next(el for el in harvest.elements if el.id == "cta")
     assert cta.clickable is True
@@ -124,8 +126,8 @@ def test_hover_color_change_detected(fixtures_dir: Path, config: Config) -> None
 # ---------------------------------------------------------------------------
 
 
-def test_screenshot_bins_valid(fixtures_dir: Path, config: Config) -> None:
-    harvest = _harvest(fixtures_dir / "tokens.html", config)
+async def test_screenshot_bins_valid(fixtures_dir: Path, config: Config) -> None:
+    harvest = await _harvest(fixtures_dir / "tokens.html", config)
 
     assert harvest.screenshot_bins, "expected non-empty screenshot bins"
     for bin_ in harvest.screenshot_bins:
@@ -134,8 +136,8 @@ def test_screenshot_bins_valid(fixtures_dir: Path, config: Config) -> None:
     assert total <= 1.0 + 1e-6
 
 
-def test_consent_region_masked(fixtures_dir: Path, config: Config) -> None:
-    harvest = _harvest(fixtures_dir / "consent.html", config)
+async def test_consent_region_masked(fixtures_dir: Path, config: Config) -> None:
+    harvest = await _harvest(fixtures_dir / "consent.html", config)
 
     # The banner detector found the fixed full-width cookie banner.
     # The banner's unique magenta (#ff00aa) must not dominate the bins after masking.
@@ -159,11 +161,11 @@ def test_consent_region_masked(fixtures_dir: Path, config: Config) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_render_session_exposes_page_and_consent(fixtures_dir: Path) -> None:
-    with RenderSession(Theme.light, VIEWPORT) as session:
-        session.goto((fixtures_dir / "consent.html").as_uri())
+async def test_render_session_exposes_page_and_consent(fixtures_dir: Path) -> None:
+    async with RenderSession(Theme.light, VIEWPORT) as session:
+        await session.goto((fixtures_dir / "consent.html").as_uri())
         # The page is exposed for module JS.
-        title = session.page.title()
+        title = await session.page.title()
         assert title == "Consent fixture"
         # A consent banner region was detected for masking.
         assert session.consent_rects, "expected a detected consent region"

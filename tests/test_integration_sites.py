@@ -47,8 +47,8 @@ COLOR_MATCH_TOL = 0.10
 pytestmark = pytest.mark.browser
 
 
-def _analyze(fixture: Path) -> AnalysisResult:
-    return analyze(fixture.as_uri(), config_path=CONFIG_PATH)
+async def _analyze(fixture: Path) -> AnalysisResult:
+    return await analyze(fixture.as_uri(), config_path=CONFIG_PATH)
 
 
 # ---------------------------------------------------------------------------
@@ -123,8 +123,8 @@ def _assert_recommendation_safe(result: AnalysisResult) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_design_system_site(fixtures_dir: Path) -> None:
-    result = _analyze(fixtures_dir / "ds_site.html")
+async def test_design_system_site(fixtures_dir: Path) -> None:
+    result = await _analyze(fixtures_dir / "ds_site.html")
 
     # A real dark-mode block: both themes survive (no collapse).
     assert {str(t) for t in result.themes} == {"light", "dark"}
@@ -168,8 +168,8 @@ def test_design_system_site(fixtures_dir: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_legacy_site(fixtures_dir: Path) -> None:
-    result = _analyze(fixtures_dir / "legacy_site.html")
+async def test_legacy_site(fixtures_dir: Path) -> None:
+    result = await _analyze(fixtures_dir / "legacy_site.html")
 
     # No dark-mode block -> identical renders -> single theme.
     assert len(result.themes) == 1
@@ -191,8 +191,8 @@ def test_legacy_site(fixtures_dir: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_cards_site(fixtures_dir: Path) -> None:
-    result = _analyze(fixtures_dir / "cards_site.html")
+async def test_cards_site(fixtures_dir: Path) -> None:
+    result = await _analyze(fixtures_dir / "cards_site.html")
 
     assert len(result.themes) == 1
 

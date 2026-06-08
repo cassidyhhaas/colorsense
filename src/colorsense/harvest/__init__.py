@@ -2,9 +2,9 @@
 
 Public interface
 ----------------
-* :func:`harvest_page` — render a URL under a theme and produce a frozen
+* :func:`harvest_page` — async: render a URL under a theme and produce a frozen
   :class:`~colorsense.models.Harvest`.
-* :class:`RenderSession` — the Playwright sync context manager used internally (exported
+* :class:`RenderSession` — the Playwright async context manager used internally (exported
   for advanced/manual use).
 """
 
@@ -21,7 +21,7 @@ from colorsense.models import Harvest, Theme, Viewport
 __all__ = ["RenderSession", "harvest_page"]
 
 
-def harvest_page(
+async def harvest_page(
     url: str,
     theme: Theme,
     config: Config,
@@ -32,20 +32,24 @@ def harvest_page(
     Opens a single :class:`RenderSession`, navigates, then runs token, DOM, hover-state,
     screenshot, and logo harvesting against the one live page, and assembles the frozen
     :class:`~colorsense.models.Harvest` contract.
+
+    The per-page harvest steps share one live page and so run sequentially; concurrency
+    across themes/URLs is the caller's job (see :meth:`PolitenessPolicy.fetch` and
+    :func:`colorsense.analyze`, which render distinct themes concurrently).
     """
     vendor_prefixes = config.component_classifier.third_party.vendor_prefixes
 
-    with RenderSession(theme, viewport) as session:
-        session.goto(url)
+    async with RenderSession(theme, viewport) as session:
+        await session.goto(url)
         page = session.page
 
-        tokens = harvest_tokens(page)
-        elements, selectors = harvest_elements(page, vendor_prefixes)
-        elements = probe_hover_states(page, elements, selectors)
-        screenshot_bins = harvest_screenshot(
+        tokens = await harvest_tokens(page)
+        elements, selectors = await harvest_elements(page, vendor_prefixes)
+        elements = await probe_hover_states(page, elements, selectors)
+        screenshot_bins = await harvest_screenshot(
             page, session.consent_rects, viewport.device_scale_factor
         )
-        logo_colors = harvest_logo_colors(page)
+        logo_colors = await harvest_logo_colors(page)
 
     return Harvest(
         url=url,

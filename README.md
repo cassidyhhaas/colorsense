@@ -21,10 +21,14 @@ required once.
 
 ## Usage
 
+`analyze` is **async-native** (it renders with Playwright's async API and renders the
+themes concurrently), so await it from an event loop:
+
 ```python
+import asyncio
 from colorsense import analyze
 
-result = analyze("https://example.com")
+result = asyncio.run(analyze("https://example.com"))
 
 for theme, palette in result.themes.items():
     rec = palette.recommendation
@@ -33,6 +37,9 @@ for theme, palette in result.themes.items():
 print(result.fit_score)          # how well declared intent matches measured usage
 print(result.status_colors)      # success/error/warning colors, kept out of the palette
 ```
+
+Inside an async application (e.g. a FastAPI `async def` endpoint) just
+`result = await analyze(url)` directly — no threadpool hop required.
 
 `analyze` returns a fully typed [`AnalysisResult`](src/colorsense/models.py) (a Pydantic
 model — `result.model_dump_json()` round-trips). Key fields:
@@ -47,15 +54,18 @@ model — `result.model_dump_json()` round-trips). Key fields:
 ### Options
 
 ```python
+import asyncio
 from colorsense import analyze, PolitenessPolicy
 from colorsense.models import Theme, Viewport
 
-result = analyze(
-    "https://example.com",
-    config_path="config/palette_config.yaml",          # token vocab + classifier weights
-    viewport=Viewport(w=1440, h=900, device_scale_factor=2.0),
-    themes=(Theme.light,),                              # render a single theme
-    politeness=PolitenessPolicy(min_interval=2.0),     # see below
+result = asyncio.run(
+    analyze(
+        "https://example.com",
+        config_path="config/palette_config.yaml",      # token vocab + classifier weights
+        viewport=Viewport(w=1440, h=900, device_scale_factor=2.0),
+        themes=(Theme.light,),                          # render a single theme
+        politeness=PolitenessPolicy(min_interval=2.0),  # see below
+    )
 )
 ```
 

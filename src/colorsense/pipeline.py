@@ -15,6 +15,7 @@ pure given a :class:`~colorsense.models.Harvest`, so tests drive the pipeline ag
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Iterable
 from dataclasses import dataclass
 
@@ -64,7 +65,7 @@ class _ThemeOutput:
     fit_score: float
 
 
-def analyze(
+async def analyze(
     url: str,
     *,
     config_path: str = DEFAULT_CONFIG_PATH,
@@ -73,6 +74,10 @@ def analyze(
     politeness: PolitenessPolicy | None = None,
 ) -> AnalysisResult:
     """Analyze ``url`` and return a typed :class:`AnalysisResult`.
+
+    Async-native: the requested themes are rendered concurrently (each its own headless
+    Chromium), gated by ``politeness``, and the rest of the pipeline is pure CPU work.
+    Awaitable directly from an asyncio event loop (e.g. a FastAPI ``async def`` endpoint).
 
     Parameters
     ----------
@@ -104,9 +109,12 @@ def analyze(
     if not ordered_themes:
         raise ValueError("analyze() requires at least one theme")
 
-    harvests: dict[Theme, Harvest] = {
-        theme: policy.fetch(url, theme, config, viewport) for theme in ordered_themes
-    }
+    # Render every requested theme concurrently; the per-host rate limiter inside
+    # ``policy.fetch`` still spaces the underlying navigations.
+    rendered = await asyncio.gather(
+        *(policy.fetch(url, theme, config, viewport) for theme in ordered_themes)
+    )
+    harvests: dict[Theme, Harvest] = dict(zip(ordered_themes, rendered, strict=True))
 
     kept_themes = _collapse_themes(ordered_themes, harvests)
 
