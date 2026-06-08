@@ -94,9 +94,11 @@ jobs:
       - name: Coverage report + floor
         run: uv run coverage report --show-missing --fail-under=90
 
-  # Aggregate gate: a single check that passes only when build, lint, and test
-  # all succeed. Set this as the lone required status check in branch protection
-  # to avoid having to update the list whenever a job is renamed.
+  # Aggregate gate: a single check that passes only when every upstream job
+  # succeeds. Set this as the lone required status check in branch protection so
+  # the list never needs updating when jobs are renamed or added (just keep
+  # `needs` current). alls-green encodes the correct result-state logic
+  # (success/skipped/failure/cancelled) that a hand-rolled shell check gets wrong.
   ci:
     name: ci
     if: always()
@@ -104,10 +106,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Require all upstream jobs to have succeeded
-        run: |
-          echo "build:  ${{ needs.build.result }}"
-          echo "lint:   ${{ needs.lint.result }}"
-          echo "test:   ${{ needs.test.result }}"
-          [ "${{ needs.build.result }}" = "success" ] \
-            && [ "${{ needs.lint.result }}" = "success" ] \
-            && [ "${{ needs.test.result }}" = "success" ]
+        uses: re-actors/alls-green@05ac9388f0aebcb5727afa17fcccfecd6f8ec5fe # release/v1
+        with:
+          jobs: ${{ toJSON(needs) }}
