@@ -8,13 +8,21 @@ and noise-floor behavior of the quantizer.
 
 from __future__ import annotations
 
+import io
+from typing import Any
+
 import numpy as np
 import pytest
+from PIL import Image
 
 from colorsense.harvest.screenshot import (
+    _MAX_CAPTURE_HEIGHT_PX,
+    _MAX_LOGO_BYTES,
     _MIN_BIN_FRACTION,
     _quantize,
     _rgb_to_color,
+    _sample_logo,
+    harvest_screenshot,
 )
 
 
@@ -108,3 +116,109 @@ def test_quantize_area_fractions_in_unit_range() -> None:
     assert bins  # at least one bin
     for b in bins:
         assert 0.0 <= b.area_fraction <= 1.0
+
+
+def _png_bytes(width: int, height: int, rgb: tuple[int, int, int]) -> bytes:
+    buf = io.BytesIO()
+    Image.new("RGB", (width, height), rgb).save(buf, format="PNG")
+    return buf.getvalue()
+
+
+class _FakePage:
+    """Minimal async stand-in recording how ``harvest_screenshot`` captures."""
+
+    def __init__(self, doc_height: float, image: bytes) -> None:
+        self._doc_height = doc_height
+        self._image = image
+        self.screenshot_kwargs: dict[str, Any] | None = None
+
+    async def evaluate(self, _js: str, *_args: Any) -> dict[str, float]:
+        return {"width": 1000.0, "height": self._doc_height}
+
+    async def screenshot(self, **kwargs: Any) -> bytes:
+        self.screenshot_kwargs = kwargs
+        return self._image
+
+
+@pytest.mark.asyncio
+async def test_harvest_screenshot_normal_page_uses_full_page() -> None:
+    page = _FakePage(doc_height=3000.0, image=_png_bytes(40, 30, (255, 0, 0)))
+
+    bins = await harvest_screenshot(page, [], 1.0)  # type: ignore[arg-type]
+
+    assert page.screenshot_kwargs is not None
+    assert page.screenshot_kwargs.get("full_page") is True
+    assert "clip" not in page.screenshot_kwargs
+    assert [b.color.hex for b in bins] == ["#ff0000"]
+
+
+@pytest.mark.asyncio
+async def test_harvest_screenshot_oversized_page_clips_height() -> None:
+    page = _FakePage(
+        doc_height=_MAX_CAPTURE_HEIGHT_PX + 50_000.0,
+        image=_png_bytes(40, 30, (0, 0, 255)),
+    )
+
+    bins = await harvest_screenshot(page, [], 1.0)  # type: ignore[arg-type]
+
+    assert page.screenshot_kwargs is not None
+    assert page.screenshot_kwargs.get("full_page") is not True
+    clip = page.screenshot_kwargs.get("clip")
+    assert clip is not None
+    assert clip["height"] == _MAX_CAPTURE_HEIGHT_PX
+    assert clip["x"] == 0 and clip["y"] == 0
+    assert [b.color.hex for b in bins] == ["#0000ff"]
+
+
+class _FakeResponse:
+    def __init__(self, body: bytes, headers: dict[str, str] | None = None) -> None:
+        self.ok = True
+        self._body = body
+        self.headers = headers or {}
+
+    async def body(self) -> bytes:
+        return self._body
+
+
+class _FakeRequest:
+    def __init__(self, response: _FakeResponse) -> None:
+        self._response = response
+        self.timeout: float | None = None
+
+    async def get(self, _url: str, timeout: float | None = None) -> _FakeResponse:
+        self.timeout = timeout
+        return self._response
+
+
+class _LogoPage:
+    def __init__(self, response: _FakeResponse) -> None:
+        self.request = _FakeRequest(response)
+
+
+@pytest.mark.asyncio
+async def test_sample_logo_passes_timeout() -> None:
+    page = _LogoPage(_FakeResponse(_png_bytes(16, 16, (10, 200, 30))))
+
+    colors = await _sample_logo(page, "https://x/logo.png")  # type: ignore[arg-type]
+
+    assert page.request.timeout is not None
+    assert colors  # a valid logo still yields colors
+
+
+@pytest.mark.asyncio
+async def test_sample_logo_rejects_oversized_content_length() -> None:
+    page = _LogoPage(
+        _FakeResponse(
+            _png_bytes(16, 16, (10, 200, 30)),
+            headers={"content-length": str(_MAX_LOGO_BYTES + 1)},
+        )
+    )
+
+    assert await _sample_logo(page, "https://x/logo.png") == []  # type: ignore[arg-type]
+
+
+@pytest.mark.asyncio
+async def test_sample_logo_rejects_oversized_body() -> None:
+    page = _LogoPage(_FakeResponse(b"\x00" * (_MAX_LOGO_BYTES + 1)))
+
+    assert await _sample_logo(page, "https://x/logo.png") == []  # type: ignore[arg-type]

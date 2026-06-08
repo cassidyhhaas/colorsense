@@ -17,14 +17,36 @@ round-trips cleanly.
 The **internal-only** assembly models (``Harvest``, ``HarvestedElement``,
 ``ScreenshotBin``, ``ClassifiedElement``, ``ColorCluster``) remain mutable: they are
 scratch structures the pipeline mutates while building the result and never escape to the
-caller.
+caller. Along with the internal value type ``Rect`` and the ``ComponentType`` taxonomy
+(which only tags those internal models), they are deliberately excluded from ``__all__``.
+
+The **public contract** types are enumerated in ``__all__`` below and re-exported from the
+top-level :mod:`colorsense` package, which is the canonical import path for consumers.
+``colorsense.models`` is their documented home, but importing from the package root
+(``from colorsense import ...``) is preferred.
 """
 
 from __future__ import annotations
 
 from enum import StrEnum
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+__all__ = [
+    "AnalysisResult",
+    "ClassifiedToken",
+    "Color",
+    "DivergenceItem",
+    "PaletteCandidate",
+    "PaletteRole",
+    "RoleResults",
+    "RunMetadata",
+    "Theme",
+    "ThemePalette",
+    "TokenRecord",
+    "TokenSemanticRole",
+    "Viewport",
+]
 
 # ---------------------------------------------------------------------------
 # Enums
@@ -246,13 +268,25 @@ class PaletteCandidate(BaseModel):
 class RoleResults(BaseModel):
     """Per-role ranked candidate lists.
 
-    ``mapping`` always contains every :class:`PaletteRole`; a role with no detected
-    candidates maps to an empty tuple.
+    ``mapping`` is guaranteed to contain every :class:`PaletteRole`; a role with no
+    detected candidates maps to an empty tuple. This invariant is enforced by an
+    after-validator that backfills any missing roles, so even ``RoleResults()`` and the
+    empty-input path expose all five keys.
     """
 
     model_config = ConfigDict(frozen=True)
 
     mapping: dict[PaletteRole, tuple[PaletteCandidate, ...]] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def _backfill_roles(self) -> RoleResults:
+        """Ensure every :class:`PaletteRole` is present, mapping to ``()`` when absent."""
+        # ``frozen=True`` blocks reassigning ``mapping`` itself, but the dict it points to
+        # is a regular (non-deep-frozen) dict, so in-place backfill is sound.
+        for role in PaletteRole:
+            if role not in self.mapping:
+                self.mapping[role] = ()
+        return self
 
 
 class DivergenceItem(BaseModel):

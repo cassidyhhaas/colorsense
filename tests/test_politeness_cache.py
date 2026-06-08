@@ -184,6 +184,130 @@ async def test_robots_disallow_propagates_and_is_not_cached(config: Config) -> N
     assert not policy._inflight
 
 
+class _Clock:
+    """Synchronous fake time source; advanced manually or by the fake sleeper."""
+
+    def __init__(self, start: float = 1000.0) -> None:
+        self.t = start
+
+    def __call__(self) -> float:
+        return self.t
+
+
+class _ImmediateHarvester:
+    """Harvester that returns at once, recording each URL it was asked to render."""
+
+    def __init__(self) -> None:
+        self.urls: list[str] = []
+
+    async def __call__(self, url: str, theme: Theme, config: Config, viewport: Viewport) -> Harvest:
+        self.urls.append(url)
+        return Harvest(url=url, theme=theme, viewport=viewport, screenshot_bins=[])
+
+
+async def test_robots_fetch_is_throttled_without_double_waiting(config: Config) -> None:
+    # FIX 2: the robots.txt GET is the first request to a host and must respect the per-host
+    # limiter. FIX (no double-wait): the robots GET and the page nav of the SAME fetch are one
+    # logical visit, so the first fetch to a fresh host sleeps zero — not a full interval.
+    robots_urls: list[str] = []
+
+    async def recording_robots(url: str) -> str | None:
+        robots_urls.append(url)
+        return None  # fail-open: no rules => permitted
+
+    clock = _Clock()
+    slept: list[float] = []
+
+    async def sleeper(seconds: float) -> None:
+        slept.append(seconds)
+        clock.t += seconds
+
+    harvester = _ImmediateHarvester()
+    policy = PolitenessPolicy(
+        harvester=harvester,
+        robots_loader=recording_robots,
+        min_interval=2.0,
+        clock=clock,
+        sleeper=sleeper,
+    )
+
+    await policy.fetch("https://host.test/a", Theme.light, config, VIEWPORT)
+    # First contact: robots GET + page nav share one reservation, so no sleep at all.
+    assert robots_urls == ["https://host.test/robots.txt"]
+    assert slept == []
+
+    clock.t += 0.5  # only 0.5s passes before the next same-host fetch
+    await policy.fetch("https://host.test/b", Theme.light, config, VIEWPORT)
+    # robots.txt is cached per host, so the second fetch makes no second robots GET; the page
+    # nav waits the remaining 1.5s of the interval — proof the host slot was reserved.
+    assert robots_urls == ["https://host.test/robots.txt"]
+    assert slept == [pytest.approx(1.5)]
+
+
+async def test_different_hosts_do_not_serialize(config: Config) -> None:
+    # FIX 1: a rate-limit wait for one host must not block a fetch to a DIFFERENT host. With
+    # the old global throttle lock, host B's fetch would queue behind host A's sleep.
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    async def blocking_sleeper(_seconds: float) -> None:
+        # Simulate host A being mid-wait: signal we started, then block until released.
+        started.set()
+        await release.wait()
+
+    clock = _Clock()
+    harvester = _ImmediateHarvester()
+    policy = PolitenessPolicy(
+        harvester=harvester,
+        robots_loader=_no_robots,
+        min_interval=5.0,
+        clock=clock,
+        sleeper=blocking_sleeper,
+    )
+
+    # Prime host A so its next fetch must wait, then launch that waiting fetch.
+    await policy.fetch("https://a.test/1", Theme.light, config, VIEWPORT)
+    a_again = asyncio.ensure_future(policy.fetch("https://a.test/2", Theme.light, config, VIEWPORT))
+    await started.wait()  # host A is now parked inside the sleeper
+
+    # Host B (never fetched) must complete WITHOUT waiting on host A's lock/sleep.
+    b = await asyncio.wait_for(
+        policy.fetch("https://b.test/1", Theme.light, config, VIEWPORT), timeout=1.0
+    )
+    assert b.url == "https://b.test/1"
+
+    release.set()
+    await a_again
+
+
+async def test_concurrent_same_host_distinct_keys_chain(config: Config) -> None:
+    # Same-host pacing must still hold across DISTINCT keys fetched concurrently: two callers
+    # arriving together each reserve their own slot, so the second waits min_interval.
+    clock = _Clock()
+    slept: list[float] = []
+
+    async def sleeper(seconds: float) -> None:
+        slept.append(seconds)
+        clock.t += seconds
+
+    harvester = _ImmediateHarvester()
+    policy = PolitenessPolicy(
+        harvester=harvester,
+        robots_loader=_no_robots,
+        min_interval=3.0,
+        clock=clock,
+        sleeper=sleeper,
+    )
+
+    # Different themes => distinct cache keys => not coalesced; both throttle the same host.
+    await asyncio.gather(
+        policy.fetch("https://host.test/p", Theme.light, config, VIEWPORT),
+        policy.fetch("https://host.test/p", Theme.dark, config, VIEWPORT),
+    )
+    # First caller: no wait. Second caller: chains a full interval after the first's slot.
+    assert slept == [pytest.approx(3.0)]
+
+
 async def test_completed_coalesced_render_served_from_cache(config: Config) -> None:
     # After a coalesced render completes, a later fetch of the same key is a cache hit:
     # no new harvester call, and the in-flight map is empty.

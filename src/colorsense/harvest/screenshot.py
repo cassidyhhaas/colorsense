@@ -44,6 +44,49 @@ _MIN_BIN_FRACTION: float = 0.005
 # Max distinct logo colors to keep.
 _MAX_LOGO_COLORS: int = 5
 
+# Cap the full-page capture height (CSS pixels). A page is decoded into a
+# (height x width x 3) uint8 array PLUS a (height x width) bool keep-mask before any
+# downscaling, and themes render concurrently, so an attacker-controlled tall page (e.g.
+# 100,000px) could force hundreds of MB-GBs of RAM. 20,000px is far above any genuine page
+# (real captures are a few thousand px) yet bounds a single channel to ~20k x ~2k = ~40M px.
+# Pages at or under this cap are captured ``full_page=True`` exactly as before; taller pages
+# fall back to a top-anchored clip of this height so the harvest still succeeds, bounded.
+_MAX_CAPTURE_HEIGHT_PX: int = 20_000
+
+# Decompression-bomb guard for decoding fetched/captured images. Sized to admit the bounded
+# full-page capture (~40M px above, ~2x device-scale headroom) while rejecting tiny-file,
+# huge-dimension bombs (e.g. a malicious favicon) before they allocate. Applied process-wide
+# via ``Image.MAX_IMAGE_PIXELS`` so decoding such an image raises rather than silently
+# allocating gigabytes; the callers treat the raise as a best-effort failure.
+_MAX_IMAGE_PIXELS: int = 90_000_000
+Image.MAX_IMAGE_PIXELS = _MAX_IMAGE_PIXELS
+
+# Cap the bytes read from a page-controlled logo/favicon body, and the request timeout. A
+# logo is downscaled to 64x64, so a few MB is already generous; this bounds memory against a
+# huge body regardless of any (spoofable) Content-Length header.
+_MAX_LOGO_BYTES: int = 5 * 1024 * 1024
+_LOGO_REQUEST_TIMEOUT_MS: float = 10_000.0
+
+# JS reporting the full document dimensions (CSS pixels) so an oversized capture can be
+# clipped to a bounded height instead of decoding the whole page.
+_DOCUMENT_SIZE_JS: str = r"""
+() => {
+    const d = document.documentElement;
+    const b = document.body;
+    return {
+        width: Math.max(d ? d.scrollWidth : 0, b ? b.scrollWidth : 0, window.innerWidth),
+        height: Math.max(d ? d.scrollHeight : 0, b ? b.scrollHeight : 0, window.innerHeight),
+    };
+}
+"""
+
+
+class _DocumentSize(TypedDict):
+    """Full document dimensions in CSS pixels."""
+
+    width: float
+    height: float
+
 
 class _LogoSource(TypedDict):
     """A candidate logo image: its resolved URL."""
@@ -66,9 +109,25 @@ async def harvest_screenshot(
     ``consent_rects`` are CSS-pixel rects (from :class:`RenderSession`); they are scaled by
     ``device_scale_factor`` and zeroed out of the raw screenshot before quantizing.
     """
-    raw_bytes = await page.screenshot(
-        full_page=True, type=_SCREENSHOT_TYPE, quality=_SCREENSHOT_QUALITY
-    )
+    # Bound capture height: a pathologically tall (e.g. attacker-controlled) page would decode
+    # into a huge array + keep-mask before any downscaling. Pages at/under the cap are captured
+    # full-page exactly as before; taller pages fall back to a top-anchored clip.
+    size = cast(_DocumentSize, await page.evaluate(_DOCUMENT_SIZE_JS))
+    if size["height"] > _MAX_CAPTURE_HEIGHT_PX:
+        raw_bytes = await page.screenshot(
+            type=_SCREENSHOT_TYPE,
+            quality=_SCREENSHOT_QUALITY,
+            clip={
+                "x": 0,
+                "y": 0,
+                "width": size["width"],
+                "height": _MAX_CAPTURE_HEIGHT_PX,
+            },
+        )
+    else:
+        raw_bytes = await page.screenshot(
+            full_page=True, type=_SCREENSHOT_TYPE, quality=_SCREENSHOT_QUALITY
+        )
     image = Image.open(io.BytesIO(raw_bytes)).convert("RGB")
     array = np.asarray(image, dtype=np.uint8).copy()
 
@@ -194,12 +253,20 @@ async def harvest_logo_colors(page: Page) -> list[Color]:
 async def _sample_logo(page: Page, url: str) -> list[Color]:
     """Fetch and quantize a single logo image URL into dominant colors."""
     try:
-        response = await page.request.get(url)
+        response = await page.request.get(url, timeout=_LOGO_REQUEST_TIMEOUT_MS)
         if not response.ok:
             return []
+        # Reject an oversized body up front via the (spoofable) Content-Length header...
+        content_length = response.headers.get("content-length")
+        if content_length is not None and int(content_length) > _MAX_LOGO_BYTES:
+            return []
         data = await response.body()
+        # ...and again on the actual bytes, since the header may lie or be absent.
+        if len(data) > _MAX_LOGO_BYTES:
+            return []
+        # ``Image.MAX_IMAGE_PIXELS`` makes a tiny-file/huge-dimension bomb raise here.
         image = Image.open(io.BytesIO(data)).convert("RGBA")
-    except Exception:  # fetch/decode best-effort
+    except Exception:  # fetch/decode best-effort (incl. timeout, bad header, decomp bomb)
         return []
 
     image.thumbnail((64, 64), Image.Resampling.NEAREST)

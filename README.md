@@ -29,59 +29,74 @@ uv sync
 uv run playwright install chromium
 ```
 
-## Usage
+## Quickstart
 
 `analyze` is **async-native** (it renders with Playwright's async API and renders the
-themes concurrently), so await it from an event loop:
+themes concurrently), so await it from an event loop. The result's `themes` map each color
+scheme to its **60/30/10 palette** — five roles, each with ranked, scored candidate colors:
 
 ```python
 import asyncio
-from colorsense import analyze
-from colorsense.models import PaletteRole
+from colorsense import analyze, PaletteRole
 
 result = asyncio.run(analyze("https://example.com"))
 
 for theme, palette in result.themes.items():
-    roles = palette.roles                            # 60/30/10 palette roles + candidates
-    cands = roles.mapping[PaletteRole.primary]       # always present; [] if none detected
-    if cands:
-        primary = cands[0]                           # top candidate for the primary role
+    # mapping always contains every role; () when none was detected
+    candidates = palette.roles.mapping[PaletteRole.primary]
+    if candidates:
+        primary = candidates[0]               # top candidate for the role
         print(theme, primary.color.hex, primary.probability)
-
-print(result.fit_score)          # how well declared intent matches measured usage
-print(result.status_colors)      # success/error/warning colors, kept out of the palette
 ```
+
+Each role — `primary`, `secondary`, `accent`, `neutral_light`, `neutral_dark` — maps to a
+probability-ranked tuple of candidates. Take `[0]` for the best pick.
 
 Inside an async application (e.g. a FastAPI `async def` endpoint) just
 `result = await analyze(url)` directly — no threadpool hop required.
 
-`analyze` returns a fully typed [`AnalysisResult`](src/colorsense/models.py) (a Pydantic
-model — `result.model_dump_json()` round-trips). Key fields:
+## The result
 
-- `themes` — per-theme reconciled palette `roles` (each role with ranked, scored color
-  candidates). Sites that ignore `prefers-color-scheme` (near-identical light/dark renders)
-  collapse to a single theme.
-- `tokens` — declared design tokens with their inferred semantic roles.
-- `divergence` — declared-but-unused and used-but-undeclared discrepancies.
-- `third_party_colors` / `status_colors` — colors deliberately excluded from the palette.
-- `fit_score` — agreement between declared intent and measured usage, in `[0, 1]`.
-- `metadata` — a typed [`RunMetadata`](src/colorsense/models.py): themes requested vs.
-  analyzed, whether the run collapsed to a single theme, and the fetch policy in effect.
+`analyze` returns a fully typed `AnalysisResult` (a Pydantic model —
+`result.model_dump_json()` round-trips). The fields most consumers use:
 
-### Options
+**`themes`** — the payload: each `Theme` mapped to its reconciled palette `roles`. You walk
+`palette.roles.mapping[role]` to a tuple of candidates, where each candidate carries:
+
+- `color` — a `Color`: an sRGB `hex` string plus cached **OKLCH** coordinates (`lightness`,
+  `chroma`, `hue`) of the composited color, and the source `alpha`. `hex` is what you paint
+  with; the OKLCH coordinates make it easy to derive your own theme-matched colors — sort by
+  perceptual lightness, build accessible tints/shades, or compute contrast — without
+  re-parsing the hex.
+- `probability` — confidence this color fills the role (candidates within a role rank by it).
+- `area` — the fraction of page area the color covers, i.e. its 60/30/10 dominance.
+
+Sites that ignore `prefers-color-scheme` (near-identical light/dark renders) collapse to a
+single reported theme.
+
+**`fit_score`** — how well the measured palette matches the canonical 60/30/10 split, in
+`[0, 1]`. A quick quality signal for the analysis as a whole.
+
+**`status_colors`** — success/error/warning colors detected and deliberately **kept out** of
+the palette, so a red error banner doesn't masquerade as a brand accent.
+
+**`metadata`** — a typed `RunMetadata`: which themes were requested versus actually analyzed,
+whether the run collapsed to a single theme, and the fetch policy in effect. Useful for
+logging and for detecting the single-theme collapse.
+
+## Options
 
 ```python
 import asyncio
-from colorsense import analyze, LIGHT_AND_DARK, PolitenessPolicy
-from colorsense.models import Viewport
+from colorsense import analyze, LIGHT_AND_DARK, PolitenessPolicy, Viewport
 
 result = asyncio.run(
     analyze(
         "https://example.com",
-        config_path="my_palette_config.yaml",          # override the bundled token vocab + weights
         viewport=Viewport(width=1440, height=900, device_scale_factor=2.0),
         themes=LIGHT_AND_DARK,                          # opt in to dark mode; default is light only
-        politeness=PolitenessPolicy(min_interval=2.0),  # see below
+        politeness=PolitenessPolicy(min_interval=2.0),  # see "Fetching responsibly" below
+        config_path="my_palette_config.yaml",           # advanced; see "Custom tuning" below
     )
 )
 ```
@@ -89,9 +104,10 @@ result = asyncio.run(
 By default `analyze` renders **light mode only** — most sites have no dark mode, and a
 second theme roughly doubles the render cost. Pass `themes=LIGHT_AND_DARK` (equivalently
 `themes=(Theme.light, Theme.dark)`) to also analyze dark mode; near-identical light/dark
-renders are collapsed back to a single reported theme.
+renders are collapsed back to a single reported theme. A custom `viewport` captures a
+different layout (e.g. mobile), which can yield a different palette.
 
-## Deployment: embedded vs server-side, and authorization
+## Fetching responsibly: politeness, authorization & security
 
 colorsense fetches and renders a third-party page. **Authorization is the consumer's
 responsibility** — the library provides *mechanism, not policy*. `PolitenessPolicy`
@@ -135,19 +151,30 @@ you accept user-supplied URLs, validate the scheme and host **before** calling `
 allowlist public hosts, and reject `file://` and private / link-local IP ranges. As above,
 this is the consumer's responsibility — the library provides mechanism, not policy.
 
-## Configuration
+## Advanced
 
-[`palette_config.yaml`](src/colorsense/data/palette_config.yaml) **ships bundled with
-the package** and is loaded automatically. It is the single source of truth for the **token
+### Design-token auditing
+
+Beyond the palette, `analyze` reports what the site's CSS **declares** versus what it
+actually **renders** — useful for auditing a design system you own:
+
+- **`tokens`** — the declared design tokens (CSS custom properties) with their inferred
+  semantic roles (e.g. `--accent-500` read as `brand_accent`), for the primary theme.
+- **`divergence`** — discrepancies between intent and usage: brand colors **declared but
+  unused** in the render, and prominent rendered colors that are **used but undeclared**.
+
+```python
+for item in result.divergence:
+    print(item.note, item.color.hex)     # e.g. "declared '--brand' unused in render"
+```
+
+### Custom tuning
+
+[`palette_config.yaml`](src/colorsense/data/palette_config.yaml) **ships bundled with the
+package** and is loaded automatically. It is the single source of truth for the **token
 vocabulary** (CSS custom-property names → semantic roles → 60/30/10 palette-role priors) and
 the **component-classifier** weights (how rendered elements are scored into headers, cards,
 CTAs, …). The weights are calibrated starting points, not ground truth.
-
-Not everything is in the YAML, though: the usage-side role-scoring weights and the
-component→palette-role affinity map are documented module-level constants in
-[`palette/roles.py`](src/colorsense/palette/roles.py) (e.g. `W_AREA`, `W_NEUTRAL`,
-`SOFTMAX_T`, `TARGET_SPLIT`, `COMPONENT_AFFINITY`) — `assign_roles` takes no `Config`, so
-those are tuned in code, not via `config_path=`.
 
 To tune them, copy the bundled file, edit your copy, and pass its path as `config_path=` to
 `analyze` (or load it with `load_config`). To inspect the defaults programmatically:
@@ -157,6 +184,11 @@ from colorsense import load_default_config
 
 config = load_default_config()
 ```
+
+`config_path=` tunes the token vocabulary and the component classifier. The usage-side
+role-scoring weights are documented in-code constants in
+[`palette/roles.py`](src/colorsense/palette/roles.py) (e.g. `W_AREA`, `SOFTMAX_T`,
+`TARGET_SPLIT`), not part of the YAML.
 
 ## Development
 

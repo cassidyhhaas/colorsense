@@ -174,9 +174,11 @@ class PolitenessPolicy:
         # consumer fetches (tiny in practice), not by request volume.
         self._robots_cache: dict[str, RobotFileParser | None] = {}
         self._last_fetch: dict[str, float] = {}
-        # Serializes the rate-limiter's read-wait-stamp sequence so concurrent fetches
-        # (e.g. light + dark renders gathered by analyze()) still honor min_interval
-        # instead of all racing through on a stale timestamp.
+        # Serializes only the rate-limiter's read-and-stamp step (not the sleep), so
+        # concurrent fetches (e.g. light + dark renders gathered by analyze()) reserve
+        # distinct same-host slots and honor min_interval instead of racing through on a
+        # stale timestamp. The sleep runs outside the lock, so waits for *different* hosts
+        # never serialize through this one mutex.
         self._throttle_lock = asyncio.Lock()
 
     # -- robots --------------------------------------------------------------
@@ -219,9 +221,12 @@ class PolitenessPolicy:
     async def _throttle(self, url: str) -> None:
         """Wait until ``min_interval`` has elapsed since the last fetch to this host.
 
-        The read-wait-stamp sequence is guarded by an :class:`asyncio.Lock` so concurrent
-        callers serialize correctly; the (potentially long) render then runs outside the
-        lock, so distinct fetches still overlap once spaced by ``min_interval``.
+        The read-and-stamp step is guarded by an :class:`asyncio.Lock` so concurrent callers
+        serialize correctly, but the actual sleep happens *outside* the lock: we reserve this
+        caller's slot by stamping the projected next-fetch time (``last + min_interval``)
+        before releasing, so two same-host callers arriving together chain (each waits
+        ``min_interval`` after the previous) instead of both computing a zero wait — yet
+        waits for *different* hosts no longer serialize through one global mutex.
         """
         parts = urlsplit(url)
         if parts.scheme not in _NETWORK_SCHEMES or not parts.netloc:
@@ -230,12 +235,14 @@ class PolitenessPolicy:
         async with self._throttle_lock:
             last = self._last_fetch.get(host)
             now = self._clock()
-            if last is not None:
-                wait = self.min_interval - (now - last)
-                if wait > 0:
-                    await self._sleeper(wait)
-                    now = self._clock()
-            self._last_fetch[host] = now
+            # Projected fetch time: ``now`` if the interval has already elapsed, else the
+            # next free slot after the previous (reserved) fetch. Stamping it under the lock
+            # is what makes concurrent same-host callers chain rather than collide.
+            projected = now if last is None else max(now, last + self.min_interval)
+            self._last_fetch[host] = projected
+        wait = projected - now
+        if wait > 0:
+            await self._sleeper(wait)
 
     # -- fetch ---------------------------------------------------------------
 
@@ -243,12 +250,13 @@ class PolitenessPolicy:
         """Return a :class:`Harvest` for ``url``/``theme``/``viewport``, politely.
 
         Cache hits return immediately (no robots check, no throttle, no render) and mark the
-        entry most-recently-used. Otherwise the robots gate is enforced, the per-host rate
-        limiter applied, and the harvester awaited; the result is cached (LRU-evicting the
-        least-recently-used entry if the cache is bounded and now full) before return.
+        entry most-recently-used. Otherwise the per-host rate limiter is applied, the robots
+        gate is enforced (its ``robots.txt`` GET is the first throttled request to the host),
+        and the harvester awaited; the result is cached (LRU-evicting the least-recently-used
+        entry if the cache is bounded and now full) before return.
 
         Concurrent misses for the *same* key are coalesced (single-flight): the first caller
-        becomes the leader and runs exactly one robots gate → throttle → render; any caller
+        becomes the leader and runs exactly one throttle → robots gate → render; any caller
         that arrives while that render is in flight becomes a follower, awaiting the leader's
         result instead of launching a redundant headless render. All followers receive the
         leader's :class:`Harvest` — or, if the leader's gate/render fails, the *same*
@@ -274,9 +282,16 @@ class PolitenessPolicy:
         future: asyncio.Future[Harvest] = loop.create_future()
         self._inflight[key] = future
         try:
+            # Throttle BEFORE the robots gate: the robots.txt GET inside ``can_fetch`` is
+            # itself the first network request to this host, so it must respect the per-host
+            # limiter too (otherwise the very first request to a host is un-throttled). One
+            # reservation covers both the robots GET and the page nav that follow — they are
+            # a single logical visit, so we deliberately do not pace them a full interval
+            # apart. ``can_fetch`` fails OPEN (timeout/404/error => allow), so a throttled
+            # robots fetch never turns a transient error into a block.
+            await self._throttle(url)
             if not await self.can_fetch(url):
                 raise RobotsDisallowedError(url)
-            await self._throttle(url)
             harvest = await self._harvester(url, theme, config, viewport)
         except BaseException as err:  # re-raised after fanning out to followers
             # Fan the failure out to every waiting follower, then re-raise to the leader.
