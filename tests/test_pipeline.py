@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from colorsense import analyze
+from colorsense import LIGHT_AND_DARK, analyze
 from colorsense.config import Config, load_config
 from colorsense.models import (
     AnalysisResult,
@@ -166,8 +166,8 @@ async def _analyze_fixture(name: str, fixtures_dir: Path, **kwargs: object) -> A
 @pytest.mark.browser
 async def test_end_to_end_light_and_dark(fixtures_dir: Path) -> None:
     # tokens.html has a `prefers-color-scheme: dark` block, so the two renders differ
-    # and both themes survive collapse.
-    result = await _analyze_fixture("tokens.html", fixtures_dir)
+    # and both themes survive collapse. Dark is opt-in, so request it explicitly.
+    result = await _analyze_fixture("tokens.html", fixtures_dir, themes=LIGHT_AND_DARK)
 
     assert isinstance(result, AnalysisResult)
     assert set(result.themes) == {Theme.light, Theme.dark}
@@ -194,14 +194,26 @@ async def test_end_to_end_light_and_dark(fixtures_dir: Path) -> None:
 
 @pytest.mark.browser
 async def test_single_theme_site_collapses(fixtures_dir: Path) -> None:
-    # hover.html has no dark-mode block: light and dark renders are identical, so the
-    # pipeline collapses to one theme.
-    result = await _analyze_fixture("hover.html", fixtures_dir)
+    # hover.html has no dark-mode block: when both themes are requested, the light and dark
+    # renders are identical, so the pipeline collapses to one theme.
+    result = await _analyze_fixture("hover.html", fixtures_dir, themes=LIGHT_AND_DARK)
 
     assert len(result.themes) == 1
     assert result.metadata["single_theme"] == "true"
     assert result.metadata["themes_requested"] == "light,dark"
     assert result.metadata["themes_analyzed"] == "light"
+
+
+@pytest.mark.browser
+async def test_default_is_light_only(fixtures_dir: Path) -> None:
+    # The default flow renders light only — even on a site with a dark-mode block, dark is
+    # not analyzed unless explicitly requested.
+    result = await _analyze_fixture("tokens.html", fixtures_dir)
+
+    assert set(result.themes) == {Theme.light}
+    assert result.metadata["themes_requested"] == "light"
+    assert result.metadata["themes_analyzed"] == "light"
+    assert result.metadata["single_theme"] == "true"
 
 
 @pytest.mark.browser

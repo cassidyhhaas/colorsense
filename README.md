@@ -55,19 +55,24 @@ model — `result.model_dump_json()` round-trips). Key fields:
 
 ```python
 import asyncio
-from colorsense import analyze, PolitenessPolicy
-from colorsense.models import Theme, Viewport
+from colorsense import analyze, LIGHT_AND_DARK, PolitenessPolicy
+from colorsense.models import Viewport
 
 result = asyncio.run(
     analyze(
         "https://example.com",
         config_path="config/palette_config.yaml",      # token vocab + classifier weights
         viewport=Viewport(w=1440, h=900, device_scale_factor=2.0),
-        themes=(Theme.light,),                          # render a single theme
+        themes=LIGHT_AND_DARK,                          # opt in to dark mode; default is light only
         politeness=PolitenessPolicy(min_interval=2.0),  # see below
     )
 )
 ```
+
+By default `analyze` renders **light mode only** — most sites have no dark mode, and a
+second theme roughly doubles the render cost. Pass `themes=LIGHT_AND_DARK` (equivalently
+`themes=(Theme.light, Theme.dark)`) to also analyze dark mode; near-identical light/dark
+renders are collapsed back to a single reported theme.
 
 ## Deployment: embedded vs server-side, and authorization
 

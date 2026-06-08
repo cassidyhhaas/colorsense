@@ -8,6 +8,8 @@ Public API
 * :class:`Config` / :func:`load_config` — load and inspect the palette config.
 * :class:`PolitenessPolicy` — opt-in fetch policy (robots, rate limit, cache); the consumer
   owns authorization.
+* :data:`LIGHT_AND_DARK` — pass as ``themes=`` to opt into dark-mode analysis (the default
+  is light only).
 """
 
 from __future__ import annotations
@@ -15,9 +17,10 @@ from __future__ import annotations
 from colorsense.config import Config, load_config
 from colorsense.models import AnalysisResult
 from colorsense.net.politeness import PolitenessPolicy, RobotsDisallowedError
-from colorsense.pipeline import analyze
+from colorsense.pipeline import LIGHT_AND_DARK, analyze
 
 __all__ = [
+    "LIGHT_AND_DARK",
     "AnalysisResult",
     "Config",
     "PolitenessPolicy",

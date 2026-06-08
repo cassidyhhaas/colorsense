@@ -44,7 +44,12 @@ from colorsense.recommend import recommend
 
 DEFAULT_CONFIG_PATH = "config/palette_config.yaml"
 DEFAULT_VIEWPORT = Viewport(w=1280, h=800, device_scale_factor=1.0)
-DEFAULT_THEMES: tuple[Theme, ...] = (Theme.light, Theme.dark)
+
+# Light only by default: most sites ship no dark mode, and a second theme roughly doubles
+# render cost (a whole extra headless render). A consumer analyzing their own (or a client's)
+# site knows whether dark mode exists, so dark is opt-in via ``themes=LIGHT_AND_DARK``.
+DEFAULT_THEMES: tuple[Theme, ...] = (Theme.light,)
+LIGHT_AND_DARK: tuple[Theme, ...] = (Theme.light, Theme.dark)
 
 # Two renders are "the same site" when every dominant screenshot bin in one has a close
 # perceptual match in the other. A genuine dark mode flips the large-area background bin,
@@ -91,7 +96,11 @@ async def analyze(
         Render viewport; defaults to 1280x800 at 1x scale.
     themes:
         Themes to render, in priority order (the first is "primary" and supplies the
-        top-level token/divergence/fit-score fields). Duplicates are ignored.
+        top-level token/divergence/fit-score fields). Duplicates are ignored. Defaults to
+        **light only** — most sites have no dark mode and a second theme roughly doubles the
+        work. Pass ``themes=(Theme.light, Theme.dark)`` (or the exported
+        :data:`LIGHT_AND_DARK`) to also analyze dark mode; near-identical renders still
+        collapse to a single reported theme.
     politeness:
         Fetch policy (robots gate, rate limit, render cache). A conservative default
         :class:`PolitenessPolicy` is created when omitted. The **consumer** is responsible
@@ -248,4 +257,4 @@ def _build_metadata(
 
 # ``RoleResults`` is re-exported for callers that build/inspect palettes without importing
 # from ``models`` directly.
-__all__ = ["DEFAULT_VIEWPORT", "RoleResults", "analyze"]
+__all__ = ["DEFAULT_THEMES", "DEFAULT_VIEWPORT", "LIGHT_AND_DARK", "RoleResults", "analyze"]

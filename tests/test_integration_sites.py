@@ -23,7 +23,7 @@ from typing import Any
 
 import pytest
 
-from colorsense import analyze
+from colorsense import LIGHT_AND_DARK, analyze
 from colorsense.color.primitives import delta_e, parse_css_color
 from colorsense.models import (
     AnalysisResult,
@@ -48,7 +48,9 @@ pytestmark = pytest.mark.browser
 
 
 async def _analyze(fixture: Path) -> AnalysisResult:
-    return await analyze(fixture.as_uri(), config_path=CONFIG_PATH)
+    # These fixtures exercise the full light+dark path (ds_site has a real dark-mode block;
+    # the goldens pin both themes), so request dark explicitly — analyze defaults to light.
+    return await analyze(fixture.as_uri(), config_path=CONFIG_PATH, themes=LIGHT_AND_DARK)
 
 
 # ---------------------------------------------------------------------------

@@ -10,6 +10,8 @@ Public interface
 
 from __future__ import annotations
 
+import asyncio
+
 from colorsense.config import Config
 from colorsense.harvest.dom import harvest_elements
 from colorsense.harvest.render import RenderSession
@@ -33,9 +35,13 @@ async def harvest_page(
     screenshot, and logo harvesting against the one live page, and assembles the frozen
     :class:`~colorsense.models.Harvest` contract.
 
-    The per-page harvest steps share one live page and so run sequentially; concurrency
-    across themes/URLs is the caller's job (see :meth:`PolitenessPolicy.fetch` and
-    :func:`colorsense.analyze`, which render distinct themes concurrently).
+    The steps share one live page but overlap where it is safe to: token and DOM reads run
+    together (both are read-only DOM queries), and the screenshot and logo fetch run
+    together (the logo is a network fetch independent of rendering). Hover probing runs on
+    its own — it forces ``:hover`` pseudo-state per element, which would otherwise leak into
+    a concurrent screenshot. Concurrency *across* themes/URLs is the caller's job (see
+    :meth:`PolitenessPolicy.fetch` and :func:`colorsense.analyze`, which render distinct
+    themes concurrently).
     """
     vendor_prefixes = config.component_classifier.third_party.vendor_prefixes
 
@@ -43,13 +49,16 @@ async def harvest_page(
         await session.goto(url)
         page = session.page
 
-        tokens = await harvest_tokens(page)
-        elements, selectors = await harvest_elements(page, vendor_prefixes)
-        elements = await probe_hover_states(page, elements, selectors)
-        screenshot_bins = await harvest_screenshot(
-            page, session.consent_rects, viewport.device_scale_factor
+        tokens, (elements, selectors) = await asyncio.gather(
+            harvest_tokens(page),
+            harvest_elements(page, vendor_prefixes),
         )
-        logo_colors = await harvest_logo_colors(page)
+        # Isolated: forces :hover per element, which would pollute a concurrent screenshot.
+        elements = await probe_hover_states(page, elements, selectors)
+        screenshot_bins, logo_colors = await asyncio.gather(
+            harvest_screenshot(page, session.consent_rects, viewport.device_scale_factor),
+            harvest_logo_colors(page),
+        )
 
     return Harvest(
         url=url,

@@ -41,7 +41,12 @@ _DISABLE_MOTION_CSS: str = "* { transition: none !important; animation: none !im
 _MAX_SCROLL_STEPS: int = 20
 
 # Timeout (ms) guarding wait_for_load_state("networkidle") on pages that never idle.
-_NETWORKIDLE_TIMEOUT_MS: float = 3000.0
+# Kept short on purpose: ``goto(wait_until="load")`` has already fired the load event (all
+# synchronous resources fetched), so this only waits out async/lazy chatter (analytics,
+# below-fold images). Measured against real sites (stripe/github/bootstrap), dropping this
+# from 3s to 1s left the harvested palette, tokens, and hover hits unchanged while saving
+# ~1.5s/render; the subsequent step-scroll still triggers genuinely lazy content.
+_NETWORKIDLE_TIMEOUT_MS: float = 1000.0
 
 # JS that step-scrolls the full document height and returns the iteration count.
 _STEP_SCROLL_JS: str = """
