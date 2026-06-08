@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import pytest
+from pydantic import ValidationError
+
 from colorsense.models import (
     AnalysisResult,
     ClassifiedToken,
@@ -87,13 +90,22 @@ def _dummy_result() -> AnalysisResult:
 
 
 def test_value_objects_are_frozen() -> None:
-    c = _color()
-    try:
-        c.lightness = 0.9  # type: ignore[misc]
-    except Exception:  # frozen models raise ValidationError on mutation
-        pass
-    else:
-        raise AssertionError("Color should be immutable (frozen)")
+    # Each value object is frozen: assigning to a field must raise pydantic's ValidationError
+    # (specifically a frozen-instance error), not merely "something raised".
+    color = _color()
+    with pytest.raises(ValidationError):
+        color.lightness = 0.9  # type: ignore[misc]
+    assert color.lightness == 0.5  # value unchanged
+
+    rect = Rect(x=1.0, y=2.0, width=3.0, height=4.0)
+    with pytest.raises(ValidationError):
+        rect.width = 99.0  # type: ignore[misc]
+    assert rect.width == 3.0
+
+    viewport = Viewport(width=1280, height=800, device_scale_factor=1.0)
+    with pytest.raises(ValidationError):
+        viewport.width = 640  # type: ignore[misc]
+    assert viewport.width == 1280
 
 
 def test_harvest_models_construct() -> None:

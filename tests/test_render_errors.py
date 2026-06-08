@@ -79,7 +79,7 @@ async def test_render_error_raised_on_navigation_failure(monkeypatch: pytest.Mon
         async def __aexit__(self, *_exc: object) -> None:
             return None
 
-        async def goto(self, _url: str) -> None:
+        async def goto(self, _url: str, **_kwargs: object) -> None:
             raise original
 
     monkeypatch.setattr(harvest_mod, "RenderSession", _FailingSession)

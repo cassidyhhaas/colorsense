@@ -125,14 +125,29 @@ Choose your posture by where colorsense runs:
 colorsense never decides whether a fetch is permitted; it only makes it easy to fetch
 considerately once you have decided.
 
+**Security (SSRF + local-file reads).** `analyze` fetches and renders whatever URL it is
+given, so passing **untrusted** URLs exposes a server-side request forgery and local-file-read
+surface. `file://` URLs read arbitrary local files (intentional, for the test fixtures), and
+`http(s)://` URLs can reach internal hosts and cloud metadata endpoints (e.g.
+`169.254.169.254`, `localhost`). This is by design — the politeness controls above gate
+*network* schemes for robots/rate-limiting, but nothing validates the destination host. If
+you accept user-supplied URLs, validate the scheme and host **before** calling `analyze`:
+allowlist public hosts, and reject `file://` and private / link-local IP ranges. As above,
+this is the consumer's responsibility — the library provides mechanism, not policy.
+
 ## Configuration
 
-All tunable behavior lives in
-[`palette_config.yaml`](src/colorsense/data/palette_config.yaml), which **ships bundled with
-the package** and is loaded automatically — the single source of truth for the **token
+[`palette_config.yaml`](src/colorsense/data/palette_config.yaml) **ships bundled with
+the package** and is loaded automatically. It is the single source of truth for the **token
 vocabulary** (CSS custom-property names → semantic roles → 60/30/10 palette-role priors) and
 the **component-classifier** weights (how rendered elements are scored into headers, cards,
 CTAs, …). The weights are calibrated starting points, not ground truth.
+
+Not everything is in the YAML, though: the usage-side role-scoring weights and the
+component→palette-role affinity map are documented module-level constants in
+[`palette/roles.py`](src/colorsense/palette/roles.py) (e.g. `W_AREA`, `W_NEUTRAL`,
+`SOFTMAX_T`, `TARGET_SPLIT`, `COMPONENT_AFFINITY`) — `assign_roles` takes no `Config`, so
+those are tuned in code, not via `config_path=`.
 
 To tune them, copy the bundled file, edit your copy, and pass its path as `config_path=` to
 `analyze` (or load it with `load_config`). To inspect the defaults programmatically:

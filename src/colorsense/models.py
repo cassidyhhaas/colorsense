@@ -6,7 +6,10 @@ must be made centrally and re-validated against every dependent module, never pa
 locally by a consumer.
 
 Value objects (``Color``, ``Rect``, ``Viewport``) are immutable. Aggregate records carry
-lists/dicts and are kept mutable for ergonomic assembly during the pipeline.
+lists/dicts and are kept mutable for ergonomic assembly during the pipeline. These
+aggregates do **not** enable ``validate_assignment``: mutating a field after construction
+(e.g. ``result.tokens.append(...)`` or reassigning an attribute) is *not* re-validated, so
+the caller owns the integrity of any post-construction edits.
 """
 
 from __future__ import annotations
@@ -272,7 +275,13 @@ class RunMetadata(BaseModel):
 
 
 class AnalysisResult(BaseModel):
-    """The top-level typed result returned by ``analyze``."""
+    """The top-level typed result returned by ``analyze``.
+
+    This aggregate is intentionally mutable and is **not** re-validated on mutation
+    (``validate_assignment`` is off): editing the returned result in place — appending to
+    ``tokens``, reassigning ``fit_score``, etc. — succeeds without validation, so any such
+    post-``analyze`` edits are the caller's responsibility.
+    """
 
     url: str
     viewport: Viewport

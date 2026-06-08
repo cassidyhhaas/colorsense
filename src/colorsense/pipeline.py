@@ -190,16 +190,29 @@ def _collapse_themes(ordered_themes: list[Theme], harvests: dict[Theme, Harvest]
 
 
 def _near_identical(a: Harvest, b: Harvest) -> bool:
-    """Whether two renders' dominant screenshot colors all match within the OKLab threshold."""
-    bins_a = sorted(a.screenshot_bins, key=lambda s: s.area_fraction, reverse=True)
-    bins_b = sorted(b.screenshot_bins, key=lambda s: s.area_fraction, reverse=True)
+    """Whether two renders' dominant screenshot colors mutually match within the threshold.
+
+    The two top-bin sets must agree *symmetrically*: every dominant bin of ``a`` has a close
+    perceptual match in ``b`` **and** vice versa. The one-directional form would wrongly
+    collapse a theme whose dominant colors are a superset of the primary's (e.g. a dark mode
+    that keeps the light background somewhere on the page) — symmetry guards against that.
+
+    Sorting and the inner matching break ``area_fraction`` ties deterministically on the
+    color hex so the result never depends on incidental bin insertion order.
+    """
+    bins_a = sorted(a.screenshot_bins, key=lambda s: (-s.area_fraction, s.color.hex))
+    bins_b = sorted(b.screenshot_bins, key=lambda s: (-s.area_fraction, s.color.hex))
     top_a = bins_a[:_COLLAPSE_TOP_BINS]
     top_b = bins_b[:_COLLAPSE_TOP_BINS]
     if not top_a or not top_b:
         return False
-    return all(
+    a_matches_b = all(
         min(delta_e(sb.color, ob.color) for ob in top_b) <= _COLLAPSE_DELTA_E for sb in top_a
     )
+    b_matches_a = all(
+        min(delta_e(sb.color, ob.color) for ob in top_a) <= _COLLAPSE_DELTA_E for sb in top_b
+    )
+    return a_matches_b and b_matches_a
 
 
 def _third_party_colors(clusters: list[ColorCluster]) -> list[Color]:
@@ -209,7 +222,8 @@ def _third_party_colors(clusters: list[ColorCluster]) -> list[Color]:
         mix = cluster.component_mix
         if not mix:
             continue
-        dominant = max(mix, key=lambda key: mix[key])
+        # Stable secondary key (the component-type value) so ties don't depend on dict order.
+        dominant = max(mix, key=lambda key: (mix[key], key.value))
         if dominant is ComponentType.third_party:
             out.append(cluster.color)
     return _dedupe_colors(out)

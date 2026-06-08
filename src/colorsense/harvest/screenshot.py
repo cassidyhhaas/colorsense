@@ -136,7 +136,9 @@ def _quantize(array: np.ndarray, keep: np.ndarray) -> list[ScreenshotBin]:
             continue
         bins.append(ScreenshotBin(color=color, area_fraction=fraction))
 
-    bins.sort(key=lambda item: item.area_fraction, reverse=True)
+    # Stable secondary key on the color hex so equal-area bins sort deterministically
+    # regardless of palette-index order.
+    bins.sort(key=lambda item: (-item.area_fraction, item.color.hex))
     return bins
 
 

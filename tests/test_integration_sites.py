@@ -31,6 +31,7 @@ from colorsense.models import (
     PaletteRole,
     RoleResults,
     Theme,
+    ThemePalette,
     TokenSemanticRole,
 )
 
@@ -68,19 +69,49 @@ def _color_near(colors: list[Color], target_hex: str) -> bool:
     return any(delta_e(color, target) <= COLOR_MATCH_TOL for color in colors)
 
 
-def _digest(result: AnalysisResult) -> dict[str, Any]:
-    """A deterministic, *platform-stable* summary of an AnalysisResult.
+def _theme_structure(palette: ThemePalette) -> dict[str, Any]:
+    """A compact, deterministic structural summary of one theme's reconciled palette.
 
-    Only fields that derive from computed style or structure are captured: token
-    classifications, token-resolved status colors, theme set, and fit_score. Rendered
-    (screenshot-derived) colors — the role candidates — are NOT portable
-    across OSes, so they are excluded here and asserted perceptually in each test instead.
+    Captures, per theme:
+
+    * ``populated_roles`` — the sorted set of :class:`PaletteRole`s that have >=1 candidate
+      (purely structural: which slots the pipeline managed to fill).
+    * ``top_role_colors`` — the dominant (argmax) candidate hex per populated role.
+
+    The top-candidate hexes are screenshot-derived and so carry the usual cross-OS
+    anti-aliasing/gamma drift; they are pinned here because these golden tests are
+    ``browser``-marked and run against the locally installed Chromium (a fixed platform), and
+    they make the goldens catch ordering/dominance regressions that the role *set* alone
+    would miss. Roles are emitted in a stable, sorted order so the digest is deterministic.
+    """
+    mapping = palette.roles.mapping
+    populated = sorted(str(role) for role, cands in mapping.items() if cands)
+    top_colors = {
+        str(role): cands[0].color.hex
+        for role, cands in sorted(mapping.items(), key=lambda kv: str(kv[0]))
+        if cands
+    }
+    return {"populated_roles": populated, "top_role_colors": top_colors}
+
+
+def _digest(result: AnalysisResult) -> dict[str, Any]:
+    """A deterministic summary of an AnalysisResult for golden comparison.
+
+    Captures the computed-style/structural fields (token classifications, token-resolved
+    status colors, theme set, fit_score) plus, for every kept theme, the populated palette
+    roles and dominant role colors (see :func:`_theme_structure`) and the divergence count.
+    Everything is emitted in a stable, sorted order so the digest is deterministic.
     """
     return {
         "themes": sorted(str(theme) for theme in result.themes),
         "single_theme": result.metadata.single_theme,
         "tokens": {ct.record.name: str(ct.semantic_role) for ct in result.tokens},
         "status_colors": sorted(c.hex for c in result.status_colors),
+        "divergence_count": len(result.divergence),
+        "theme_structure": {
+            str(theme): _theme_structure(palette)
+            for theme, palette in sorted(result.themes.items(), key=lambda kv: str(kv[0]))
+        },
         "fit_score": round(result.fit_score, 4),
     }
 

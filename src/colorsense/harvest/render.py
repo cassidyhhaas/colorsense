@@ -40,6 +40,12 @@ _DISABLE_MOTION_CSS: str = "* { transition: none !important; animation: none !im
 # Max step-scroll iterations to trigger lazy content (cap so we never loop forever).
 _MAX_SCROLL_STEPS: int = 20
 
+# Default navigation timeout (ms) for ``page.goto``. Made explicit (rather than relying on
+# Playwright's implicit 30s default) so the value is documented and overridable per render.
+# A ``goto`` that exceeds it raises a Playwright ``TimeoutError``, which ``harvest_page``
+# wraps as the public ``RenderError``.
+DEFAULT_NAV_TIMEOUT_MS: float = 30_000.0
+
 # Timeout (ms) guarding wait_for_load_state("networkidle") on pages that never idle.
 # Kept short on purpose: ``goto(wait_until="load")`` has already fired the load event (all
 # synchronous resources fetched), so this only waits out async/lazy chatter (analytics,
@@ -184,16 +190,23 @@ class RenderSession:
 
     # -- navigation -------------------------------------------------------
 
-    async def goto(self, url: str) -> None:
+    async def goto(self, url: str, *, nav_timeout_ms: float = DEFAULT_NAV_TIMEOUT_MS) -> None:
         """Navigate to ``url`` and stabilize the page for harvesting.
 
         Performs ``goto(..., wait_until="load")``, a guarded ``networkidle`` wait, motion
         neutralization, step-scrolling to trigger lazy content, and consent-region
         detection. ``networkidle`` is guarded with a timeout/try-except so ``file://``
         pages that never report idle do not hang.
+
+        Parameters
+        ----------
+        nav_timeout_ms:
+            Per-navigation timeout in milliseconds, passed explicitly to ``page.goto``.
+            Defaults to :data:`DEFAULT_NAV_TIMEOUT_MS`. Exceeding it raises a Playwright
+            ``TimeoutError`` (wrapped as :class:`~colorsense.harvest.RenderError` upstream).
         """
         page = self.page
-        await page.goto(url, wait_until="load")
+        await page.goto(url, wait_until="load", timeout=nav_timeout_ms)
         # file:// pages may never report networkidle; guard with a timeout.
         with contextlib.suppress(Exception):
             await page.wait_for_load_state("networkidle", timeout=_NETWORKIDLE_TIMEOUT_MS)
