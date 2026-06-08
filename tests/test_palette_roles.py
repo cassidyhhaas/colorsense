@@ -124,7 +124,9 @@ def test_fit_score_in_range_and_ordering() -> None:
 
 def test_empty_clusters() -> None:
     results, fit = assign_roles([])
-    assert results.mapping == {}
+    # RoleResults backfills every role, so empty input yields all roles mapped to ().
+    assert set(results.mapping) == set(PaletteRole)
+    assert all(cands == () for cands in results.mapping.values())
     assert fit == 0.0
 
 

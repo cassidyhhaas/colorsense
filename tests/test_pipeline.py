@@ -12,12 +12,19 @@ from pathlib import Path
 import pytest
 
 from colorsense import LIGHT_AND_DARK, analyze
+from colorsense.color.primitives import parse_css_color
 from colorsense.config import Config, load_default_config
 from colorsense.models import (
     AnalysisResult,
+    Color,
     Harvest,
+    HarvestedElement,
+    PaletteRole,
+    Rect,
     ScreenshotBin,
     Theme,
+    TokenRecord,
+    TokenSemanticRole,
     Viewport,
 )
 from colorsense.net.politeness import PolitenessPolicy, RobotsDisallowedError
@@ -205,6 +212,135 @@ async def test_analyze_propagates_robots_block(config: Config) -> None:
     )
     with pytest.raises(RobotsDisallowedError):
         await analyze("https://example.test/", politeness=policy)
+
+
+# ---------------------------------------------------------------------------
+# Orchestration on a fully-faked Harvest (no browser): assert analyze() wires the
+# stages together and segregates outputs correctly. The pipeline is pure given a
+# Harvest, so an injected harvester returning a populated Harvest exercises the whole
+# classify -> inventory -> roles -> reconcile -> assemble chain browserlessly.
+# ---------------------------------------------------------------------------
+
+
+def _color(value: str) -> Color:
+    c = parse_css_color(value)
+    assert c is not None, f"unparseable test color {value!r}"
+    return c
+
+
+def _bg_element(
+    *, tag: str, bg: Color, class_tokens: list[str] | None = None, clickable: bool = False
+) -> HarvestedElement:
+    return HarvestedElement(
+        tag=tag,
+        role=None,
+        id=None,
+        class_tokens=class_tokens or [],
+        rect=Rect(x=0.0, y=0.0, width=1280.0, height=200.0),
+        position="static",
+        bg=bg,
+        text=_color("#111827"),
+        border=None,
+        is_iframe=False,
+        cross_origin=False,
+        shadow_host=False,
+        clickable=clickable,
+        has_hover_color_change=False,
+        hover_bg=None,
+        vendor_match=False,
+        visible=True,
+        aria_hidden=False,
+    )
+
+
+def _token(name: str, hex_value: str) -> TokenRecord:
+    return TokenRecord(
+        name=name,
+        raw_value=hex_value,
+        resolved=_color(hex_value),
+        scope=":root",
+    )
+
+
+def _populated_harvest(url: str, theme: Theme, viewport: Viewport) -> Harvest:
+    """A realistic single-theme Harvest: a light surface, a dark neutral, an accent,
+    declared tokens (including a status/destructive token), and matching screenshot bins."""
+    surface = _color("#ffffff")
+    dark = _color("#111827")
+    accent = _color("#2244aa")
+    return Harvest(
+        url=url,
+        theme=theme,
+        viewport=viewport,
+        tokens=[
+            _token("--color-primary", "#2244aa"),
+            _token("--gray-100", "#f3f4f6"),
+            _token("--gray-900", "#111827"),
+            _token("--destructive", "#ef4444"),
+        ],
+        elements=[
+            _bg_element(tag="body", bg=surface),
+            _bg_element(tag="footer", bg=dark),
+            _bg_element(tag="button", bg=accent, class_tokens=["btn", "cta"], clickable=True),
+        ],
+        screenshot_bins=[
+            ScreenshotBin(color=surface, area_fraction=0.6),
+            ScreenshotBin(color=dark, area_fraction=0.25),
+            ScreenshotBin(color=accent, area_fraction=0.15),
+        ],
+    )
+
+
+async def test_analyze_orchestrates_faked_harvest(config: Config) -> None:
+    url = "https://example.test/page"
+
+    async def harvester(u: str, theme: Theme, _cfg: Config, vp: Viewport) -> Harvest:
+        return _populated_harvest(u, theme, vp)
+
+    policy = PolitenessPolicy(harvester=harvester, robots_loader=_no_robots)
+    result = await analyze(url, viewport=VIEWPORT, politeness=policy)
+
+    assert isinstance(result, AnalysisResult)
+    assert result.url == url
+    assert result.viewport == VIEWPORT
+
+    # Themes present: default flow is light-only, and it survives as the analyzed theme.
+    assert set(result.themes) == {Theme.light}
+    palette = result.themes[Theme.light]
+    assert palette.theme is Theme.light
+    assert result.metadata.themes_requested == (Theme.light,)
+    assert result.metadata.themes_analyzed == (Theme.light,)
+    assert result.metadata.single_theme is True
+
+    # Roles populated: the mapping has every role key, and the area-truth bins yield real
+    # candidates for the dominant surface roles.
+    roles = palette.roles.mapping
+    assert set(roles) == set(PaletteRole)
+    nonempty = {role for role, cands in roles.items() if cands}
+    assert nonempty, "expected at least one palette role to carry a candidate"
+    # The dominant ~60% light surface should anchor the primary role.
+    assert roles[PaletteRole.primary], "primary role should be populated from the 60% bin"
+    primary_hexes = {cand.color.hex for cand in roles[PaletteRole.primary]}
+    assert "#ffffff" in primary_hexes
+
+    # Tokens carried through and classified (token names preserved, semantic roles assigned).
+    token_names = {ct.record.name for ct in result.tokens}
+    assert token_names == {"--color-primary", "--gray-100", "--gray-900", "--destructive"}
+    by_name = {ct.record.name: ct for ct in result.tokens}
+    assert by_name["--color-primary"].semantic_role is TokenSemanticRole.brand_primary
+    assert by_name["--gray-100"].semantic_role is TokenSemanticRole.neutral
+    assert by_name["--destructive"].semantic_role is TokenSemanticRole.status
+
+    # Status colors are segregated OUT of the palette: the destructive red is reported as a
+    # status color and must NOT appear as a palette-role candidate.
+    status_hexes = {c.hex for c in result.status_colors}
+    assert "#ef4444" in status_hexes
+    all_role_hexes = {cand.color.hex for cands in roles.values() for cand in cands}
+    assert "#ef4444" not in all_role_hexes
+
+    # Clean Pydantic round-trip of the assembled result.
+    restored = AnalysisResult.model_validate_json(result.model_dump_json())
+    assert restored == result
 
 
 # ---------------------------------------------------------------------------

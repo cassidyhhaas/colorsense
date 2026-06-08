@@ -19,6 +19,7 @@ from playwright.async_api import Error as PlaywrightError
 import colorsense.harvest as harvest_mod
 from colorsense.config import load_default_config
 from colorsense.harvest import RenderError, harvest_page
+from colorsense.harvest.render import RenderSession
 from colorsense.models import Theme, Viewport
 from colorsense.net.politeness import PolitenessPolicy
 
@@ -92,3 +93,92 @@ async def test_render_error_raised_on_navigation_failure(monkeypatch: pytest.Mon
     assert isinstance(err, RenderError)  # catchable as the typed public class
     assert err.url == url
     assert err.__cause__ is original  # original Playwright error chained via ``from``
+
+
+# --- RenderSession teardown: every resource is closed exactly once --------------------
+
+
+class _Closer:
+    """A fake ``_context``/``_browser`` recording its ``close()`` calls."""
+
+    def __init__(self) -> None:
+        self.closes = 0
+
+    async def close(self) -> None:
+        self.closes += 1
+
+
+class _Playwright:
+    """A fake ``_playwright`` recording its ``stop()`` calls."""
+
+    def __init__(self) -> None:
+        self.stops = 0
+
+    async def stop(self) -> None:
+        self.stops += 1
+
+
+def _session_with_fakes() -> tuple[RenderSession, _Closer, _Closer, _Playwright]:
+    """A RenderSession with its Playwright handles replaced by recording stubs."""
+    session = RenderSession(Theme.light, VIEWPORT)
+    context, browser, pw = _Closer(), _Closer(), _Playwright()
+    session._context = context  # type: ignore[assignment]
+    session._browser = browser  # type: ignore[assignment]
+    session._playwright = pw  # type: ignore[assignment]
+    return session, context, browser, pw
+
+
+def _assert_torn_down_once(
+    session: RenderSession, context: _Closer, browser: _Closer, pw: _Playwright
+) -> None:
+    # Each resource closed/stopped exactly once: a future edit dropping a `.close()`/`.stop()`
+    # turns this red.
+    assert context.closes == 1
+    assert browser.closes == 1
+    assert pw.stops == 1
+    # Handles are cleared so a stale resource can't be re-used after teardown.
+    assert session._context is None
+    assert session._browser is None
+    assert session._playwright is None
+    assert session._page is None
+
+
+async def test_aexit_closes_resources_on_normal_exit() -> None:
+    session, context, browser, pw = _session_with_fakes()
+
+    result = await session.__aexit__(None, None, None)
+
+    assert result is None  # does not suppress (there is nothing to suppress)
+    _assert_torn_down_once(session, context, browser, pw)
+
+
+async def test_aexit_closes_resources_on_exception_path() -> None:
+    # Driving __aexit__ with exception info must still tear every resource down once, and
+    # must NOT suppress the in-flight exception (returns falsy so it propagates).
+    session, context, browser, pw = _session_with_fakes()
+    exc = RuntimeError("boom")
+
+    result = await session.__aexit__(type(exc), exc, exc.__traceback__)
+
+    assert not result  # falsy -> the original exception propagates
+    _assert_torn_down_once(session, context, browser, pw)
+
+
+async def test_aexit_swallows_teardown_errors_but_still_closes_rest() -> None:
+    # A failing context.close() must not stop browser.close()/playwright.stop(): teardown
+    # errors are suppressed so the original control flow is preserved.
+    session, context, browser, pw = _session_with_fakes()
+
+    async def _boom() -> None:
+        context.closes += 1
+        raise RuntimeError("close failed")
+
+    context.close = _boom  # type: ignore[method-assign]
+
+    await session.__aexit__(None, None, None)
+
+    assert context.closes == 1  # attempted once
+    assert browser.closes == 1  # still closed despite the context failure
+    assert pw.stops == 1
+    assert session._browser is None
+    assert session._playwright is None

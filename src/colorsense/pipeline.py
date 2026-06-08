@@ -32,7 +32,6 @@ from colorsense.models import (
     ComponentType,
     DivergenceItem,
     Harvest,
-    RoleResults,
     RunMetadata,
     Theme,
     ThemePalette,
@@ -253,6 +252,7 @@ def _build_metadata(
     )
 
 
-# ``RoleResults`` is re-exported for callers that build/inspect palettes without importing
-# from ``models`` directly.
-__all__ = ["DEFAULT_THEMES", "DEFAULT_VIEWPORT", "LIGHT_AND_DARK", "RoleResults", "analyze"]
+# ``colorsense.pipeline`` is an internal orchestration module; the supported public surface
+# is the top-level ``colorsense`` package (see ``colorsense.__all__``). ``__all__`` here only
+# scopes ``from colorsense.pipeline import *`` and the names the package facade re-exports.
+__all__ = ["DEFAULT_THEMES", "DEFAULT_VIEWPORT", "LIGHT_AND_DARK", "analyze"]
