@@ -42,6 +42,7 @@ def _roles(**by_role: list[PaletteCandidate]) -> RoleResults:
 def _assert_all_pairs_pass(contrast: dict[str, float]) -> None:
     assert contrast["heading_text_on_heading_bg"] >= TEXT_CONTRAST_TARGET - EPS
     assert contrast["cta_text_on_cta_bg"] >= TEXT_CONTRAST_TARGET - EPS
+    assert contrast["cta_hover_text_on_cta_hover_bg"] >= TEXT_CONTRAST_TARGET - EPS
     assert contrast["heading_bg_on_page"] >= UI_CONTRAST_TARGET - EPS
     assert contrast["cta_bg_on_page"] >= UI_CONTRAST_TARGET - EPS
 
@@ -80,6 +81,7 @@ def test_contrast_reported() -> None:
         "heading_bg_on_page",
         "cta_bg_on_page",
         "cta_hover_bg_on_page",
+        "cta_hover_text_on_cta_hover_bg",
     }
     assert rec.contrast  # non-empty
     assert expected_keys <= set(rec.contrast)
@@ -111,6 +113,26 @@ def test_hover_uses_distinct_hint() -> None:
 def test_hover_synthesized_when_none() -> None:
     rec = recommend(_roles(accent=[_candidate("#2563eb")]), Theme.light, None)
     assert delta_e(rec.cta_hover_bg, rec.cta_bg) > 0.02
+
+
+def test_hover_text_readable_on_light_hover_hint() -> None:
+    # A button whose hover surface flips to (near-)white is the white-on-white trap: the
+    # resting cta_text is light, so the hover state needs its own enforced text color.
+    rec = recommend(_roles(accent=[_candidate("#2563eb")]), Theme.light, _color("#ffffff"))
+    assert rec.cta_hover_bg.hex == "#ffffff"
+    assert rec.contrast["cta_hover_text_on_cta_hover_bg"] >= TEXT_CONTRAST_TARGET - EPS
+    # The hover text must actually differ from the resting CTA text here (white CTA text
+    # would be invisible on the white hover surface).
+    assert rec.cta_hover_text.hex != rec.cta_text.hex
+
+
+def test_page_bg_returned_per_theme() -> None:
+    light = recommend(_roles(accent=[_candidate("#2563eb")]), Theme.light, None)
+    dark = recommend(_roles(accent=[_candidate("#2563eb")]), Theme.dark, None)
+    assert light.page_bg.hex == "#ffffff"
+    assert dark.page_bg.hex == "#0b0b0b"
+    # The reported on-page contrasts are measured against this returned surface.
+    assert light.contrast["cta_bg_on_page"] >= UI_CONTRAST_TARGET - EPS
 
 
 def test_dark_theme_all_pairs_pass() -> None:

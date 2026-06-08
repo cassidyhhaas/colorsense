@@ -249,11 +249,13 @@ class Recommendation(BaseModel):
     """WCAG-enforced widget color recommendation for one theme."""
 
     theme: Theme
+    page_bg: Color
     heading_bg: Color
     heading_text: Color
     cta_bg: Color
     cta_text: Color
     cta_hover_bg: Color
+    cta_hover_text: Color
     contrast: dict[str, float] = Field(default_factory=dict)
 
 

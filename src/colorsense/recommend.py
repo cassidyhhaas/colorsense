@@ -15,10 +15,15 @@ The pipeline is deterministic (no randomness):
    from the page background until it meets :data:`UI_CONTRAST_TARGET`).
 4. Compute readable ``heading_text`` / ``cta_text`` on the *final* surfaces
    (meeting :data:`TEXT_CONTRAST_TARGET`).
-5. Derive a perceptibly distinct ``cta_hover_bg``.
+5. Derive a perceptibly distinct ``cta_hover_bg`` and a readable ``cta_hover_text``
+   on it (also meeting :data:`TEXT_CONTRAST_TARGET`).
 6. Emit a contrast report of the final measured ratios.
 
-The acceptance guarantee: no returned text/bg pair fails its threshold.
+The page background the widget host sits on is returned as ``page_bg`` so consumers can
+render the widget against the same surface the contrast guarantees were computed for.
+
+The acceptance guarantee: no returned text/bg pair fails its threshold — including the
+hover state.
 """
 
 from __future__ import annotations
@@ -237,6 +242,10 @@ def recommend(roles: RoleResults, theme: Theme, hover_hint: Color | None) -> Rec
     cta_text = _enforce_text_on(cta_bg, TEXT_CONTRAST_TARGET)
 
     cta_hover_bg = _make_hover(cta_bg, theme, hover_hint)
+    # The hover surface is its own background: give it a guaranteed-readable text color
+    # instead of reusing cta_text, which was enforced against the resting cta_bg and can
+    # clash once the surface shifts (e.g. a button that flips to white on hover).
+    cta_hover_text = _enforce_text_on(cta_hover_bg, TEXT_CONTRAST_TARGET)
 
     contrast = {
         "heading_text_on_heading_bg": contrast_ratio(heading_text, heading_bg),
@@ -244,14 +253,17 @@ def recommend(roles: RoleResults, theme: Theme, hover_hint: Color | None) -> Rec
         "heading_bg_on_page": contrast_ratio(heading_bg, page_bg),
         "cta_bg_on_page": contrast_ratio(cta_bg, page_bg),
         "cta_hover_bg_on_page": contrast_ratio(cta_hover_bg, page_bg),
+        "cta_hover_text_on_cta_hover_bg": contrast_ratio(cta_hover_text, cta_hover_bg),
     }
 
     return Recommendation(
         theme=theme,
+        page_bg=page_bg,
         heading_bg=heading_bg,
         heading_text=heading_text,
         cta_bg=cta_bg,
         cta_text=cta_text,
         cta_hover_bg=cta_hover_bg,
+        cta_hover_text=cta_hover_text,
         contrast=contrast,
     )

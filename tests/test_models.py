@@ -36,11 +36,13 @@ def _dummy_result() -> AnalysisResult:
 
     recommendation = Recommendation(
         theme=Theme.light,
+        page_bg=white,
         heading_bg=brand,
         heading_text=white,
         cta_bg=brand,
         cta_text=white,
         cta_hover_bg=_color("#2a52a3", 0.45),
+        cta_hover_text=white,
         contrast={"heading": 7.2, "cta": 7.2},
     )
     roles = RoleResults(
