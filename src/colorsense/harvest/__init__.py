@@ -2,7 +2,7 @@
 
 Public interface
 ----------------
-* :func:`harvest_page` — async: render a URL under a theme and produce a frozen
+* :func:`harvest_page` — async: render a URL under a theme and produce a
   :class:`~colorsense.models.Harvest`.
 * :class:`RenderSession` — the Playwright async context manager used internally (exported
   for advanced/manual use).
@@ -55,7 +55,7 @@ async def harvest_page(
     """Render ``url`` under ``theme``/``viewport`` and harvest everything into a Harvest.
 
     Opens a single :class:`RenderSession`, navigates, then runs token, DOM, hover-state,
-    screenshot, and logo harvesting against the one live page, and assembles the frozen
+    screenshot, and logo harvesting against the one live page, and assembles the
     :class:`~colorsense.models.Harvest` contract.
 
     ``nav_timeout_ms`` is the per-navigation timeout passed through to
