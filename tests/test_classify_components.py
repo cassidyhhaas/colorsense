@@ -2,10 +2,8 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
 from colorsense.classify.components import classify_components
-from colorsense.config import load_config
+from colorsense.config import load_default_config
 from colorsense.models import (
     Color,
     ComponentType,
@@ -14,8 +12,7 @@ from colorsense.models import (
     Viewport,
 )
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
-CONFIG = load_config(REPO_ROOT / "config" / "palette_config.yaml")
+CONFIG = load_default_config()
 
 VIEWPORT = Viewport(w=1280, h=800, device_scale_factor=1.0)
 

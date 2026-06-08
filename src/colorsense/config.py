@@ -1,4 +1,4 @@
-"""Typed loader for ``config/palette_config.yaml``.
+"""Typed loader for the palette configuration YAML.
 
 This module mirrors the palette configuration YAML into fully-typed Pydantic
 models and exposes the token-name matching helpers consumed by the token and
@@ -6,12 +6,17 @@ component classifiers. The
 single source of truth for every value is the YAML file itself — this module
 *models* and *loads* it, it does not hard-code config values.
 
+The default configuration ships with the package as ``data/palette_config.yaml``
+and is loaded by :func:`load_default_config`; callers can supply their own copy
+via :func:`load_config`.
+
 Public interface
 ----------------
 * :class:`Config` — top-level model + the four token helpers
   (:meth:`Config.strip_namespace`, :meth:`Config.match_name_rule`,
   :meth:`Config.detect_scale`, :meth:`Config.match_relational`).
-* :func:`load_config` — read, validate, and normalize the YAML.
+* :func:`load_default_config` — load the configuration bundled with the package.
+* :func:`load_config` — read, validate, and normalize a YAML file from a path.
 * :class:`ScaleInfo`, :class:`RelationalInfo` — small result models.
 * :class:`TokenVocabularyConfig`, :class:`ComponentClassifierConfig` — domain models.
 """
@@ -20,6 +25,7 @@ from __future__ import annotations
 
 import re
 from enum import StrEnum
+from importlib import resources
 from pathlib import Path
 
 import yaml
@@ -37,7 +43,12 @@ __all__ = [
     "ScaleInfo",
     "TokenVocabularyConfig",
     "load_config",
+    "load_default_config",
 ]
+
+# The configuration bundled inside the package (importable resource location).
+_DATA_PACKAGE = "colorsense"
+_BUNDLED_CONFIG = "data/palette_config.yaml"
 
 
 # ---------------------------------------------------------------------------
@@ -501,28 +512,48 @@ class Config(BaseModel):
 # ---------------------------------------------------------------------------
 
 
+def load_default_config() -> Config:
+    """Load the palette configuration bundled with the installed package.
+
+    Resolves ``data/palette_config.yaml`` from the package itself (via
+    :mod:`importlib.resources`), so it works regardless of the current working
+    directory and whether the package is installed editable, as a wheel, or
+    zipped. This is what :func:`colorsense.analyze` uses when no ``config_path``
+    is given.
+    """
+    raw_text = resources.files(_DATA_PACKAGE).joinpath(_BUNDLED_CONFIG).read_text(encoding="utf-8")
+    return _build_config(raw_text, f"<bundled {_BUNDLED_CONFIG}>")
+
+
 def load_config(path: str | Path) -> Config:
     """Read, validate, and normalize the palette config YAML at ``path``.
 
-    Raises a clear :class:`pydantic.ValidationError` (or a wrapping
-    :class:`ValueError`) on malformed YAML or schema violations — never a bare
-    ``KeyError``.
+    For the configuration shipped with the package, prefer
+    :func:`load_default_config`. Raises a clear :class:`pydantic.ValidationError`
+    (or a wrapping :class:`ValueError`) on malformed YAML or schema violations —
+    never a bare ``KeyError``.
     """
     config_path = Path(path)
     try:
         raw_text = config_path.read_text(encoding="utf-8")
     except OSError as exc:
         raise ValueError(f"could not read config file {config_path!r}: {exc}") from exc
+    return _build_config(raw_text, repr(config_path))
 
+
+def _build_config(raw_text: str, source: str) -> Config:
+    """Parse and validate raw YAML text into a :class:`Config`.
+
+    ``source`` is a human-readable label for the origin of ``raw_text`` used in
+    error messages (a file path or a bundled-resource marker).
+    """
     try:
         data = yaml.safe_load(raw_text)
     except yaml.YAMLError as exc:
-        raise ValueError(f"invalid YAML in config file {config_path!r}: {exc}") from exc
+        raise ValueError(f"invalid YAML in config {source}: {exc}") from exc
 
     if not isinstance(data, dict):
         kind = type(data).__name__
-        raise ValueError(
-            f"config file {config_path!r} must contain a top-level mapping, got {kind}"
-        )
+        raise ValueError(f"config {source} must contain a top-level mapping, got {kind}")
 
     return Config.model_validate(data)

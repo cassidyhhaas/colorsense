@@ -139,7 +139,7 @@ requires-dist = [
     { name = "httpx" },
     { name = "numpy" },
     { name = "pillow" },
-    { name = "playwright" },
+    { name = "playwright", specifier = ">=1.40" },
     { name = "pydantic", specifier = ">=2" },
     { name = "pydantic-settings" },
     { name = "pyyaml" },
