@@ -14,19 +14,20 @@ updates:
         patterns:
           - "*"
 
-  # Keep the Python dev tooling (ruff, mypy, pytest, …) current. Scoped to the
-  # development dependency group ([dependency-groups] dev in pyproject.toml);
-  # pyproject.toml and uv.lock are updated together. Runtime deps are left to
-  # Dependabot security alerts rather than routine version bumps.
+  # Keep uv.lock current across all dependencies (runtime + dev tooling) so CI
+  # exercises recent versions and surfaces breakage early. `lockfile-only` means
+  # only uv.lock is updated — the permissive `>=` floors in [project.dependencies]
+  # that ship to consumers are never touched (raising those is a deliberate act,
+  # left to security alerts for runtime CVEs). Dev tools are bare names whose
+  # versions live only in the lock, so this keeps them current too.
   - package-ecosystem: "uv"
     directory: "/"
     schedule:
       interval: "weekly"
+    versioning-strategy: lockfile-only
     commit-message:
       prefix: "deps"
-    allow:
-      - dependency-type: "development"
     groups:
-      python-dev:
+      python:
         patterns:
           - "*"
