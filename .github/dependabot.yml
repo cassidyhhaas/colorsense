@@ -13,3 +13,20 @@ updates:
       github-actions:
         patterns:
           - "*"
+
+  # Keep the Python dev tooling (ruff, mypy, pytest, …) current. Scoped to the
+  # development dependency group ([dependency-groups] dev in pyproject.toml);
+  # pyproject.toml and uv.lock are updated together. Runtime deps are left to
+  # Dependabot security alerts rather than routine version bumps.
+  - package-ecosystem: "uv"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    commit-message:
+      prefix: "deps"
+    allow:
+      - dependency-type: "development"
+    groups:
+      python-dev:
+        patterns:
+          - "*"
