@@ -151,6 +151,11 @@ you accept user-supplied URLs, validate the scheme and host **before** calling `
 allowlist public hosts, and reject `file://` and private / link-local IP ranges. As above,
 this is the consumer's responsibility — the library provides mechanism, not policy.
 
+Because `colorsense` fetches and fully renders arbitrary URLs, the risks you take on — SSRF,
+resource exhaustion / DoS, and the fail-open `robots.txt` gate — and the controls you are
+expected to enforce are documented in full in [`SECURITY.md`](SECURITY.md). **Read it before
+exposing `analyze` to untrusted input.**
+
 ## Advanced
 
 ### Design-token auditing
