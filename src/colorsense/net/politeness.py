@@ -151,6 +151,16 @@ def _robots_url_for(url: str) -> str | None:
 _MAX_ROBOTS_REDIRECTS = 20
 """Redirect-hop cap for the robots GET (httpx's own default ``max_redirects``)."""
 
+_MAX_ROBOTS_BYTES = 512 * 1024
+"""Size cap (bytes) on a fetched ``robots.txt`` body — Google's documented processing limit.
+
+The loader's httpx timeout is per-read, not total, so without a cap a hostile or
+misconfigured server could stream an arbitrarily large body within the timeout and
+``response.text`` would materialize it all in memory (the robots GET runs server-side,
+outside the browser's resource caps). An oversized body is treated like any other fetch
+failure: ``None``, failing open as "no rules".
+"""
+
 
 async def _default_robots_loader(
     robots_url: str,
@@ -165,6 +175,14 @@ async def _default_robots_loader(
     the robots GET is attributable to the same identity as the page render. A missing or
     unreachable ``robots.txt`` is treated by callers as "no rules", which permits fetching —
     the conventional interpretation.
+
+    The body is read in a streaming fashion and capped at :data:`_MAX_ROBOTS_BYTES`
+    (512 KiB, Google's documented robots.txt processing limit): a declared
+    ``Content-Length`` over the cap aborts before the body is read, and a body that
+    *streams* past the cap (chunked, lying, or absent ``Content-Length``) aborts
+    mid-read. Either way the oversized fetch is treated like any other failure —
+    ``None``, no rules — so a hostile server cannot exhaust memory by streaming an
+    arbitrarily large body within the per-read timeout.
 
     ``request_filter`` is the policy's egress predicate. Redirects are followed *manually*
     (``follow_redirects=False`` plus a loop capped at :data:`_MAX_ROBOTS_REDIRECTS` hops)
@@ -198,15 +216,23 @@ async def _default_robots_loader(
             for _ in range(_MAX_ROBOTS_REDIRECTS + 1):
                 if not _permitted(url):
                     return None
-                response = await client.get(url)
-                if response.is_redirect:
-                    location = response.headers.get("location")
-                    if not location:
+                async with client.stream("GET", url) as response:
+                    if response.is_redirect:
+                        location = response.headers.get("location")
+                        if not location:
+                            return None
+                        url = urljoin(url, location)
+                        continue
+                    response.raise_for_status()
+                    declared = response.headers.get("content-length")
+                    if declared is not None and int(declared) > _MAX_ROBOTS_BYTES:
                         return None
-                    url = urljoin(url, location)
-                    continue
-                response.raise_for_status()
-                return response.text
+                    body = bytearray()
+                    async for chunk in response.aiter_bytes():
+                        body.extend(chunk)
+                        if len(body) > _MAX_ROBOTS_BYTES:
+                            return None
+                    return bytes(body).decode(response.encoding or "utf-8", errors="replace")
             # Redirect cap exhausted without reaching a terminal response.
             return None
     except (httpx.HTTPError, ValueError):

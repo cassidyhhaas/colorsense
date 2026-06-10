@@ -45,6 +45,14 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   unfiltered — the robots GET is `httpx`, not the browser, so the browser-route filter
   never saw it. A rejected hop aborts the fetch, which fails open as "no rules" while the
   navigation stays gated browser-side.
+- The policy's `robots.txt` fetch now caps the response body at 512 KiB (Google's
+  documented robots.txt processing limit), read in a streaming fashion: a declared
+  `Content-Length` over the cap aborts before the body is read, and a body streaming past
+  the cap aborts mid-read. Previously the entire body was materialized in memory and the
+  httpx timeout is per-read (not total), so a hostile or misconfigured server could
+  stream an arbitrarily large body to the server-side loader — outside the browser's
+  resource caps. An oversized body is treated like any other fetch failure (no rules;
+  fails open).
 - `block_private_networks()` now classifies IPv4-mapped IPv6 addresses
   (`::ffff:a.b.c.d`) by their embedded IPv4 address, so a resolver returning the mapped
   form of a private address is rejected like the bare IPv4 form.

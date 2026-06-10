@@ -15,6 +15,7 @@ from __future__ import annotations
 import httpx
 
 from colorsense.net.politeness import (
+    _MAX_ROBOTS_BYTES,
     _MAX_ROBOTS_REDIRECTS,
     PolitenessPolicy,
     _default_robots_loader,
@@ -164,6 +165,72 @@ async def test_redirect_without_location_returns_none() -> None:
 
     assert text is None
     assert requested == [ROBOTS_URL]
+
+
+class _ChunkStream(httpx.AsyncByteStream):
+    """A response body served as raw chunks, with no Content-Length header."""
+
+    def __init__(self, chunks: list[bytes]) -> None:
+        self._chunks = chunks
+
+    async def __aiter__(self):
+        for chunk in self._chunks:
+            yield chunk
+
+
+async def test_declared_oversized_body_is_rejected_before_reading() -> None:
+    # A Content-Length over the cap aborts the fetch from the headers alone: no body
+    # bytes are consumed, and the loader fails open as "no rules".
+    consumed: list[bytes] = []
+
+    class _RecordingStream(_ChunkStream):
+        async def __aiter__(self):
+            async for chunk in super().__aiter__():
+                consumed.append(chunk)
+                yield chunk
+
+    transport, requested = _transport_recording(
+        {
+            ROBOTS_URL: httpx.Response(
+                200,
+                headers={"content-length": str(_MAX_ROBOTS_BYTES + 1)},
+                stream=_RecordingStream([b"x" * 1024]),
+            )
+        }
+    )
+
+    text = await _default_robots_loader(ROBOTS_URL, UA, None, _transport=transport)
+
+    assert text is None
+    assert requested == [ROBOTS_URL]
+    assert consumed == []  # rejected on the header, before any body chunk was read
+
+
+async def test_streamed_oversized_body_is_rejected_at_the_cap() -> None:
+    # No Content-Length (chunked/streaming server): the loader must stop accumulating
+    # the moment the body exceeds the cap, not materialize an unbounded stream.
+    chunk = b"x" * 64 * 1024
+    transport, _ = _transport_recording(
+        {
+            ROBOTS_URL: httpx.Response(
+                200, stream=_ChunkStream([chunk] * (_MAX_ROBOTS_BYTES // len(chunk) + 2))
+            )
+        }
+    )
+
+    text = await _default_robots_loader(ROBOTS_URL, UA, None, _transport=transport)
+
+    assert text is None
+
+
+async def test_body_at_exactly_the_cap_is_accepted() -> None:
+    # Off-by-one guard: a body of exactly _MAX_ROBOTS_BYTES is within the limit.
+    body = b"#" * _MAX_ROBOTS_BYTES
+    transport, _ = _transport_recording({ROBOTS_URL: httpx.Response(200, content=body)})
+
+    text = await _default_robots_loader(ROBOTS_URL, UA, None, _transport=transport)
+
+    assert text == body.decode()
 
 
 async def test_non_redirect_failures_still_return_none() -> None:
