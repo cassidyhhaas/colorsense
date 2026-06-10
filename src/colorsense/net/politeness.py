@@ -22,8 +22,8 @@ from __future__ import annotations
 import asyncio
 import time
 from collections import OrderedDict
-from importlib.metadata import PackageNotFoundError, version
 from collections.abc import Awaitable, Callable
+from importlib.metadata import PackageNotFoundError, version
 from typing import Protocol
 from urllib.parse import urljoin, urlsplit, urlunsplit
 from urllib.robotparser import RobotFileParser
