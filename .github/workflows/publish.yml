@@ -4,11 +4,14 @@ name: Publish to PyPI
 # published. Authentication uses PyPI Trusted Publishing (OIDC) — no API token
 # or secret is stored; PyPI verifies the workflow identity instead.
 #
-# One-time PyPI setup (Trusted Publisher, "pending" until first publish):
+# The Trusted Publisher is configured and active on PyPI (publishing releases
+# since v0.1.0). For reference, the configuration registered there:
 #   Owner:        cassidyhhaas
 #   Repository:   colorsense
 #   Workflow:     publish.yml          # the name of THIS file
 #   Environment:  pypi                  # matches `environment:` below
+# Renaming this file, the repository, or the environment breaks the OIDC match —
+# update the Trusted Publisher entry on PyPI in the same change.
 
 on:
   release:
