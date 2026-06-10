@@ -11,7 +11,8 @@ most of them now as library knobs:
 * **Egress filtering** (§1 "Filter egress in-library"): the library-shipped
   :func:`colorsense.block_private_networks` is installed as the policy's
   ``request_filter``, so every request the rendered page makes — navigation, redirects,
-  sub-resources, the page's own ``fetch`` calls — is checked against
+  sub-resources, the page's own ``fetch`` calls — and the policy's own ``robots.txt``
+  fetch (each of its redirect hops vetted before being requested) is checked against
   private/loopback/link-local/metadata ranges, failing closed.
 * **Concurrency cap** (§2): ``PolitenessPolicy(max_concurrent_renders=...)`` bounds
   simultaneous renders process-wide (the policy instance is shared, so its semaphore is).
@@ -44,16 +45,17 @@ Run from the repository root (needs the ``examples`` dependency group):
 Environment knobs: ``COLORSENSE_ALLOWED_HOSTS`` (comma-separated exact hostnames; unset =
 any public host), ``COLORSENSE_MAX_CONCURRENCY`` (default 2),
 ``COLORSENSE_DEADLINE_SECONDS`` (default 60), and ``COLORSENSE_BROWSER_ARGS``
-(comma-separated extra Chromium launch args; default caps each renderer's V8 heap at
-512 MB).
+(whitespace-separated, shell-quoted (shlex) extra Chromium launch args; default caps each
+renderer's V8 heap at 512 MB).
 """
 
 from __future__ import annotations
 
 import os
+import shlex
 
 from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from colorsense import (
     AnalysisResult,
@@ -92,14 +94,20 @@ ANALYZE_DEADLINE_SECONDS = float(os.environ.get("COLORSENSE_DEADLINE_SECONDS", "
 # Chromium launch via analyze(browser_args=...). This bounds the JS heap only — not total
 # renderer memory — so it complements, never replaces, the container/cgroup memory limit
 # (the enforceable cap; the library ships no in-process memory watchdog by design).
-# Override with COLORSENSE_BROWSER_ARGS (comma-separated; empty string = no extra args).
-BROWSER_ARGS = tuple(
-    arg.strip()
-    for arg in os.environ.get(
-        "COLORSENSE_BROWSER_ARGS", "--js-flags=--max-old-space-size=512"
-    ).split(",")
-    if arg.strip()
-)
+# Override with COLORSENSE_BROWSER_ARGS (whitespace-separated, with shell-style quoting
+# via shlex; empty string = no extra args). Flags containing commas or spaces are
+# expressible by quoting — e.g. --host-resolver-rules='MAP a 1.2.3.4, MAP b 5.6.7.8'
+# stays one argument. Unbalanced quotes raise ValueError at import/startup: a loud
+# failure for a misconfigured env var, deliberately preferred over silently mangled args.
+
+
+def _browser_args_from_env() -> tuple[str, ...]:
+    """Extra Chromium launch args from the env, shlex-split (see comment above)."""
+    raw = os.environ.get("COLORSENSE_BROWSER_ARGS", "--js-flags=--max-old-space-size=512")
+    return tuple(shlex.split(raw))
+
+
+BROWSER_ARGS = _browser_args_from_env()
 
 # One policy for the process: its render cache, per-host rate limiter, robots cache, and
 # render-concurrency semaphore are all per-policy state, so sharing the instance is what
@@ -133,7 +141,9 @@ class AnalyzeRequest(BaseModel):
     """POST body: the page to analyze. Validation happens in the endpoint, not the model,
     so rejections produce a 400 with a reason rather than a generic 422."""
 
-    url: str
+    # Bounding untrusted input: cap the URL length (2083 is well above any legitimate
+    # URL) so a multi-megabyte string never reaches urlsplit/resolution.
+    url: str = Field(max_length=2083)
 
 
 class CandidateOut(BaseModel):

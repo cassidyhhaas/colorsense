@@ -106,6 +106,19 @@ def test_bad_urls_rejected_before_any_render(
     assert stub.calls == []  # validation must fire before analyze is ever awaited
 
 
+def test_oversized_url_rejected_by_model(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # AnalyzeRequest bounds untrusted input: URLs beyond max_length (2083) fail model
+    # validation with a 422 before urlsplit/resolution — or any render — is reached.
+    stub = AnalyzeStub(result=fake_result("https://example.com/"))
+    install_stub(monkeypatch, stub)
+    oversized = "https://example.com/" + "a" * 5000
+    response = client.post("/analyze", json={"url": oversized})
+    assert response.status_code == 422
+    assert stub.calls == []
+
+
 def test_allowlist_enforced_before_any_render(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -171,3 +184,47 @@ def test_endpoint_passes_policy_and_deadline_to_analyze(
     assert app_module._policy.max_concurrent_renders == app_module.MAX_CONCURRENT_ANALYSES
     # The default (no COLORSENSE_BROWSER_ARGS override) is the documented V8-heap cap.
     assert app_module.BROWSER_ARGS == ("--js-flags=--max-old-space-size=512",)
+
+
+def test_browser_args_default_is_v8_heap_cap(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("COLORSENSE_BROWSER_ARGS", raising=False)
+    assert app_module._browser_args_from_env() == ("--js-flags=--max-old-space-size=512",)
+
+
+def test_browser_args_empty_string_means_no_extra_args(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("COLORSENSE_BROWSER_ARGS", "")
+    assert app_module._browser_args_from_env() == ()
+
+
+def test_browser_args_whitespace_separated(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv(
+        "COLORSENSE_BROWSER_ARGS", "--disable-gpu  --js-flags=--max-old-space-size=256"
+    )
+    assert app_module._browser_args_from_env() == (
+        "--disable-gpu",
+        "--js-flags=--max-old-space-size=256",
+    )
+
+
+def test_browser_args_quoted_flag_with_commas_and_spaces_stays_one_arg(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The shlex upgrade exists exactly for this: a flag whose value contains commas and
+    # spaces (multiple host-resolver rules) must survive as a single argument.
+    monkeypatch.setenv(
+        "COLORSENSE_BROWSER_ARGS",
+        "--host-resolver-rules='MAP a 1.2.3.4, MAP b 5.6.7.8' --disable-gpu",
+    )
+    assert app_module._browser_args_from_env() == (
+        "--host-resolver-rules=MAP a 1.2.3.4, MAP b 5.6.7.8",
+        "--disable-gpu",
+    )
+
+
+def test_browser_args_unbalanced_quote_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Loud failure at import/startup for a misconfigured env var, never mangled args.
+    monkeypatch.setenv("COLORSENSE_BROWSER_ARGS", "--host-resolver-rules='MAP a 1.2.3.4")
+    with pytest.raises(ValueError):
+        app_module._browser_args_from_env()

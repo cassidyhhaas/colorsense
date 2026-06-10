@@ -94,11 +94,15 @@ class _Clock:
 
 # Async robots_loader seams (the policy awaits the loader with the configured wire UA).
 # One permits all (no rules), the other disallows everything.
-async def _no_robots(_url: str, _user_agent: str) -> str | None:
+async def _no_robots(
+    _url: str, _user_agent: str, _request_filter: Callable[[str], bool] | None = None
+) -> str | None:
     return None
 
 
-async def _disallow_all(_url: str, _user_agent: str) -> str | None:
+async def _disallow_all(
+    _url: str, _user_agent: str, _request_filter: Callable[[str], bool] | None = None
+) -> str | None:
     return "User-agent: *\nDisallow: /"
 
 

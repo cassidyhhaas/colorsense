@@ -30,12 +30,16 @@ def config() -> Config:
     return load_default_config()
 
 
-async def _no_robots(_url: str, _user_agent: str) -> str | None:
+async def _no_robots(
+    _url: str, _user_agent: str, _request_filter: Callable[[str], bool] | None = None
+) -> str | None:
     """Robots loader that returns no rules, so every URL is permitted."""
     return None
 
 
-async def _disallow_all(_url: str, _user_agent: str) -> str | None:
+async def _disallow_all(
+    _url: str, _user_agent: str, _request_filter: Callable[[str], bool] | None = None
+) -> str | None:
     return "User-agent: *\nDisallow: /"
 
 
@@ -243,7 +247,9 @@ async def test_robots_fetch_is_throttled_without_double_waiting(config: Config) 
     # logical visit, so the first fetch to a fresh host sleeps zero — not a full interval.
     robots_urls: list[str] = []
 
-    async def recording_robots(url: str, _user_agent: str) -> str | None:
+    async def recording_robots(
+        url: str, _user_agent: str, _request_filter: Callable[[str], bool] | None = None
+    ) -> str | None:
         robots_urls.append(url)
         return None  # fail-open: no rules => permitted
 
@@ -375,7 +381,9 @@ def _delay_policy(
 ) -> tuple[PolitenessPolicy, list[float]]:
     """A policy whose robots loader returns ``robots_text``, with a recording fake sleeper."""
 
-    async def loader(_url: str, _user_agent: str) -> str | None:
+    async def loader(
+        _url: str, _user_agent: str, _request_filter: Callable[[str], bool] | None = None
+    ) -> str | None:
         return robots_text
 
     clock = _Clock()

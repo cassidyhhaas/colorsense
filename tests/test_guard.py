@@ -69,6 +69,24 @@ def test_public_addresses_accepted(address: IPAddress) -> None:
     assert _is_public_address(address)
 
 
+@pytest.mark.parametrize(
+    "address",
+    [
+        "::ffff:127.0.0.1",  # mapped loopback
+        "::ffff:169.254.169.254",  # mapped link-local: the cloud metadata endpoint
+        "::ffff:10.0.0.1",  # mapped RFC 1918
+    ],
+)
+def test_ipv4_mapped_non_public_addresses_rejected(address: str) -> None:
+    # Classification must follow the *embedded* IPv4 address, not the v6 wrapper's flags:
+    # resolver stacks can return ::ffff:a.b.c.d, and the connection goes to a.b.c.d.
+    assert not _is_public_address(ipaddress.ip_address(address))
+
+
+def test_ipv4_mapped_public_address_accepted() -> None:
+    assert _is_public_address(ipaddress.ip_address(f"::ffff:{PUBLIC_V4}"))
+
+
 # -- the guard predicate ------------------------------------------------------
 
 

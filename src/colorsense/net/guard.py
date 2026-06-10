@@ -2,8 +2,10 @@
 
 :func:`block_private_networks` builds a predicate suitable for
 ``PolitenessPolicy(request_filter=...)``: it is applied by the library to **every** URL the
-browser requests while rendering (the navigation and all sub-resources), resolving each
-hostname and rejecting any URL whose resolution includes a non-public address — loopback,
+browser requests while rendering (the navigation and all sub-resources) *and* to the
+policy's own server-side ``robots.txt`` GET (the robots URL and each redirect hop, vetted
+before being requested), resolving each hostname and rejecting any URL whose resolution
+includes a non-public address — loopback,
 RFC 1918, link-local (including the cloud metadata endpoint 169.254.169.254), CGNAT
 (100.64.0.0/10), unspecified, multicast, reserved, and their IPv6 equivalents. Resolution
 failures fail **closed**. This is the shipped mechanism for the SECURITY.md §1
@@ -72,8 +74,13 @@ def _is_public_address(ip: IPAddress) -> bool:
 
     The explicit flags name the classic SSRF targets; ``is_global`` then sweeps up the
     ranges they miss — CGNAT (100.64.0.0/10), IETF protocol assignments, benchmarking
-    nets, IPv6 ULA/site-local, and friends. Both checks must agree.
+    nets, IPv6 ULA/site-local, and friends. Both checks must agree. IPv4-mapped IPv6
+    addresses (``::ffff:a.b.c.d``) are classified as the *embedded* IPv4 address — some
+    resolver stacks return them, and the connection goes to the embedded v4 target, so
+    the wrapper's own flags must not be what decides.
     """
+    if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped is not None:
+        return _is_public_address(ip.ipv4_mapped)
     if (
         ip.is_loopback  # 127.0.0.0/8, ::1
         or ip.is_private  # RFC 1918, IPv6 ULA, ...
@@ -167,8 +174,10 @@ def block_private_networks(
     The returned synchronous predicate (``guard(url) -> bool``; ``True`` permits, ``False``
     aborts) is meant for ``PolitenessPolicy(request_filter=...)``, where the library applies
     it to **every** URL the browser requests while rendering — the navigation, every
-    redirect hop, and all sub-resources, including the page's own ``fetch`` calls. It
-    implements the SECURITY.md §1 egress-filter item:
+    redirect hop, and all sub-resources, including the page's own ``fetch`` calls — and to
+    the policy's own ``robots.txt`` GET, whose initial URL and every redirect ``Location``
+    are vetted before each request goes out. It implements the SECURITY.md §1
+    egress-filter item:
 
     * only ``http(s)`` URLs pass; URLs carrying userinfo (``user:pass@host``) are rejected;
     * the hostname is resolved (stdlib ``getaddrinfo``; IP literals pass through without a

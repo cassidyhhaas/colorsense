@@ -9,9 +9,18 @@ Extract the rendered color palette of any website as a structured, typed Python 
 
 colorsense renders a page in a headless browser, harvests its design tokens and computed
 element colors, and classifies them into a 60/30/10 palette — primary, secondary, accent,
-and neutrals, each with ranked, scored candidates. The result is a Pydantic model, ready
-for downstream consumers (including AI models) that need to understand a site's color
-identity.
+and neutrals, each with ranked, scored candidates. The result is a frozen Pydantic model,
+ready for downstream consumers (including AI models) that need to understand a site's
+color identity.
+
+```python
+import asyncio
+from colorsense import PaletteRole, Theme, analyze
+
+result = asyncio.run(analyze("https://example.com"))
+primary = result.themes[Theme.light].roles.mapping[PaletteRole.primary]
+print(primary[0].color.hex)  # ranked candidates; empty tuple when none detected
+```
 
 ## Installation
 
@@ -21,8 +30,8 @@ playwright install chromium
 ```
 
 Requires Python 3.12+. Rendering uses headless Chromium via [Playwright](https://playwright.dev/python/);
-the browser binary is not a pip dependency, so run `playwright install chromium` once after
-installing (on Linux, also `playwright install-deps chromium` for the OS libraries).
+the browser binary is not a pip dependency, so run `playwright install chromium` once
+after installing (on Linux, also `playwright install-deps chromium` for the OS libraries).
 
 ## Quick start
 
@@ -77,21 +86,31 @@ The default output is a human-readable palette summary; `--json` emits the full
   the palette, so an error banner never masquerades as a brand accent.
 - **Polite, controllable fetching** — configurable User-Agent, `robots.txt` gate with
   `Crawl-delay` support, per-host rate limiting, render caching, and a per-request egress
-  filter.
+  filter that gates every browser request and the policy's own `robots.txt` fetch.
 - **Server-grade guard rails** — a built-in private-network egress filter
-  (`block_private_networks`) plus opt-in bounds on render concurrency
-  (`max_concurrent_renders`) and total call time (`max_total_seconds`), and a browser
-  launch-arg pass-through (`browser_args`) for e.g. capping the V8 heap per renderer.
+  (`block_private_networks`) covering browser requests and the robots fetch alike, plus
+  opt-in bounds on render concurrency (`max_concurrent_renders`) and total call time
+  (`max_total_seconds`), and a browser launch-arg pass-through (`browser_args`) for e.g.
+  capping the V8 heap per renderer.
 - **Async-native and concurrent** — themes render concurrently in one shared browser; CPU
   work is offloaded so the event loop stays responsive.
+
+## How it compares
+
+Most palette tools quantize the pixels of an image or screenshot and return dominant
+colors with no semantics. colorsense renders the live page, reads computed styles and
+declared design tokens, and classifies colors into 60/30/10 roles with confidence scores —
+you get "this is the brand accent", not "this orange is common". If you just need dominant
+colors from an image, an image-quantization tool is simpler and the right choice.
 
 ## Security
 
 colorsense fetches and fully renders third-party pages. If untrusted or user-supplied URLs
 can reach `analyze` from a server, treat it as an SSRF surface: validate hosts before
 calling, and use `PolitenessPolicy(request_filter=block_private_networks())` to gate every
-request the rendered page makes; bound abuse with `max_concurrent_renders` and
-`max_total_seconds`. The threat model and required controls are documented in
+request the rendered page makes — and the policy's own `robots.txt` fetch, including its
+redirect hops; bound abuse with `max_concurrent_renders` and `max_total_seconds`. The
+threat model and required controls are documented in
 [SECURITY.md](https://github.com/cassidyhhaas/colorsense/blob/main/SECURITY.md) — **read it before exposing `analyze` to untrusted input.**
 
 ## Examples
@@ -112,4 +131,5 @@ implementation of the SECURITY.md controls for untrusted, user-supplied URLs.
 ## Support & license
 
 Bug reports and feature requests: [GitHub Issues](https://github.com/cassidyhhaas/colorsense/issues).
+Want to contribute? Start with [CONTRIBUTING.md](https://github.com/cassidyhhaas/colorsense/blob/main/CONTRIBUTING.md).
 Licensed under the [MIT License](https://github.com/cassidyhhaas/colorsense/blob/main/LICENSE).

@@ -1,9 +1,13 @@
-"""``PolitenessPolicy(max_concurrent_renders=...)`` tests — no browser, no network.
+"""``PolitenessPolicy`` concurrency tests — no browser, no network.
 
-The semaphore must bound only genuine renders: cache hits and single-flight followers
-never take a slot, a throttle wait does not hold one, ``None`` stays unbounded, and the
-limiter is per-policy and per-event-loop. Concurrency is driven deterministically through
-the same gated-harvester pattern as ``test_politeness_cache.py``.
+Two concerns share the gated-harvester pattern from ``test_politeness_cache.py``:
+
+* ``max_concurrent_renders``: the semaphore must bound only genuine renders — cache hits
+  and single-flight followers never take a slot, a throttle wait does not hold one,
+  ``None`` stays unbounded, and the limiter is per-policy and per-event-loop.
+* single-flight cancellation: a cancelled *leader* must never propagate ``CancelledError``
+  to its followers (they re-elect, exactly one re-rendering), while a follower's *own*
+  cancellation and the leader's own cancellation still raise normally.
 """
 
 from __future__ import annotations
@@ -13,6 +17,7 @@ from collections.abc import Callable
 
 import pytest
 
+from colorsense import AnalysisTimeoutError, analyze
 from colorsense.config import Config, load_default_config
 from colorsense.harvest import SharedBrowser
 from colorsense.models import Harvest, Theme, Viewport
@@ -26,7 +31,9 @@ def config() -> Config:
     return load_default_config()
 
 
-async def _no_robots(_url: str, _user_agent: str) -> str | None:
+async def _no_robots(
+    _url: str, _user_agent: str, _request_filter: Callable[[str], bool] | None = None
+) -> str | None:
     return None
 
 
@@ -228,6 +235,142 @@ def test_policy_survives_sequential_event_loops() -> None:
     assert first.url == "https://loop1.test/"
     assert second.url == "https://loop2.test/"
     assert harvester.calls == 2
+
+
+# -- single-flight cancellation -----------------------------------------------------------
+
+
+async def test_leader_cancellation_does_not_propagate_to_follower(config: Config) -> None:
+    # The leader's task is cancelled mid-render; the follower must NOT inherit the
+    # CancelledError — it re-elects, re-renders, and returns a correct Harvest.
+    harvester = _GatedHarvester()
+    policy = _policy(harvester)
+    url = "https://example.test/page"
+
+    leader = asyncio.ensure_future(policy.fetch(url, Theme.light, config, VIEWPORT))
+    await harvester.entered.wait()  # the leader is rendering
+    follower = asyncio.ensure_future(policy.fetch(url, Theme.light, config, VIEWPORT))
+    await _spin()  # the follower is parked on the leader's future
+
+    harvester.entered.clear()  # re-arm: the next entered.wait() means the FOLLOWER rendered
+    leader.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await leader  # the leader itself still propagates its own cancellation
+    assert leader.cancelled()
+
+    # The follower re-elected as the new leader and is rendering again.
+    await asyncio.wait_for(harvester.entered.wait(), timeout=1.0)
+    assert harvester.calls == 2
+
+    harvester.gate.set()
+    result = await asyncio.wait_for(follower, timeout=1.0)
+    assert result.url == url
+    assert harvester.calls == 2  # the original (cancelled) render plus the re-election
+
+
+async def test_follower_own_cancellation_still_raises(config: Config) -> None:
+    # Cancelling the FOLLOWER while the leader renders must raise CancelledError in the
+    # follower only; the leader completes normally and its result is cached.
+    harvester = _GatedHarvester()
+    policy = _policy(harvester)
+    url = "https://example.test/page"
+
+    leader = asyncio.ensure_future(policy.fetch(url, Theme.light, config, VIEWPORT))
+    await harvester.entered.wait()
+    follower = asyncio.ensure_future(policy.fetch(url, Theme.light, config, VIEWPORT))
+    await _spin()
+
+    follower.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await follower
+    assert follower.cancelled()
+
+    harvester.gate.set()
+    result = await asyncio.wait_for(leader, timeout=1.0)
+    assert result.url == url
+    assert harvester.calls == 1  # the follower's cancellation never reached the leader's render
+
+    # The leader's result was cached despite the follower's cancellation.
+    again = await policy.fetch(url, Theme.light, config, VIEWPORT)
+    assert again is result
+    assert harvester.calls == 1
+
+
+async def test_leader_cancelled_with_multiple_followers_reelects_exactly_once(
+    config: Config,
+) -> None:
+    # With N followers and a cancelled leader, exactly ONE follower re-elects as the new
+    # leader; the rest follow it (harvester call count is 2, not N+1).
+    harvester = _GatedHarvester()
+    policy = _policy(harvester)
+    url = "https://example.test/page"
+
+    leader = asyncio.ensure_future(policy.fetch(url, Theme.light, config, VIEWPORT))
+    await harvester.entered.wait()
+    followers = [
+        asyncio.ensure_future(policy.fetch(url, Theme.light, config, VIEWPORT)) for _ in range(3)
+    ]
+    await _spin()
+
+    harvester.entered.clear()
+    leader.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await leader
+
+    await asyncio.wait_for(harvester.entered.wait(), timeout=1.0)  # the new leader is rendering
+    await _spin()  # let the remaining followers park on the new leader's future
+    assert harvester.calls == 2  # exactly one re-election — the others never rendered
+
+    harvester.gate.set()
+    results = await asyncio.wait_for(asyncio.gather(*followers), timeout=1.0)
+    assert all(result is results[0] for result in results)
+    assert harvester.calls == 2
+
+
+class _HangThenSucceedHarvester:
+    """First call hangs until cancelled; every later call returns a Harvest immediately."""
+
+    def __init__(self) -> None:
+        self.calls = 0
+        self.started = asyncio.Event()
+
+    async def __call__(
+        self,
+        url: str,
+        theme: Theme,
+        config: Config,
+        viewport: Viewport,
+        *,
+        user_agent: str | None = None,
+        request_filter: Callable[[str], bool] | None = None,
+        browser: SharedBrowser | None = None,
+    ) -> Harvest:
+        self.calls += 1
+        if self.calls == 1:
+            self.started.set()
+            await asyncio.Event().wait()  # never set: only cancellation ends this render
+        return Harvest(url=url, theme=theme, viewport=viewport, screenshot_bins=[])
+
+
+async def test_analyze_deadline_on_one_caller_spares_a_coalesced_caller() -> None:
+    # The real-world trigger: caller A's analyze() deadline cancels the shared leader;
+    # caller B (same URL, generous deadline, coalesced onto A's render) must NOT die with
+    # A's CancelledError — it re-elects and completes successfully.
+    harvester = _HangThenSucceedHarvester()
+    policy = PolitenessPolicy(harvester=harvester, robots_loader=_no_robots, min_interval=0.0)
+    url = "https://example.test/page"
+
+    a = asyncio.ensure_future(analyze(url, politeness=policy, max_total_seconds=0.05))
+    await asyncio.wait_for(harvester.started.wait(), timeout=1.0)  # A is the in-flight leader
+    b = asyncio.ensure_future(analyze(url, politeness=policy, max_total_seconds=30.0))
+    await _spin()  # B coalesces onto A's render as a follower
+
+    with pytest.raises(AnalysisTimeoutError):
+        await a  # A's deadline expired and cancelled the shared render
+
+    result = await asyncio.wait_for(b, timeout=5.0)  # B survived A's cancellation
+    assert result.url == url
+    assert harvester.calls == 2  # A's cancelled render plus B's re-elected one
 
 
 def test_max_concurrent_renders_validation() -> None:

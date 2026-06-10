@@ -40,8 +40,13 @@ policy, and network isolation (below) remains the strong recommendation even wit
 in place.
 
 **Redirects make this worse.** A URL that *looks* public can bounce to an internal one:
-both the `robots.txt` fetch (`httpx` with `follow_redirects=True`) and the Chromium
-navigation follow redirects. Allowlisting only the *initial* host is therefore insufficient.
+both the `robots.txt` fetch and the Chromium navigation follow redirects, so allowlisting
+only the *initial* host is insufficient. When a `request_filter` is configured, the policy
+applies it to **both** paths per hop: the browser-side route handler vets the navigation,
+every redirect hop, and all sub-resources, and the policy's own server-side `robots.txt`
+GET vets the robots URL and each redirect `Location` before requesting it (a rejected hop
+aborts the robots fetch, which then fails open as "no rules" — the navigation itself stays
+gated by the filter).
 
 ### What you must do
 
@@ -145,7 +150,7 @@ cannot stall your pipeline; raise the cap to honor longer delays. Two caveats:
 
 | Risk | Library's stance | Your responsibility |
 | --- | --- | --- |
-| **SSRF** | `http(s)` only by default (`file://` opt-in, other schemes rejected); no host/IP validation unless configured; follows redirects; optional `request_filter` over every browser request, with `block_private_networks()` as the shipped filter (does not fully defeat DNS rebinding) | Allowlist hosts, configure `request_filter` (e.g. `block_private_networks()`), pin redirects, isolate egress — network isolation stays primary |
+| **SSRF** | `http(s)` only by default (`file://` opt-in, other schemes rejected); no host/IP validation unless configured; follows redirects; optional `request_filter` over every browser request and the policy's own `robots.txt` fetch (each redirect hop included), with `block_private_networks()` as the shipped filter (does not fully defeat DNS rebinding) | Allowlist hosts, configure `request_filter` (e.g. `block_private_networks()`), pin redirects, isolate egress — network isolation stays primary |
 | **Resource / DoS** | Timeout, rate limiter (incl. capped `Crawl-delay`), capture dimension + decode pixel caps; opt-in `max_concurrent_renders` and `max_total_seconds` (both unset by default); opt-in V8-heap cap via `browser_args`; no in-process memory/CPU cap (by design) | Container limits (the enforceable cap), set `max_concurrent_renders` + `max_total_seconds`, cap the V8 heap via `browser_args`, network isolation |
 | **`robots.txt`** | Respected by default (incl. `Crawl-delay`, capped at 30s), but fails open; can be disabled | Don't disable without authorization; gate authorization yourself before calling |
 
