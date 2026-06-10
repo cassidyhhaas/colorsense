@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pytest
+from coloraide import Color as CAColor
 
 from colorsense.color.primitives import (
     composite_over,
@@ -42,6 +43,66 @@ def test_delta_e_identity_is_zero() -> None:
 def test_delta_e_different_colors_positive() -> None:
     assert delta_e(WHITE, BLACK) > 0.0
     assert delta_e(BLUE, GRAY) > 0.0
+
+
+def test_delta_e_black_white_is_about_one() -> None:
+    # OKLab lightness spans [0, 1]; black vs white is a pure-lightness distance of ~1.
+    assert delta_e(BLACK, WHITE) == pytest.approx(1.0, abs=1e-6)
+
+
+# A meaningful spread: saturated hues around the wheel, grays, near-black/near-white, and
+# alpha-carrying inputs (alpha is ignored by deltaEOK; the pairs prove it stays ignored).
+# Each color is canonicalized through its hex (``_color(_color(v).hex)``): the cached OKLCH
+# coords are computed from the *unquantized* sRGB input, while the coloraide reference below
+# is built from the 8-bit hex — for non-hex-exact inputs (hsl) those differ by ~1e-3, which
+# is quantization, not a delta_e formula error. The canonical form pins both sides to the
+# same 8-bit color so the formula equivalence is testable at 1e-7. The original alpha is
+# carried over so the grid still exercises alpha-bearing colors (deltaEOK ignores alpha).
+def _canonical(value: str) -> Color:
+    c = _color(value)
+    return _color(c.hex).model_copy(update={"alpha": c.alpha})
+
+
+_DELTA_E_GRID = [
+    _canonical(v)
+    for v in [
+        "#ff0000",
+        "#00ff00",
+        "#0000ff",
+        "#ffff00",
+        "#00ffff",
+        "#ff00ff",
+        "#ff8800",
+        "#8800ff",
+        "#22aa66",
+        "#aa2266",
+        "hsl(15, 90%, 55%)",
+        "hsl(195, 80%, 40%)",
+        "hsl(285, 70%, 65%)",
+        "#000000",
+        "#ffffff",
+        "#010101",
+        "#fefefe",
+        "#0a0a0a",
+        "#f5f5f5",
+        "#808080",
+        "#404040",
+        "#c0c0c0",
+        "rgba(255, 0, 0, 0.5)",
+        "rgba(0, 0, 255, 0.25)",
+        "rgba(17, 24, 39, 0.8)",
+        "rgba(128, 128, 128, 0.1)",
+    ]
+]
+
+
+def test_delta_e_matches_coloraide_deltaeok() -> None:
+    # The cached-OKLCH fast path must agree with coloraide's deltaEOK across the whole
+    # pairwise grid (saturated hues, grays, near-black/white, alpha-carrying colors).
+    for a in _DELTA_E_GRID:
+        for b in _DELTA_E_GRID:
+            expected = float(CAColor(a.hex).delta_e(CAColor(b.hex), method="ok"))
+            assert delta_e(a, b) == pytest.approx(expected, abs=1e-7), (a.hex, b.hex)
 
 
 def test_composite_half_alpha_black_over_white_is_midgray() -> None:

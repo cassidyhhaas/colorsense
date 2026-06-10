@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from conftest import file_policy
 
 from colorsense import LIGHT_AND_DARK, analyze
 from colorsense.color.primitives import delta_e, parse_css_color
@@ -42,14 +43,16 @@ FIT_SCORE_TOL = 0.05
 # are matched perceptually, never by exact hex. Well below cross-hue distances (~0.37).
 COLOR_MATCH_TOL = 0.10
 
-# Every test here drives a real Chromium render; skip in browserless CI.
-pytestmark = pytest.mark.browser
+# The site tests drive a real Chromium render and are marked ``browser`` individually
+# (not via module-level ``pytestmark``) so the browserless unit tests of the golden
+# helper at the bottom of this file still run under ``-m "not browser"``.
 
 
 async def _analyze(fixture: Path) -> AnalysisResult:
     # These fixtures exercise the full light+dark path (ds_site has a real dark-mode block;
     # the goldens pin both themes), so request dark explicitly — analyze defaults to light.
-    return await analyze(fixture.as_uri(), themes=LIGHT_AND_DARK)
+    # file:// fixtures require the explicit allow_file_urls opt-in.
+    return await analyze(fixture.as_uri(), themes=LIGHT_AND_DARK, politeness=file_policy())
 
 
 # ---------------------------------------------------------------------------
@@ -121,8 +124,13 @@ def _digest(result: AnalysisResult) -> dict[str, Any]:
     }
 
 
-def _check_golden(name: str, digest: dict[str, Any]) -> None:
+def _check_golden(name: str, digest: dict[str, Any], golden_dir: Path = GOLDEN_DIR) -> None:
     """Assert ``digest`` matches the stored golden, regenerating it on demand.
+
+    A golden is (re)written only under ``UPDATE_GOLDEN``; a *missing* golden without
+    the env var fails loudly instead of silently self-creating-and-passing (which
+    would let a renamed/deleted golden turn the test vacuous). ``golden_dir`` is
+    parameterized (default: the real goldens dir) so the helper itself is unit-testable.
 
     Three comparison modes, by field stability:
 
@@ -132,11 +140,16 @@ def _check_golden(name: str, digest: dict[str, Any]) -> None:
     * everything else (themes, token classifications, token-resolved status colors,
       ``single_theme``, ``has_divergence``) — computed-style/structural, compared exactly.
     """
-    path = GOLDEN_DIR / f"{name}.json"
-    if os.environ.get("UPDATE_GOLDEN") or not path.exists():
-        GOLDEN_DIR.mkdir(exist_ok=True)
+    path = golden_dir / f"{name}.json"
+    if os.environ.get("UPDATE_GOLDEN"):
+        golden_dir.mkdir(exist_ok=True)
         path.write_text(json.dumps(digest, indent=2, sort_keys=True) + "\n")
         return
+    if not path.exists():
+        pytest.fail(
+            f"golden snapshot {path} is missing; regenerate it with "
+            f"`UPDATE_GOLDEN=1 uv run pytest tests/test_integration_sites.py`"
+        )
 
     expected = json.loads(path.read_text())
 
@@ -179,6 +192,7 @@ def _check_golden(name: str, digest: dict[str, Any]) -> None:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.browser
 async def test_design_system_site(fixtures_dir: Path) -> None:
     result = await _analyze(fixtures_dir / "ds_site.html")
 
@@ -221,6 +235,7 @@ async def test_design_system_site(fixtures_dir: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.browser
 async def test_legacy_site(fixtures_dir: Path) -> None:
     result = await _analyze(fixtures_dir / "legacy_site.html")
 
@@ -243,6 +258,7 @@ async def test_legacy_site(fixtures_dir: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.browser
 async def test_cards_site(fixtures_dir: Path) -> None:
     result = await _analyze(fixtures_dir / "cards_site.html")
 
@@ -258,3 +274,76 @@ async def test_cards_site(fixtures_dir: Path) -> None:
     assert _color_near(_dominant_role_colors(palette.roles), "#f1f5f9")
 
     _check_golden("cards_site", _digest(result))
+
+
+# ---------------------------------------------------------------------------
+# Browserless unit tests of the golden helper itself
+# ---------------------------------------------------------------------------
+
+
+def _unit_digest() -> dict[str, Any]:
+    """A minimal but structurally complete digest for exercising ``_check_golden``."""
+    return {
+        "themes": ["light"],
+        "single_theme": True,
+        "tokens": {"--color-primary": "brand_primary"},
+        "status_colors": ["#dc2626"],
+        "has_divergence": False,
+        "theme_structure": {
+            "light": {
+                "populated_roles": ["accent", "primary"],
+                "top_role_colors": {"accent": "#2563eb", "primary": "#ffffff"},
+            }
+        },
+        "fit_score": 0.8123,
+    }
+
+
+def test_check_golden_missing_golden_fails(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A missing golden without UPDATE_GOLDEN must FAIL, never self-create-and-pass.
+
+    Regression guard: the helper used to write the golden and return on `not
+    path.exists()`, so a deleted/renamed golden silently passed forever.
+    """
+    monkeypatch.delenv("UPDATE_GOLDEN", raising=False)
+
+    with pytest.raises(pytest.fail.Exception) as excinfo:
+        _check_golden("no_such_site", _unit_digest(), golden_dir=tmp_path)
+
+    message = str(excinfo.value)
+    assert "no_such_site.json" in message
+    assert "UPDATE_GOLDEN=1" in message
+    # And it must not have created the file as a side effect.
+    assert not (tmp_path / "no_such_site.json").exists()
+
+
+def test_check_golden_update_env_writes_golden(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Under UPDATE_GOLDEN the helper (re)writes the golden and passes."""
+    monkeypatch.setenv("UPDATE_GOLDEN", "1")
+    digest = _unit_digest()
+
+    _check_golden("unit_site", dict(digest), golden_dir=tmp_path)
+
+    written = json.loads((tmp_path / "unit_site.json").read_text())
+    assert written == digest
+
+
+def test_check_golden_matches_and_mismatches(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A digest matching a stored golden passes; a structural change fails."""
+    monkeypatch.setenv("UPDATE_GOLDEN", "1")
+    _check_golden("unit_site", _unit_digest(), golden_dir=tmp_path)
+    monkeypatch.delenv("UPDATE_GOLDEN")
+
+    # Same digest round-trips cleanly (note: _check_golden mutates via pop, so
+    # always pass a fresh dict).
+    _check_golden("unit_site", _unit_digest(), golden_dir=tmp_path)
+
+    # A structural (exactly-compared) field change must fail.
+    changed = _unit_digest()
+    changed["has_divergence"] = True
+    with pytest.raises(AssertionError):
+        _check_golden("unit_site", changed, golden_dir=tmp_path)

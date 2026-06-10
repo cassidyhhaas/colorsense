@@ -4,8 +4,13 @@ This module gives a consumer the tools to fetch pages considerately — a config
 User-Agent, an opt-out ``robots.txt`` gate, a per-host rate limiter, and a render cache —
 but it deliberately does **not** decide whether a given fetch is authorized. Authorization
 is the caller's responsibility (see the README note on embedded vs server-side use). The
-defaults are conservative: ``robots.txt`` is respected and same-host fetches are spaced by
-one second.
+defaults are conservative: ``robots.txt`` is respected (including its ``Crawl-delay``,
+capped), same-host fetches are spaced by one second, and only ``http(s)`` URLs are fetched
+(``file://`` is an explicit opt-in).
+
+The policy is the only place networking policy is enforced: calling
+:func:`colorsense.harvest.harvest_page` or :class:`~colorsense.harvest.RenderSession`
+directly bypasses every gate here (scheme validation, robots, throttle, cache).
 
 ``PolitenessPolicy`` is the single object the pipeline talks to. It is *not* a frozen
 cross-WP contract (it never crosses the ``models.py`` boundary), so it lives here rather
@@ -18,17 +23,18 @@ import asyncio
 import time
 from collections import OrderedDict
 from collections.abc import Awaitable, Callable
+from typing import Protocol
 from urllib.parse import urlsplit, urlunsplit
 from urllib.robotparser import RobotFileParser
 
 import httpx
 
 from colorsense.config import Config
-from colorsense.harvest import harvest_page
+from colorsense.harvest import SharedBrowser, harvest_page
 from colorsense.models import Harvest, Theme, Viewport
 
 DEFAULT_USER_AGENT = (
-    "Mozilla/5.0 (compatible; colorsense/0.1; +https://github.com/colorsense/colorsense)"
+    "Mozilla/5.0 (compatible; colorsense/0.1; +https://github.com/cassidyhhaas/colorsense)"
 )
 """A real browser-engine base token plus an identifiable ``colorsense`` token and a URL."""
 
@@ -50,15 +56,54 @@ DEFAULT_MIN_INTERVAL = 1.0
 DEFAULT_MAX_CACHE_ENTRIES = 256
 """Default upper bound on the render cache (largest objects; LRU-evicted past this)."""
 
-# Schemes for which robots.txt and rate limiting apply. ``file://`` fixtures (used by the
-# test suite) carry no host and no robots concept, so they bypass both gates.
+DEFAULT_MAX_CRAWL_DELAY = 30.0
+"""Cap (seconds) applied to a ``robots.txt`` ``Crawl-delay`` before it joins the limiter.
+
+A hostile or typo'd ``robots.txt`` (``Crawl-delay: 86400``) must not be able to stall a
+pipeline arbitrarily, so the learned delay is clamped to this before being combined with
+``min_interval``. Consumers who genuinely want to honor longer delays can raise
+``max_crawl_delay`` on their policy.
+"""
+
+# Schemes for which robots.txt and rate limiting apply. ``file://`` URLs (opt-in via
+# ``allow_file_urls=True``; used by the test suite) carry no host and no robots concept,
+# so they bypass both gates.
 _NETWORK_SCHEMES = frozenset({"http", "https"})
 
 # All I/O seams are async: the harvester renders via async Playwright and the robots
 # loader fetches over async httpx. The clock stays synchronous (a plain time source);
-# only the sleeper is awaited so rate-limit waits yield the event loop.
-Harvester = Callable[[str, Theme, Config, Viewport], Awaitable[Harvest]]
-RobotsLoader = Callable[[str], Awaitable[str | None]]
+# only the sleeper is awaited so rate-limit waits yield the event loop. Both network
+# seams carry the policy's configured ``user_agent`` so the identity sent on the wire
+# (robots GET *and* page render) is the one the consumer configured.
+
+
+class Harvester(Protocol):
+    """Render seam: ``(url, theme, config, viewport, *, user_agent=, request_filter=, browser=)``.
+
+    A :class:`~typing.Protocol` rather than a plain ``Callable`` because the policy passes
+    its configured wire UA as the keyword-only ``user_agent``, its egress
+    ``request_filter`` predicate, and the caller-supplied shared-``browser`` handle (all
+    with defaults, so direct callers that ignore them remain expressible). The ``browser``
+    handle is opaque to the policy — it is threaded through from :meth:`PolitenessPolicy.fetch`
+    untouched; the harvester (and ultimately the render session) owns what it means.
+    Defaults to :func:`colorsense.harvest.harvest_page`.
+    """
+
+    def __call__(
+        self,
+        url: str,
+        theme: Theme,
+        config: Config,
+        viewport: Viewport,
+        *,
+        user_agent: str | None = None,
+        request_filter: Callable[[str], bool] | None = None,
+        browser: SharedBrowser | None = None,
+    ) -> Awaitable[Harvest]: ...
+
+
+RobotsLoader = Callable[[str, str], Awaitable[str | None]]
+"""Robots seam: ``(robots_url, user_agent) -> text | None`` — the UA is sent on the wire."""
 Clock = Callable[[], float]
 Sleeper = Callable[[float], Awaitable[None]]
 
@@ -71,6 +116,23 @@ class RobotsDisallowedError(RuntimeError):
         self.url = url
 
 
+class UnsupportedSchemeError(ValueError):
+    """Raised by :meth:`PolitenessPolicy.fetch` for URLs whose scheme it refuses to render.
+
+    Only ``http``/``https`` URLs are fetchable by default. ``file://`` (a local-file-read
+    primitive) is an explicit opt-in via ``PolitenessPolicy(allow_file_urls=True)``; every
+    other scheme (``ftp``, ``data``, ``javascript``, scheme-less, ...) is always rejected.
+    The offending URL is available as :attr:`url`.
+    """
+
+    def __init__(self, url: str, *, hint: str | None = None) -> None:
+        message = f"unsupported URL scheme for fetching {url!r}"
+        if hint:
+            message = f"{message} ({hint})"
+        super().__init__(message)
+        self.url = url
+
+
 def _robots_url_for(url: str) -> str | None:
     """Return the ``robots.txt`` URL for ``url``'s host, or ``None`` for non-network URLs."""
     parts = urlsplit(url)
@@ -79,16 +141,18 @@ def _robots_url_for(url: str) -> str | None:
     return urlunsplit((parts.scheme, parts.netloc, "/robots.txt", "", ""))
 
 
-async def _default_robots_loader(robots_url: str) -> str | None:
+async def _default_robots_loader(robots_url: str, user_agent: str) -> str | None:
     """Fetch ``robots.txt`` text over http(s); return ``None`` on any failure.
 
-    A missing or unreachable ``robots.txt`` is treated by callers as "no rules", which
-    permits fetching — the conventional interpretation.
+    ``user_agent`` is the policy's configured wire UA, sent as the ``User-Agent`` header so
+    the robots GET is attributable to the same identity as the page render. A missing or
+    unreachable ``robots.txt`` is treated by callers as "no rules", which permits fetching —
+    the conventional interpretation.
     """
     try:
         async with httpx.AsyncClient(
             timeout=10.0,
-            headers={"User-Agent": DEFAULT_USER_AGENT},
+            headers={"User-Agent": user_agent},
             follow_redirects=True,
         ) as client:
             response = await client.get(robots_url)
@@ -109,8 +173,9 @@ class PolitenessPolicy:
     Parameters
     ----------
     user_agent:
-        Identifiable User-Agent sent on the wire when reading ``robots.txt`` (the renderer's
-        own UA is set elsewhere). Defaults to :data:`DEFAULT_USER_AGENT`.
+        Identifiable User-Agent sent on the wire for *both* the ``robots.txt`` GET and the
+        page render itself (forwarded to the harvester, which sets it on the browser
+        context). Defaults to :data:`DEFAULT_USER_AGENT`.
     robots_agent:
         The product token matched against ``robots.txt`` ``User-agent:`` groups by
         :meth:`can_fetch`. Kept separate from ``user_agent`` because the descriptive wire UA
@@ -119,9 +184,35 @@ class PolitenessPolicy:
     respect_robots:
         When ``True`` (default), :meth:`can_fetch` consults ``robots.txt`` and
         :meth:`fetch` raises :class:`RobotsDisallowedError` on a disallow. Set ``False`` to
-        bypass the check entirely — the consumer then owns authorization.
+        bypass the check entirely — the consumer then owns authorization. Disabling robots
+        also disables ``Crawl-delay`` honoring (no ``robots.txt`` is ever fetched).
+    allow_file_urls:
+        Whether :meth:`fetch` may render ``file://`` URLs. ``False`` by default —
+        ``file://`` reads arbitrary local files, so it must be an explicit opt-in (the test
+        suite opts in to render its local fixtures). When allowed, ``file://`` still
+        bypasses the robots gate and the rate limiter: it has no host and no robots
+        concept. Schemes other than ``http``/``https``/``file`` are always rejected;
+        rejections raise :class:`UnsupportedSchemeError`.
+    request_filter:
+        Optional synchronous predicate over **every request URL the browser makes** while
+        rendering — the navigation itself *and* all sub-resources (scripts, images, XHR/
+        ``fetch`` issued by the page's own JS). Returning ``False`` aborts that request.
+        This is the in-library mechanism against sub-resource SSRF: validating the
+        navigation URL alone cannot stop the rendered page from requesting internal
+        endpoints (e.g. ``169.254.169.254``). A predicate that *raises* fails closed (the
+        request is aborted). ``None`` (default) installs no interception at all — zero
+        overhead.
     min_interval:
-        Minimum seconds between same-host fetches (per-host rate limiter).
+        Minimum seconds between same-host fetches (per-host rate limiter). When the host's
+        ``robots.txt`` declares a ``Crawl-delay`` for this policy's ``robots_agent``, the
+        effective per-host interval is ``max(min_interval, crawl_delay)`` with the crawl
+        delay capped at ``max_crawl_delay``. The delay is learned from the ``robots.txt``
+        fetch itself, which is the host's *first* throttled request — so it applies from
+        the second fetch to that host onward.
+    max_crawl_delay:
+        Upper bound (seconds) on an honored ``robots.txt`` ``Crawl-delay``. Defaults to
+        :data:`DEFAULT_MAX_CRAWL_DELAY` (30.0) so a hostile or typo'd ``robots.txt``
+        cannot stall a pipeline arbitrarily; raise it to honor longer delays.
     max_cache_entries:
         Upper bound on the render cache (``_cache``), which holds full :class:`Harvest`
         objects — the largest things this policy retains. When the cache would exceed this,
@@ -144,7 +235,10 @@ class PolitenessPolicy:
         user_agent: str = DEFAULT_USER_AGENT,
         robots_agent: str = DEFAULT_ROBOTS_AGENT,
         respect_robots: bool = True,
+        allow_file_urls: bool = False,
+        request_filter: Callable[[str], bool] | None = None,
         min_interval: float = DEFAULT_MIN_INTERVAL,
+        max_crawl_delay: float = DEFAULT_MAX_CRAWL_DELAY,
         max_cache_entries: int | None = DEFAULT_MAX_CACHE_ENTRIES,
         harvester: Harvester = harvest_page,
         robots_loader: RobotsLoader = _default_robots_loader,
@@ -154,7 +248,10 @@ class PolitenessPolicy:
         self.user_agent = user_agent
         self.robots_agent = robots_agent
         self.respect_robots = respect_robots
+        self.allow_file_urls = allow_file_urls
+        self.request_filter = request_filter
         self.min_interval = min_interval
+        self.max_crawl_delay = max_crawl_delay
         # ``0``/``None`` mean unbounded; any positive value is the LRU ceiling.
         self.max_cache_entries = max_cache_entries
         self._harvester = harvester
@@ -174,6 +271,11 @@ class PolitenessPolicy:
         # consumer fetches (tiny in practice), not by request volume.
         self._robots_cache: dict[str, RobotFileParser | None] = {}
         self._last_fetch: dict[str, float] = {}
+        # Per-host ``Crawl-delay`` learned from robots.txt, keyed by netloc — the same key
+        # space as ``_last_fetch`` so the limiter can join the two. Populated as a side
+        # effect of loading a robots parser; never populated when ``respect_robots=False``
+        # (no robots fetch happens, so no crawl delay is ever honored).
+        self._crawl_delay: dict[str, float] = {}
         # Serializes only the rate-limiter's read-and-stamp step (not the sleep), so
         # concurrent fetches (e.g. light + dark renders gathered by analyze()) reserve
         # distinct same-host slots and honor min_interval instead of racing through on a
@@ -181,19 +283,52 @@ class PolitenessPolicy:
         # never serialize through this one mutex.
         self._throttle_lock = asyncio.Lock()
 
+    # -- scheme gate ---------------------------------------------------------
+
+    def _validate_scheme(self, url: str) -> None:
+        """Raise :class:`UnsupportedSchemeError` unless ``url``'s scheme is fetchable.
+
+        ``http``/``https`` are always allowed (the robots/throttle gates apply downstream);
+        ``file`` only when this policy opted in via ``allow_file_urls=True``; everything
+        else (``ftp``, ``data``, ``javascript``, scheme-less, ...) is always rejected.
+        """
+        scheme = urlsplit(url).scheme.lower()
+        if scheme in _NETWORK_SCHEMES:
+            return
+        if scheme == "file":
+            if self.allow_file_urls:
+                return
+            raise UnsupportedSchemeError(
+                url,
+                hint=(
+                    "file:// URLs read local files and are disabled by default; "
+                    "opt in with PolitenessPolicy(allow_file_urls=True)"
+                ),
+            )
+        raise UnsupportedSchemeError(url)
+
     # -- robots --------------------------------------------------------------
 
     async def _robots_parser(self, robots_url: str) -> RobotFileParser | None:
         """Load and memoize a parser for ``robots_url``; ``None`` when no rules apply."""
         if robots_url in self._robots_cache:
             return self._robots_cache[robots_url]
-        text = await self._robots_loader(robots_url)
+        # The configured wire UA identifies the robots GET, same as the page render.
+        text = await self._robots_loader(robots_url, self.user_agent)
         parser: RobotFileParser | None
         if text is None:
             parser = None
         else:
             parser = RobotFileParser()
             parser.parse(text.splitlines())
+            # Record the host's ``Crawl-delay`` (for our robots agent) so the rate limiter
+            # can honor it. The netloc key matches ``_last_fetch``. Because the robots GET
+            # is itself the host's first throttled request, the delay learned here only
+            # paces the *second* fetch to the host onward — the first fetch has already
+            # passed the limiter by the time this parser exists.
+            delay = parser.crawl_delay(self.robots_agent)
+            if delay is not None:
+                self._crawl_delay[urlsplit(robots_url).netloc] = float(delay)
         self._robots_cache[robots_url] = parser
         return parser
 
@@ -218,14 +353,30 @@ class PolitenessPolicy:
 
     # -- rate limiting -------------------------------------------------------
 
+    def _host_interval(self, host: str) -> float:
+        """Effective pacing interval for ``host``: ``max(min_interval, capped Crawl-delay)``.
+
+        The crawl delay (when the host's ``robots.txt`` declared one) is clamped to
+        ``max_crawl_delay`` first, so a hostile/typo'd directive cannot stall the pipeline.
+        With ``respect_robots=False`` no robots is ever fetched, ``_crawl_delay`` stays
+        empty, and this reduces to ``min_interval``.
+        """
+        crawl_delay = self._crawl_delay.get(host)
+        if crawl_delay is None:
+            return self.min_interval
+        return max(self.min_interval, min(crawl_delay, self.max_crawl_delay))
+
     async def _throttle(self, url: str) -> None:
-        """Wait until ``min_interval`` has elapsed since the last fetch to this host.
+        """Wait until the host's effective interval has elapsed since its last fetch.
+
+        The interval is :meth:`_host_interval` — ``min_interval`` raised to the host's
+        (capped) ``robots.txt`` ``Crawl-delay`` once one has been learned.
 
         The read-and-stamp step is guarded by an :class:`asyncio.Lock` so concurrent callers
         serialize correctly, but the actual sleep happens *outside* the lock: we reserve this
-        caller's slot by stamping the projected next-fetch time (``last + min_interval``)
+        caller's slot by stamping the projected next-fetch time (``last + interval``)
         before releasing, so two same-host callers arriving together chain (each waits
-        ``min_interval`` after the previous) instead of both computing a zero wait — yet
+        the interval after the previous) instead of both computing a zero wait — yet
         waits for *different* hosts no longer serialize through one global mutex.
         """
         parts = urlsplit(url)
@@ -238,7 +389,8 @@ class PolitenessPolicy:
             # Projected fetch time: ``now`` if the interval has already elapsed, else the
             # next free slot after the previous (reserved) fetch. Stamping it under the lock
             # is what makes concurrent same-host callers chain rather than collide.
-            projected = now if last is None else max(now, last + self.min_interval)
+            interval = self._host_interval(host)
+            projected = now if last is None else max(now, last + interval)
             self._last_fetch[host] = projected
         wait = projected - now
         if wait > 0:
@@ -246,8 +398,28 @@ class PolitenessPolicy:
 
     # -- fetch ---------------------------------------------------------------
 
-    async def fetch(self, url: str, theme: Theme, config: Config, viewport: Viewport) -> Harvest:
+    async def fetch(
+        self,
+        url: str,
+        theme: Theme,
+        config: Config,
+        viewport: Viewport,
+        *,
+        browser: SharedBrowser | None = None,
+    ) -> Harvest:
         """Return a :class:`Harvest` for ``url``/``theme``/``viewport``, politely.
+
+        ``browser`` is an optional shared-browser handle forwarded to the harvester
+        verbatim — the policy itself knows nothing about browser lifecycle (neither
+        launching nor closing). :func:`colorsense.analyze` passes one handle to all of a
+        call's theme fetches so they share a single Chromium launch; the handle is lazy,
+        so a fetch served from the cache (or coalesced onto an in-flight leader) never
+        triggers a launch. The cache key is unchanged (URL + theme + viewport): sharing a
+        browser does not change *what* is rendered, only where the context lives.
+
+        The URL scheme is validated first — before even the cache lookup, so a previously
+        cached ``file://`` harvest can never be served by a policy that forbids file URLs
+        (raises :class:`UnsupportedSchemeError`; see ``allow_file_urls``).
 
         Cache hits return immediately (no robots check, no throttle, no render) and mark the
         entry most-recently-used. Otherwise the per-host rate limiter is applied, the robots
@@ -263,6 +435,10 @@ class PolitenessPolicy:
         exception (the failure is not cached, and the next fetch re-renders). Distinct keys
         never share, so unrelated renders still run in parallel.
         """
+        # Gate the scheme BEFORE the cache lookup: order matters for clarity (each policy
+        # owns its cache, but the gate must visibly come first) and ensures a cached
+        # ``file://`` harvest is never served once file URLs are forbidden.
+        self._validate_scheme(url)
         key = _cache_key(url, theme, viewport)
         cached = self._cache.get(key)
         if cached is not None:
@@ -292,7 +468,17 @@ class PolitenessPolicy:
             await self._throttle(url)
             if not await self.can_fetch(url):
                 raise RobotsDisallowedError(url)
-            harvest = await self._harvester(url, theme, config, viewport)
+            # The configured wire UA rides along so the page render is attributable too,
+            # and the egress request filter (if any) gates every request the browser makes.
+            harvest = await self._harvester(
+                url,
+                theme,
+                config,
+                viewport,
+                user_agent=self.user_agent,
+                request_filter=self.request_filter,
+                browser=browser,
+            )
         except BaseException as err:  # re-raised after fanning out to followers
             # Fan the failure out to every waiting follower, then re-raise to the leader.
             # The failure is never cached. ``set_exception`` is skipped if the Future was

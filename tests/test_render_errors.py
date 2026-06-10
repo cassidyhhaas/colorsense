@@ -13,15 +13,19 @@ the test deterministic and browser-free.
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
+import httpx
 import pytest
 from playwright.async_api import Error as PlaywrightError
 
 import colorsense.harvest as harvest_mod
-from colorsense.config import load_default_config
-from colorsense.harvest import RenderError, harvest_page
+import colorsense.harvest.render as render_mod
+from colorsense.config import Config, load_default_config
+from colorsense.harvest import RenderError, SharedBrowser, harvest_page
 from colorsense.harvest.render import RenderSession
-from colorsense.models import Theme, Viewport
-from colorsense.net.politeness import PolitenessPolicy
+from colorsense.models import Harvest, Theme, Viewport
+from colorsense.net.politeness import PolitenessPolicy, _default_robots_loader
 
 VIEWPORT = Viewport(width=1280, height=800, device_scale_factor=1.0)
 
@@ -30,7 +34,7 @@ VIEWPORT = Viewport(width=1280, height=800, device_scale_factor=1.0)
 
 
 def _loader_for(text: str | None):
-    async def _loader(_url: str) -> str | None:
+    async def _loader(_url: str, _user_agent: str) -> str | None:
         return text
 
     return _loader
@@ -182,3 +186,242 @@ async def test_aexit_swallows_teardown_errors_but_still_closes_rest() -> None:
     assert pw.stops == 1
     assert session._browser is None
     assert session._playwright is None
+
+
+# --- Configured user_agent reaches the wire (robots GET + page render) -----------------
+
+
+CUSTOM_UA = "colorsense-tests/1.0 (+https://example.test/contact)"
+
+
+class _RecordingHarvester:
+    """Harvester fake capturing the keyword-only seams it was invoked with."""
+
+    def __init__(self) -> None:
+        self.user_agents: list[str | None] = []
+        self.request_filters: list[Callable[[str], bool] | None] = []
+
+    async def __call__(
+        self,
+        url: str,
+        theme: Theme,
+        config: Config,
+        viewport: Viewport,
+        *,
+        user_agent: str | None = None,
+        request_filter: Callable[[str], bool] | None = None,
+        browser: SharedBrowser | None = None,
+    ) -> Harvest:
+        self.user_agents.append(user_agent)
+        self.request_filters.append(request_filter)
+        return Harvest(url=url, theme=theme, viewport=viewport, screenshot_bins=[])
+
+
+async def test_policy_passes_configured_user_agent_to_robots_loader() -> None:
+    # The robots GET must identify as the policy's configured UA, not the module default
+    # (the bug: ``_default_robots_loader`` hardcoded DEFAULT_USER_AGENT).
+    seen: list[tuple[str, str]] = []
+
+    async def recording_loader(url: str, user_agent: str) -> str | None:
+        seen.append((url, user_agent))
+        return None  # no rules => permitted
+
+    policy = PolitenessPolicy(user_agent=CUSTOM_UA, robots_loader=recording_loader)
+    assert await policy.can_fetch("https://example.com/page") is True
+    assert seen == [("https://example.com/robots.txt", CUSTOM_UA)]
+
+
+async def test_policy_passes_configured_user_agent_to_harvester() -> None:
+    # The page render must go out under the configured UA too (the bug: fetch never
+    # forwarded it, so navigation used the stock HeadlessChrome UA).
+    harvester = _RecordingHarvester()
+
+    async def no_robots(_url: str, _user_agent: str) -> str | None:
+        return None
+
+    policy = PolitenessPolicy(user_agent=CUSTOM_UA, harvester=harvester, robots_loader=no_robots)
+    config = load_default_config()
+    await policy.fetch("https://example.com/page", Theme.light, config, VIEWPORT)
+    assert harvester.user_agents == [CUSTOM_UA]
+
+
+async def test_policy_passes_request_filter_to_harvester() -> None:
+    # The configured egress predicate must reach the harvester (which installs it as a
+    # browser route), and the default (None) must pass through as None.
+    harvester = _RecordingHarvester()
+
+    async def no_robots(_url: str, _user_agent: str) -> str | None:
+        return None
+
+    def only_example(url: str) -> bool:
+        return url.startswith("https://example.com/")
+
+    config = load_default_config()
+    policy = PolitenessPolicy(
+        harvester=harvester, robots_loader=no_robots, request_filter=only_example
+    )
+    await policy.fetch("https://example.com/page", Theme.light, config, VIEWPORT)
+    assert harvester.request_filters == [only_example]
+
+    default_policy = PolitenessPolicy(harvester=harvester, robots_loader=no_robots)
+    await default_policy.fetch("https://example.com/page", Theme.light, config, VIEWPORT)
+    assert harvester.request_filters == [only_example, None]
+
+
+# --- _route_handler: egress filter abort/continue logic (browserless) -------------------
+
+
+class _FakeRequest:
+    def __init__(self, url: str) -> None:
+        self.url = url
+
+
+class _FakeRoute:
+    """A fake Playwright ``Route`` recording abort/continue calls."""
+
+    def __init__(self, url: str) -> None:
+        self.request = _FakeRequest(url)
+        self.aborted = 0
+        self.continued = 0
+
+    async def abort(self) -> None:
+        self.aborted += 1
+
+    async def continue_(self) -> None:
+        self.continued += 1
+
+
+async def test_route_handler_continues_allowed_request() -> None:
+    handler = render_mod._route_handler(lambda url: url.startswith("https://ok.test/"))
+    route = _FakeRoute("https://ok.test/asset.css")
+    await handler(route)  # type: ignore[arg-type]
+    assert (route.continued, route.aborted) == (1, 0)
+
+
+async def test_route_handler_aborts_blocked_request() -> None:
+    handler = render_mod._route_handler(lambda url: url.startswith("https://ok.test/"))
+    route = _FakeRoute("http://169.254.169.254/latest/meta-data/")
+    await handler(route)  # type: ignore[arg-type]
+    assert (route.continued, route.aborted) == (0, 1)
+
+
+async def test_route_handler_fails_closed_on_predicate_error() -> None:
+    # A buggy predicate must BLOCK, not permit: the raised error is swallowed and the
+    # request aborted.
+    def broken(_url: str) -> bool:
+        raise RuntimeError("predicate boom")
+
+    handler = render_mod._route_handler(broken)
+    route = _FakeRoute("https://ok.test/page")
+    await handler(route)  # type: ignore[arg-type]
+    assert (route.continued, route.aborted) == (0, 1)
+
+
+async def test_default_robots_loader_sends_given_user_agent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The default loader must put the UA it is *given* on the wire. httpx.AsyncClient is
+    # swapped for one riding a MockTransport so the request headers can be captured
+    # without any network.
+    sent_uas: list[str] = []
+    robots_text = "User-agent: *\nDisallow:\n"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        sent_uas.append(request.headers["user-agent"])
+        return httpx.Response(200, text=robots_text)
+
+    transport = httpx.MockTransport(handler)
+    real_client = httpx.AsyncClient
+
+    def client_with_mock_transport(**kwargs: object) -> httpx.AsyncClient:
+        return real_client(transport=transport, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(httpx, "AsyncClient", client_with_mock_transport)
+
+    text = await _default_robots_loader("https://example.test/robots.txt", CUSTOM_UA)
+    assert text == robots_text
+    assert sent_uas == [CUSTOM_UA]
+
+
+# --- RenderSession forwards user_agent to new_context ----------------------------------
+
+
+class _UAFakePage:
+    pass
+
+
+class _UAFakeContext:
+    async def new_page(self) -> _UAFakePage:
+        return _UAFakePage()
+
+    async def close(self) -> None:
+        return None
+
+
+class _UAFakeBrowser:
+    """Fake browser recording every kwargs dict passed to ``new_context``."""
+
+    def __init__(self) -> None:
+        self.context_kwargs: list[dict[str, object]] = []
+
+    async def new_context(self, **kwargs: object) -> _UAFakeContext:
+        self.context_kwargs.append(kwargs)
+        return _UAFakeContext()
+
+    async def close(self) -> None:
+        return None
+
+
+class _UAFakeChromium:
+    def __init__(self, browser: _UAFakeBrowser) -> None:
+        self._browser = browser
+
+    async def launch(self, **_kwargs: object) -> _UAFakeBrowser:
+        return self._browser
+
+
+class _UAFakePlaywright:
+    def __init__(self, browser: _UAFakeBrowser) -> None:
+        self.chromium = _UAFakeChromium(browser)
+
+    async def stop(self) -> None:
+        return None
+
+
+class _UAFakePlaywrightStarter:
+    def __init__(self, browser: _UAFakeBrowser) -> None:
+        self._browser = browser
+
+    async def start(self) -> _UAFakePlaywright:
+        return _UAFakePlaywright(self._browser)
+
+
+def _patch_playwright(monkeypatch: pytest.MonkeyPatch) -> _UAFakeBrowser:
+    browser = _UAFakeBrowser()
+    monkeypatch.setattr(render_mod, "async_playwright", lambda: _UAFakePlaywrightStarter(browser))
+    return browser
+
+
+async def test_render_session_forwards_user_agent_to_new_context(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    browser = _patch_playwright(monkeypatch)
+
+    async with RenderSession(Theme.light, VIEWPORT, user_agent=CUSTOM_UA):
+        pass
+
+    assert len(browser.context_kwargs) == 1
+    assert browser.context_kwargs[0]["user_agent"] == CUSTOM_UA
+
+
+async def test_render_session_default_keeps_stock_user_agent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # No configured UA => ``user_agent=None`` reaches new_context, i.e. Playwright's own
+    # default (the stock UA) — never an empty string or a stale override.
+    browser = _patch_playwright(monkeypatch)
+
+    async with RenderSession(Theme.light, VIEWPORT):
+        pass
+
+    assert browser.context_kwargs[0]["user_agent"] is None

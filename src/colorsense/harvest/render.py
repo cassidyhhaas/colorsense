@@ -1,10 +1,17 @@
 """Playwright (async API) render session.
 
-:class:`RenderSession` is an async context manager that launches a headless Chromium
-browser, opens a page at a fixed :class:`~colorsense.models.Viewport` and color scheme,
-navigates robustly to a URL (guarding ``networkidle`` so ``file://`` pages never hang),
-neutralizes transitions/animations, step-scrolls to trigger lazy content, and detects
-consent/overlay regions whose bounding rects can be masked out of the screenshot.
+:class:`RenderSession` is an async context manager that opens a page at a fixed
+:class:`~colorsense.models.Viewport` and color scheme — in its own headless Chromium, or
+inside an externally supplied :class:`~playwright.async_api.Browser` — navigates robustly
+to a URL (guarding ``networkidle`` so ``file://`` pages never hang), neutralizes
+transitions/animations, step-scrolls to trigger lazy content, and detects consent/overlay
+regions whose bounding rects can be masked out of the screenshot.
+
+:class:`SharedBrowser` is the lazy browser-lifecycle handle that lets multiple sessions
+(e.g. the light and dark renders of one ``analyze()`` call) share a single Chromium
+launch: each theme still gets its own :class:`~playwright.async_api.BrowserContext` —
+contexts carry the color scheme, viewport, User-Agent, and egress route — so one browser
+process suffices.
 
 The Playwright :class:`~playwright.async_api.Page` is exposed as :attr:`RenderSession.page`
 so the other harvest modules can run their own JS against the same live page. Built on the
@@ -14,7 +21,9 @@ FastAPI ``async def`` endpoint) and so sibling theme renders can overlap.
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
+from collections.abc import Awaitable, Callable
 from types import TracebackType
 from typing import Literal, Self
 
@@ -23,6 +32,7 @@ from playwright.async_api import (
     BrowserContext,
     Page,
     Playwright,
+    Route,
     async_playwright,
 )
 
@@ -111,6 +121,95 @@ _CONSENT_RECTS_JS: str = r"""
 """
 
 
+def _route_handler(
+    request_filter: Callable[[str], bool],
+) -> Callable[[Route], Awaitable[None]]:
+    """Build the ``context.route`` handler enforcing ``request_filter`` on every request.
+
+    The predicate sees the request URL (the navigation itself and every sub-resource the
+    rendered page asks for: scripts, images, XHR/``fetch``). ``False`` aborts the request.
+    A predicate that *raises* fails CLOSED — the request is aborted — so a buggy filter can
+    never silently wave traffic through. Module-level so the abort/continue logic is unit
+    testable without a browser.
+    """
+
+    async def handle(route: Route) -> None:
+        try:
+            allowed = request_filter(route.request.url)
+        except Exception:
+            # Fail CLOSED: a broken predicate must block, not permit.
+            allowed = False
+        if allowed:
+            await route.continue_()
+        else:
+            await route.abort()
+
+    return handle
+
+
+class SharedBrowser:
+    """Lazily-launched headless Chromium shared by multiple :class:`RenderSession`\\ s.
+
+    Async context manager owning one Playwright + :class:`~playwright.async_api.Browser`
+    pair. Nothing is launched until the first :meth:`get` call, so a caller whose renders
+    are all served from a cache (or driven by an injected fake harvester) never pays a
+    browser launch. Teardown closes the browser and stops Playwright exactly once —
+    teardown errors are suppressed so an original in-flight exception propagates cleanly —
+    and :meth:`get` refuses to relaunch after teardown.
+
+    Usage::
+
+        async with SharedBrowser() as shared:
+            # each render opens its own context inside the one browser
+            await harvest_page(url, Theme.light, config, viewport, browser=shared)
+            await harvest_page(url, Theme.dark, config, viewport, browser=shared)
+    """
+
+    def __init__(self) -> None:
+        self._playwright: Playwright | None = None
+        self._browser: Browser | None = None
+        self._closed = False
+        # Serializes first-use launching so concurrent get() calls (e.g. sibling theme
+        # renders gathered by analyze()) share one launch instead of racing two.
+        self._lock = asyncio.Lock()
+
+    async def __aenter__(self) -> Self:
+        return self
+
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        tb: TracebackType | None,
+    ) -> None:
+        self._closed = True
+        if self._browser is not None:
+            with contextlib.suppress(Exception):
+                await self._browser.close()
+        if self._playwright is not None:
+            with contextlib.suppress(Exception):
+                await self._playwright.stop()
+        self._browser = None
+        self._playwright = None
+
+    async def get(self) -> Browser:
+        """Return the shared :class:`Browser`, launching it on first use.
+
+        Launch failures propagate as Playwright errors (callers such as
+        :func:`~colorsense.harvest.harvest_page` wrap them into the public
+        :class:`~colorsense.harvest.RenderError`). After teardown this raises
+        :class:`RuntimeError` rather than silently relaunching a browser nobody closes.
+        """
+        async with self._lock:
+            if self._closed:
+                raise RuntimeError("SharedBrowser.get() called after teardown")
+            if self._browser is None:
+                if self._playwright is None:
+                    self._playwright = await async_playwright().start()
+                self._browser = await self._playwright.chromium.launch(headless=True)
+            return self._browser
+
+
 class RenderSession:
     """Context manager wrapping a headless Chromium page at a fixed theme/viewport.
 
@@ -120,13 +219,47 @@ class RenderSession:
             await session.goto(url)
             page = session.page  # run module JS against it
             consent = session.consent_rects
+
+    Parameters
+    ----------
+    user_agent:
+        When not ``None``, the User-Agent string set on the browser context, so page
+        navigations identify themselves with it instead of the stock headless-Chromium UA.
+        The politeness layer passes its configured wire UA through here. ``None`` (the
+        default) keeps Playwright's stock UA.
+    request_filter:
+        When not ``None``, a synchronous predicate over every request URL the browser
+        makes (the navigation and all sub-resources), installed as a ``context.route``
+        interceptor: requests for which it returns ``False`` — or for which it raises
+        (fail closed) — are aborted. ``None`` (the default) installs no route at all, so
+        the unfiltered path has zero interception overhead.
+    browser:
+        When not ``None``, an externally owned :class:`~playwright.async_api.Browser` the
+        session opens its context inside instead of launching its own Chromium (the per-
+        session knobs — color scheme, viewport, UA, egress route — all live on the
+        :class:`~playwright.async_api.BrowserContext`, so sessions sharing one browser stay
+        fully isolated). The session then owns only its context: teardown closes the
+        context but never the external browser, whose lifecycle stays with the caller
+        (see :class:`SharedBrowser`). ``None`` (the default) launches and tears down a
+        dedicated Playwright + Chromium pair as before.
     """
 
-    def __init__(self, theme: Theme, viewport: Viewport) -> None:
+    def __init__(
+        self,
+        theme: Theme,
+        viewport: Viewport,
+        *,
+        user_agent: str | None = None,
+        request_filter: Callable[[str], bool] | None = None,
+        browser: Browser | None = None,
+    ) -> None:
         self._theme = theme
         self._viewport = viewport
+        self._user_agent = user_agent
+        self._request_filter = request_filter
+        self._owns_browser = browser is None
         self._playwright: Playwright | None = None
-        self._browser: Browser | None = None
+        self._browser: Browser | None = browser
         self._context: BrowserContext | None = None
         self._page: Page | None = None
         self._consent_rects: list[Rect] = []
@@ -134,13 +267,22 @@ class RenderSession:
     # -- context manager --------------------------------------------------
 
     async def __aenter__(self) -> Self:
-        self._playwright = await async_playwright().start()
-        self._browser = await self._playwright.chromium.launch(headless=True)
+        if self._owns_browser:
+            self._playwright = await async_playwright().start()
+            self._browser = await self._playwright.chromium.launch(headless=True)
+        assert self._browser is not None  # external browser, or just launched above
+        # ``user_agent=None`` is Playwright's own default (stock headless-Chromium UA), so a
+        # configured UA overrides it and ``None`` passes through unchanged.
         self._context = await self._browser.new_context(
             viewport={"width": self._viewport.width, "height": self._viewport.height},
             device_scale_factor=self._viewport.device_scale_factor,
             color_scheme=_COLOR_SCHEME[self._theme],
+            user_agent=self._user_agent,
         )
+        # Egress filtering is opt-in: install the interceptor only when a filter exists, so
+        # the default (None) path has zero routing overhead.
+        if self._request_filter is not None:
+            await self._context.route("**/*", _route_handler(self._request_filter))
         self._page = await self._context.new_page()
         return self
 
@@ -151,8 +293,11 @@ class RenderSession:
         tb: TracebackType | None,
     ) -> None:
         # Always tear down, swallowing teardown errors so the original exception (if any)
-        # propagates cleanly.
-        for closer in (self._context, self._browser):
+        # propagates cleanly. An external browser is NOT closed — only the resources this
+        # session owns (always its context; the browser/Playwright pair only when launched
+        # here) are released, and the handles are cleared either way.
+        closers = [self._context, self._browser] if self._owns_browser else [self._context]
+        for closer in closers:
             if closer is not None:
                 with contextlib.suppress(Exception):
                     await closer.close()

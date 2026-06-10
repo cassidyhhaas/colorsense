@@ -3,7 +3,10 @@
 These models are the single shared-contract surface for the pipeline. This file is
 **frozen** by design: downstream code must not modify it. A change to a contract here
 must be made centrally and re-validated against every dependent module, never patched
-locally by a consumer.
+locally by a consumer. (Most recent central change: ``HarvestedElement`` gained
+``has_box_shadow`` and ``border`` became width-gated, and ``Harvest.logo_colors`` was
+removed — re-validated against ``harvest.dom``, ``harvest.screenshot``, the ``harvest``
+package assembly, ``classify.components``, and ``palette.inventory``.)
 
 Value objects (``Color``, ``Rect``, ``Viewport``) are immutable. The **public result
 tree** reachable from :class:`AnalysisResult` is also immutable: every output model is
@@ -175,7 +178,13 @@ class TokenRecord(BaseModel):
 
 
 class HarvestedElement(BaseModel):
-    """A rendered DOM element and its measured computed colors + structural flags."""
+    """A rendered DOM element and its measured computed colors + structural flags.
+
+    ``border`` is the computed border color only when the element actually paints a
+    border (border width > 0); borderless elements carry ``None``. ``has_box_shadow``
+    defaults to ``False`` (mirroring ``has_hover_color_change``'s harvest-time default)
+    so pre-existing constructions remain valid; the DOM harvester always sets it.
+    """
 
     tag: str
     role: str | None
@@ -186,6 +195,7 @@ class HarvestedElement(BaseModel):
     bg: Color | None
     text: Color | None
     border: Color | None
+    has_box_shadow: bool = False
     is_iframe: bool
     cross_origin: bool
     shadow_host: bool
@@ -213,7 +223,6 @@ class Harvest(BaseModel):
     tokens: list[TokenRecord] = Field(default_factory=list)
     elements: list[HarvestedElement] = Field(default_factory=list)
     screenshot_bins: list[ScreenshotBin] = Field(default_factory=list)
-    logo_colors: list[Color] = Field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------

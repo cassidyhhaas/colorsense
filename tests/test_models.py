@@ -152,6 +152,7 @@ def test_harvest_models_construct() -> None:
         bg=_color("#3366cc"),
         text=_color("#ffffff", 0.99),
         border=None,
+        has_box_shadow=True,
         is_iframe=False,
         cross_origin=False,
         shadow_host=False,
@@ -163,6 +164,11 @@ def test_harvest_models_construct() -> None:
         aria_hidden=False,
     )
     assert el.tag == "button"
+    assert el.has_box_shadow is True
+    # ``has_box_shadow`` defaults to False (mirroring the harvest-time default of
+    # ``has_hover_color_change``) so pre-existing constructions stay valid.
+    assert el.model_copy(update={"has_box_shadow": False}).has_box_shadow is False
+    assert HarvestedElement.model_fields["has_box_shadow"].default is False
     sbin = ScreenshotBin(color=_color("#ffffff", 0.99), area_fraction=0.6)
     assert 0.0 <= sbin.area_fraction <= 1.0
     cluster = ColorCluster(

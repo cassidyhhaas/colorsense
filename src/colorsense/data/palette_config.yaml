@@ -150,12 +150,6 @@ token_vocabulary:
     - {pattern: "^(?P<base>.+)-foreground$", type: text_on, weight: 4.5}  # shadcn
     - {pattern: "^(?P<base>.+)-fg$",     type: text_on, weight: 4.0}
     - {pattern: "^(?P<base>.+)-text$",   type: text_on, weight: 3.5}
-  # Interaction-state shades (resting accent vs hover/active step).
-  state_modifiers:
-    - {pattern: "hover",  type: state_hover}
-    - {pattern: "active", type: state_active}
-    - {pattern: "focus",  type: state_focus}
-    - {pattern: "pressed",type: state_active}
 
   # --- Numbered scale detection. ---------------------------------------------
   # Lightness L/D is decided by the MEASURED resolved color, not the number.
@@ -169,7 +163,8 @@ token_vocabulary:
                          cyan, sky, blue, indigo, violet, purple, fuchsia, pink,
                          rose, brand, primary, accent]
     neutral_families:   [gray, grey, neutral, slate, zinc, stone, gunmetal, mauve, sand, sage]
-    # Anchor ranges by scale convention; loader picks whichever family is present.
+    # Anchor ranges by scale convention; a number is an anchor if it falls
+    # within any convention's range.
     anchor_ranges:
       tailwind: [500, 700]   # 50..950
       radix:    [9, 10]      # 1..12
@@ -199,8 +194,10 @@ token_vocabulary:
 # =============================================================================
 component_classifier:
 
-  # Final component label of an element; background-color -> <component>_bg,
-  # color -> <component>_text, border-color -> border.
+  # Final component label of an element. Color-channel routing is a fixed
+  # code-level convention (see palette/inventory.py): components named
+  # <component>_text are fed by the element's text color, `border` by its
+  # border color, and everything else by its background color.
   component_types:
     [page_bg, page_text, header_bg, header_text, nav_bg, nav_text,
      footer_bg, footer_text, hero_bg, hero_text, card_bg, card_text,
@@ -209,13 +206,6 @@ component_classifier:
 
   softmax_temperature: 0.5
   min_component_prob: 0.05
-
-  # --- Color-channel routing: which CSS property feeds which target suffix. ---
-  channel_routing:
-    background-color: "_bg"
-    color:            "_text"
-    border-color:     border
-    box-shadow:       ignore
 
   # --- Feature family 1: semantic tag / ARIA role (highest precision). -------
   semantic_tags:
@@ -322,7 +312,6 @@ component_classifier:
   # --- Feature family 5: repetition (the card detector). ---------------------
   repetition:
     min_siblings: 3
-    structural_similarity: 0.80
     requires_any: [box_shadow, border, distinct_bg_from_parent]
     votes: {card_bg: 3.5, card_text: 2.0}
 

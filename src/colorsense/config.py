@@ -93,15 +93,6 @@ class RelationalModifier(BaseModel):
     weight: float
 
 
-class StateModifier(BaseModel):
-    """An interaction-state shade modifier (hover/active/focus)."""
-
-    model_config = ConfigDict(frozen=True)
-
-    pattern: str
-    type: str
-
-
 class AnchorRange(BaseModel):
     """Inclusive ``[low, high]`` anchor-step range for a scale convention."""
 
@@ -168,7 +159,6 @@ class TokenVocabularyConfig(BaseModel):
     known_system_confidence_boost: float
     name_rules: tuple[NameRule, ...]
     relational_modifiers: tuple[RelationalModifier, ...]
-    state_modifiers: tuple[StateModifier, ...]
     scale_detection: ScaleDetectionConfig
     role_to_palette_prior: dict[TokenSemanticRole, PriorRow]
     status_excluded_from_palette: bool
@@ -262,7 +252,6 @@ class RepetitionConfig(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     min_siblings: int
-    structural_similarity: float
     requires_any: tuple[str, ...]
     votes: dict[str, float]
 
@@ -296,7 +285,6 @@ class ComponentClassifierConfig(BaseModel):
     component_types: tuple[str, ...]
     softmax_temperature: float
     min_component_prob: float
-    channel_routing: dict[str, str]
     semantic_tags: tuple[VoteRule, ...]
     geometry: GeometryConfig
     class_tokens: tuple[VoteRule, ...]
@@ -466,16 +454,16 @@ class Config(BaseModel):
         neutral_families = {f.lower() for f in scale.neutral_families}
         is_chromatic = family in chromatic_families and family not in neutral_families
 
+        # A number is an anchor when it falls within ANY configured convention's
+        # range (tailwind, radix, ...), provided the family is a known chromatic
+        # or neutral family. Conventions are checked in sorted-key order so the
+        # result is deterministic regardless of YAML mapping order.
         is_anchor = False
-        for fam_set, convention in (
-            (chromatic_families, "tailwind"),
-            (neutral_families, "tailwind"),
-        ):
-            if family in fam_set:
-                anchor = scale.anchor_ranges.get(convention)
-                if anchor is not None and anchor.contains(number):
+        if family in chromatic_families or family in neutral_families:
+            for convention in sorted(scale.anchor_ranges):
+                if scale.anchor_ranges[convention].contains(number):
                     is_anchor = True
-                break
+                    break
 
         return ScaleInfo(
             family=family,

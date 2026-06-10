@@ -12,10 +12,12 @@ injected fakes, and concurrency is driven deterministically via an ``asyncio.Eve
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 
 import pytest
 
 from colorsense.config import Config, load_default_config
+from colorsense.harvest import SharedBrowser
 from colorsense.models import Harvest, Theme, Viewport
 from colorsense.net.politeness import PolitenessPolicy, RobotsDisallowedError
 
@@ -28,12 +30,12 @@ def config() -> Config:
     return load_default_config()
 
 
-async def _no_robots(_url: str) -> str | None:
+async def _no_robots(_url: str, _user_agent: str) -> str | None:
     """Robots loader that returns no rules, so every URL is permitted."""
     return None
 
 
-async def _disallow_all(_url: str) -> str | None:
+async def _disallow_all(_url: str, _user_agent: str) -> str | None:
     return "User-agent: *\nDisallow: /"
 
 
@@ -52,7 +54,17 @@ class _GatedHarvester:
         self.gate = asyncio.Event()
         self.entered = asyncio.Event()
 
-    async def __call__(self, url: str, theme: Theme, config: Config, viewport: Viewport) -> Harvest:
+    async def __call__(
+        self,
+        url: str,
+        theme: Theme,
+        config: Config,
+        viewport: Viewport,
+        *,
+        user_agent: str | None = None,
+        request_filter: Callable[[str], bool] | None = None,
+        browser: SharedBrowser | None = None,
+    ) -> Harvest:
         self.calls += 1
         self.concurrent += 1
         self.max_concurrent = max(self.max_concurrent, self.concurrent)
@@ -72,7 +84,17 @@ class _FailingHarvester:
         self.gate = asyncio.Event()
         self.entered = asyncio.Event()
 
-    async def __call__(self, url: str, theme: Theme, config: Config, viewport: Viewport) -> Harvest:
+    async def __call__(
+        self,
+        url: str,
+        theme: Theme,
+        config: Config,
+        viewport: Viewport,
+        *,
+        user_agent: str | None = None,
+        request_filter: Callable[[str], bool] | None = None,
+        browser: SharedBrowser | None = None,
+    ) -> Harvest:
         self.calls += 1
         self.entered.set()
         await self.gate.wait()
@@ -200,7 +222,17 @@ class _ImmediateHarvester:
     def __init__(self) -> None:
         self.urls: list[str] = []
 
-    async def __call__(self, url: str, theme: Theme, config: Config, viewport: Viewport) -> Harvest:
+    async def __call__(
+        self,
+        url: str,
+        theme: Theme,
+        config: Config,
+        viewport: Viewport,
+        *,
+        user_agent: str | None = None,
+        request_filter: Callable[[str], bool] | None = None,
+        browser: SharedBrowser | None = None,
+    ) -> Harvest:
         self.urls.append(url)
         return Harvest(url=url, theme=theme, viewport=viewport, screenshot_bins=[])
 
@@ -211,7 +243,7 @@ async def test_robots_fetch_is_throttled_without_double_waiting(config: Config) 
     # logical visit, so the first fetch to a fresh host sleeps zero — not a full interval.
     robots_urls: list[str] = []
 
-    async def recording_robots(url: str) -> str | None:
+    async def recording_robots(url: str, _user_agent: str) -> str | None:
         robots_urls.append(url)
         return None  # fail-open: no rules => permitted
 
@@ -328,3 +360,89 @@ async def test_completed_coalesced_render_served_from_cache(config: Config) -> N
     assert harvester.calls == in_flight_calls  # served from cache, no new render
     assert later is first
     assert not policy._inflight
+
+
+# ---------------------------------------------------------------------------
+# robots.txt Crawl-delay honoring (deterministic via injected clock/sleeper/loader)
+# ---------------------------------------------------------------------------
+
+
+def _delay_policy(
+    robots_text: str | None,
+    *,
+    min_interval: float,
+    **kwargs: object,
+) -> tuple[PolitenessPolicy, list[float]]:
+    """A policy whose robots loader returns ``robots_text``, with a recording fake sleeper."""
+
+    async def loader(_url: str, _user_agent: str) -> str | None:
+        return robots_text
+
+    clock = _Clock()
+    slept: list[float] = []
+
+    async def sleeper(seconds: float) -> None:
+        slept.append(seconds)
+        clock.t += seconds
+
+    policy = PolitenessPolicy(
+        harvester=_ImmediateHarvester(),
+        robots_loader=loader,
+        min_interval=min_interval,
+        clock=clock,
+        sleeper=sleeper,
+        **kwargs,  # type: ignore[arg-type]
+    )
+    return policy, slept
+
+
+async def test_crawl_delay_raises_effective_interval(config: Config) -> None:
+    # A robots Crawl-delay above min_interval governs same-host pacing. The delay is learned
+    # from the FIRST fetch's robots GET (itself the host's first throttled request), so it
+    # applies from the second fetch onward: first fetch sleeps zero, second waits 5s.
+    robots = "User-agent: *\nCrawl-delay: 5\nDisallow:\n"
+    policy, slept = _delay_policy(robots, min_interval=1.0)
+
+    await policy.fetch("https://host.test/a", Theme.light, config, VIEWPORT)
+    assert slept == []  # crawl delay not yet known when the first fetch was throttled
+
+    await policy.fetch("https://host.test/b", Theme.light, config, VIEWPORT)
+    assert slept == [pytest.approx(5.0)]  # the learned 5s delay, not min_interval's 1s
+
+
+async def test_crawl_delay_clamped_to_max(config: Config) -> None:
+    # A hostile/typo'd Crawl-delay must not stall the pipeline: it is capped by
+    # max_crawl_delay (default 30s) before joining the limiter.
+    robots = "User-agent: *\nCrawl-delay: 86400\nDisallow:\n"
+    policy, slept = _delay_policy(robots, min_interval=1.0)
+
+    await policy.fetch("https://host.test/a", Theme.light, config, VIEWPORT)
+    await policy.fetch("https://host.test/b", Theme.light, config, VIEWPORT)
+    assert slept == [pytest.approx(30.0)]
+
+    # Consumers can raise the cap explicitly.
+    policy2, slept2 = _delay_policy(robots, min_interval=1.0, max_crawl_delay=120.0)
+    await policy2.fetch("https://host.test/a", Theme.light, config, VIEWPORT)
+    await policy2.fetch("https://host.test/b", Theme.light, config, VIEWPORT)
+    assert slept2 == [pytest.approx(120.0)]
+
+
+async def test_no_crawl_delay_keeps_min_interval(config: Config) -> None:
+    # robots rules without a Crawl-delay leave the limiter at min_interval, unchanged.
+    robots = "User-agent: *\nDisallow:\n"
+    policy, slept = _delay_policy(robots, min_interval=2.0)
+
+    await policy.fetch("https://host.test/a", Theme.light, config, VIEWPORT)
+    await policy.fetch("https://host.test/b", Theme.light, config, VIEWPORT)
+    assert slept == [pytest.approx(2.0)]
+
+
+async def test_min_interval_wins_over_smaller_crawl_delay(config: Config) -> None:
+    # The effective interval is max(min_interval, crawl_delay): a tiny Crawl-delay never
+    # *lowers* the consumer's configured pacing.
+    robots = "User-agent: *\nCrawl-delay: 1\nDisallow:\n"
+    policy, slept = _delay_policy(robots, min_interval=4.0)
+
+    await policy.fetch("https://host.test/a", Theme.light, config, VIEWPORT)
+    await policy.fetch("https://host.test/b", Theme.light, config, VIEWPORT)
+    assert slept == [pytest.approx(4.0)]

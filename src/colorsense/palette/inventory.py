@@ -9,8 +9,12 @@ objects:
   of page area it covers. This is the authoritative area weight.
 * **Semantic truth** — the classified elements. Each
   :class:`~colorsense.models.ClassifiedElement` carries a ``component_dist`` over
-  :class:`~colorsense.models.ComponentType`. We attribute that distribution to the
-  nearest screenshot-bin color (its main painted surface, ``element.bg``).
+  :class:`~colorsense.models.ComponentType`. The distribution is split per color
+  channel and attributed to the nearest screenshot-bin color of the *matching*
+  measured color: ``*_text`` components route to ``element.text``,
+  :attr:`~colorsense.models.ComponentType.border` to ``element.border``, and
+  everything else to ``element.bg``. This channel routing is a fixed code-level
+  convention (see :func:`_channel_for`).
 
 Perceptual distance is measured exclusively with
 :func:`colorsense.color.primitives.delta_e` (OKLab ``deltaEOK``), whose units are small;
@@ -37,15 +41,32 @@ from colorsense.models import (
 
 __all__ = ["build_inventory"]
 
-# Maximum OKLab deltaEOK distance at which a classified element's bg color is
-# considered "the same painted surface" as a screenshot bin and so donates its
-# component distribution to that bin's entry. deltaEOK units are small.
+# Maximum OKLab deltaEOK distance at which a classified element's channel color
+# (bg / text / border) is considered "the same painted surface" as a screenshot
+# bin and so donates that channel's component mass to the bin's entry. deltaEOK
+# units are small.
 DELTA_E_MATCH: float = 0.10
 
 # Maximum OKLab deltaEOK distance at which two entries are merged into a single
 # perceptual cluster. Kept <= DELTA_E_MATCH so that only truly near-identical
 # colors collapse together.
 DELTA_E_CLUSTER: float = 0.05
+
+
+def _channel_for(component: ComponentType) -> str:
+    """Return the color channel a component's vote mass routes to.
+
+    The routing convention is fixed in code: components whose value ends with
+    ``_text`` are painted by the element's ``color`` (its ``text`` channel),
+    :attr:`~colorsense.models.ComponentType.border` by its ``border-color``,
+    and everything else (including ``link``, ``badge``, ``third_party`` and
+    ``button_secondary``) by its ``background-color``.
+    """
+    if component.value.endswith("_text"):
+        return "text"
+    if component is ComponentType.border:
+        return "border"
+    return "bg"
 
 
 class _Entry:
@@ -87,12 +108,16 @@ def build_inventory(harvest: Harvest, classified: list[ClassifiedElement]) -> li
 
     1. Seed one entry per :class:`~colorsense.models.ScreenshotBin` (authoritative
        area weight, empty mix).
-    2. For each classified element with a non-``None`` ``bg`` and a non-empty
-       ``component_dist``, find the nearest entry by
-       :func:`~colorsense.color.primitives.delta_e`. If that nearest entry is within
-       :data:`DELTA_E_MATCH`, add the element's distribution (each element weighted
-       equally, raw) into the entry's mix. Otherwise create a new entry from the
-       element's ``bg`` with ``area_weight = 0.0`` so its semantics are not lost.
+    2. For each classified element, split its ``component_dist`` into per-channel
+       sub-distributions via :func:`_channel_for` and process the channels in a
+       fixed (bg, text, border) order. For each channel whose measured color is
+       non-``None`` and whose sub-distribution is non-empty, find the nearest
+       entry by :func:`~colorsense.color.primitives.delta_e`. If that nearest
+       entry is within :data:`DELTA_E_MATCH`, add the channel's mass (each
+       element weighted equally, raw) into the entry's mix. Otherwise create a
+       new entry from the channel's color with ``area_weight = 0.0`` so its
+       semantics are not lost. New entries are appended in element order then
+       channel order, which is deterministic.
     3. Cluster entries via union-find under :data:`DELTA_E_CLUSTER`. For each group
        emit one :class:`~colorsense.models.ColorCluster`: representative color =
        member with the largest area weight (ties / all-zero broken by ``hex``);
@@ -106,29 +131,44 @@ def build_inventory(harvest: Harvest, classified: list[ClassifiedElement]) -> li
         _Entry(bin_.color, bin_.area_fraction) for bin_ in harvest.screenshot_bins
     ]
 
-    # STEP 1b: attribute element semantics to the nearest entry (or a new one).
+    # STEP 1b: attribute element semantics to the nearest entry (or a new one),
+    # routing each component's mass to the channel that actually paints it.
     for ce in classified:
-        bg = ce.element.bg
-        if bg is None or not ce.component_dist:
+        if not ce.component_dist:
             continue
 
-        best_idx: int | None = None
-        best_dist = DELTA_E_MATCH
-        for idx, entry in enumerate(entries):
-            d = delta_e(bg, entry.color)
-            if d <= best_dist:
-                best_dist = d
-                best_idx = idx
+        # Split the distribution into per-channel sub-distributions.
+        sub_dists: dict[str, dict[ComponentType, float]] = {"bg": {}, "text": {}, "border": {}}
+        for comp, val in ce.component_dist.items():
+            sub_dists[_channel_for(comp)][comp] = val
 
-        if best_idx is None:
-            new_entry = _Entry(bg, 0.0)
-            for comp, val in ce.component_dist.items():
-                new_entry.component_mix[comp] += val
-            entries.append(new_entry)
-        else:
-            target = entries[best_idx]
-            for comp, val in ce.component_dist.items():
-                target.component_mix[comp] += val
+        # Fixed channel order for determinism.
+        for channel, color in (
+            ("bg", ce.element.bg),
+            ("text", ce.element.text),
+            ("border", ce.element.border),
+        ):
+            sub_dist = sub_dists[channel]
+            if color is None or not sub_dist:
+                continue
+
+            best_idx: int | None = None
+            best_dist = DELTA_E_MATCH
+            for idx, entry in enumerate(entries):
+                d = delta_e(color, entry.color)
+                if d <= best_dist:
+                    best_dist = d
+                    best_idx = idx
+
+            if best_idx is None:
+                new_entry = _Entry(color, 0.0)
+                for comp, val in sub_dist.items():
+                    new_entry.component_mix[comp] += val
+                entries.append(new_entry)
+            else:
+                target = entries[best_idx]
+                for comp, val in sub_dist.items():
+                    target.component_mix[comp] += val
 
     if not entries:
         return []

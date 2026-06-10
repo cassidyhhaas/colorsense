@@ -97,6 +97,34 @@ def test_detect_scale_none_without_number(config: Config) -> None:
     assert config.detect_scale("--blue") is None
 
 
+def test_detect_scale_anchor_any_convention(config: Config) -> None:
+    """A number is an anchor if it falls within ANY convention's range."""
+    radix = config.detect_scale("--blue-9")
+    assert isinstance(radix, ScaleInfo)
+    assert radix.is_anchor is True  # radix [9, 10]
+
+    tailwind = config.detect_scale("--blue-500")
+    assert isinstance(tailwind, ScaleInfo)
+    assert tailwind.is_anchor is True  # tailwind [500, 700]
+
+    neither = config.detect_scale("--blue-50")
+    assert isinstance(neither, ScaleInfo)
+    assert neither.is_anchor is False
+
+    neutral_radix = config.detect_scale("--gray-10")
+    assert isinstance(neutral_radix, ScaleInfo)
+    assert neutral_radix.is_anchor is True  # radix range applies to neutrals too
+
+
+def test_detect_scale_unknown_family_never_anchor(config: Config) -> None:
+    """An unknown family gets a scale number but is never an anchor."""
+    info = config.detect_scale("--foo-500")
+    assert isinstance(info, ScaleInfo)
+    assert info.family == "foo"
+    assert info.is_chromatic is False
+    assert info.is_anchor is False
+
+
 def test_strip_namespace(config: Config) -> None:
     assert config.strip_namespace("--bs-primary") == "primary"
     assert config.strip_namespace("--theme-color") == "theme"

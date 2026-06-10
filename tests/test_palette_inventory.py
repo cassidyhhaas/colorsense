@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import itertools
+
 import pytest
 
 from colorsense.color.primitives import delta_e, parse_css_color
@@ -42,7 +44,11 @@ def _harvest(bins: list[ScreenshotBin]) -> Harvest:
     )
 
 
-def _element(bg: Color | None) -> HarvestedElement:
+def _element(
+    bg: Color | None,
+    text: Color | None = None,
+    border: Color | None = None,
+) -> HarvestedElement:
     return HarvestedElement(
         tag="div",
         role=None,
@@ -50,8 +56,8 @@ def _element(bg: Color | None) -> HarvestedElement:
         rect=Rect(x=0.0, y=0.0, width=10.0, height=10.0),
         position="static",
         bg=bg,
-        text=None,
-        border=None,
+        text=text,
+        border=border,
         is_iframe=False,
         cross_origin=False,
         shadow_host=False,
@@ -64,8 +70,13 @@ def _element(bg: Color | None) -> HarvestedElement:
     )
 
 
-def _classified(bg: Color | None, dist: dict[ComponentType, float]) -> ClassifiedElement:
-    return ClassifiedElement(element=_element(bg), component_dist=dist)
+def _classified(
+    bg: Color | None,
+    dist: dict[ComponentType, float],
+    text: Color | None = None,
+    border: Color | None = None,
+) -> ClassifiedElement:
+    return ClassifiedElement(element=_element(bg, text=text, border=border), component_dist=dist)
 
 
 def test_near_identical_colors_merge() -> None:
@@ -146,11 +157,14 @@ def test_unmatched_element_creates_zero_area_entry() -> None:
 
 
 def test_element_far_from_all_bins_is_new_cluster() -> None:
+    # NOTE: previously this test put page_text mass on the element's *bg*
+    # channel; with channel routing, *_text components are carried by the
+    # measured text color, so the far color is now the text channel.
     harvest = _harvest([ScreenshotBin(color=_color("#ffffff"), area_fraction=0.8)])
     far = _color("#000000")
     assert delta_e(far, _color("#ffffff")) > DELTA_E_MATCH
 
-    classified = [_classified(far, {ComponentType.page_text: 1.0})]
+    classified = [_classified(None, {ComponentType.page_text: 1.0}, text=far)]
     clusters = build_inventory(harvest, classified)
 
     assert len(clusters) == 2
@@ -170,6 +184,78 @@ def test_element_without_bg_or_dist_is_ignored() -> None:
 
     assert len(clusters) == 1
     assert clusters[0].component_mix == {}
+
+
+def test_text_mass_routes_to_text_color_not_bg() -> None:
+    light_bg = _color("#ffffff")
+    dark_text = _color("#111111")
+    assert delta_e(light_bg, dark_text) > DELTA_E_MATCH
+
+    harvest = _harvest([ScreenshotBin(color=light_bg, area_fraction=0.9)])
+    classified = [
+        _classified(
+            light_bg,
+            {ComponentType.page_bg: 0.6, ComponentType.page_text: 0.4},
+            text=dark_text,
+        )
+    ]
+
+    clusters = build_inventory(harvest, classified)
+
+    assert len(clusters) == 2
+    white = next(c for c in clusters if c.color.hex == "#ffffff")
+    black = next(c for c in clusters if c.color.hex == "#111111")
+    # page_text mass lives on the TEXT color's cluster, not the bg cluster.
+    assert ComponentType.page_text in black.component_mix
+    assert ComponentType.page_text not in white.component_mix
+    assert ComponentType.page_bg in white.component_mix
+
+
+def test_border_mass_routes_to_border_color() -> None:
+    bg = _color("#ffffff")
+    border = _color("#3366cc")
+    assert delta_e(bg, border) > DELTA_E_MATCH
+
+    harvest = _harvest([ScreenshotBin(color=bg, area_fraction=0.9)])
+    classified = [
+        _classified(
+            bg,
+            {ComponentType.input_bg: 0.7, ComponentType.border: 0.3},
+            border=border,
+        )
+    ]
+
+    clusters = build_inventory(harvest, classified)
+
+    blue = next(c for c in clusters if c.color.hex == "#3366cc")
+    white = next(c for c in clusters if c.color.hex == "#ffffff")
+    assert max(blue.component_mix) == ComponentType.border
+    assert ComponentType.border not in white.component_mix
+    assert ComponentType.input_bg in white.component_mix
+
+
+def test_element_with_no_bg_still_contributes_text_mass() -> None:
+    dark_text = _color("#222222")
+    harvest = _harvest([])
+    classified = [_classified(None, {ComponentType.cta_text: 1.0}, text=dark_text)]
+
+    clusters = build_inventory(harvest, classified)
+
+    assert len(clusters) == 1
+    assert clusters[0].color.hex == "#222222"
+    assert max(clusters[0].component_mix) == ComponentType.cta_text
+
+
+def test_channel_without_color_drops_only_that_channel() -> None:
+    bg = _color("#ffffff")
+    harvest = _harvest([ScreenshotBin(color=bg, area_fraction=1.0)])
+    # text is None, so the page_text mass is dropped; the bg mass still lands.
+    classified = [_classified(bg, {ComponentType.page_bg: 0.5, ComponentType.page_text: 0.5})]
+
+    clusters = build_inventory(harvest, classified)
+
+    assert len(clusters) == 1
+    assert clusters[0].component_mix == {ComponentType.page_bg: pytest.approx(1.0)}
 
 
 def test_clusters_sorted_by_area_descending() -> None:
@@ -203,6 +289,67 @@ def test_determinism() -> None:
     second = build_inventory(harvest, classified)
 
     assert first == second
+
+
+def test_build_inventory_permutation_invariant_on_well_separated_colors() -> None:
+    """Permuting elements and bins leaves the output identical — for separated colors.
+
+    CAVEAT (why the pinned property is deliberately weaker than full
+    permutation-invariance): entry creation order can legitimately matter by
+    design. Two elements whose colors are both far (> DELTA_E_MATCH) from every
+    bin but between DELTA_E_CLUSTER and DELTA_E_MATCH of each other join one
+    entry whose color is whichever element came first, changing the cluster's
+    representative hex. Likewise nearest-entry ties (`<=` keeps the later index)
+    depend on bin order for equidistant bins. So we pin the property the module
+    does guarantee: when every pairwise color distance exceeds DELTA_E_MATCH,
+    matching is unambiguous and the output is exactly permutation-invariant.
+
+    All masses are dyadic (1.0), so float summation order cannot perturb the
+    result and exact equality is safe.
+    """
+    white, blue, red, black = (
+        _color("#ffffff"),
+        _color("#0000ff"),
+        _color("#ff0000"),
+        _color("#000000"),
+    )
+    # Precondition: every pairwise distance is beyond the matching threshold.
+    colors = [white, blue, red, black]
+    for i in range(len(colors)):
+        for j in range(i + 1, len(colors)):
+            assert delta_e(colors[i], colors[j]) > DELTA_E_MATCH
+
+    bins = [
+        ScreenshotBin(color=white, area_fraction=0.5),
+        ScreenshotBin(color=blue, area_fraction=0.3),
+        ScreenshotBin(color=red, area_fraction=0.2),
+    ]
+    elements = [
+        _classified(white, {ComponentType.page_bg: 1.0}),
+        _classified(blue, {ComponentType.cta_bg: 1.0}),
+        _classified(blue, {ComponentType.link: 1.0}),
+        # Far from every bin: creates a zero-area entry.
+        _classified(None, {ComponentType.page_text: 1.0}, text=black),
+    ]
+
+    base = build_inventory(_harvest(bins), elements)
+    assert len(base) == 4  # sanity: white, blue, red, black all present
+
+    for element_perm in itertools.permutations(elements):
+        assert build_inventory(_harvest(bins), list(element_perm)) == base
+    for bin_perm in itertools.permutations(bins):
+        assert build_inventory(_harvest(list(bin_perm)), elements) == base
+
+
+def test_equal_area_clusters_sorted_by_hex() -> None:
+    # Two clusters with identical area weights must order by hex (the secondary
+    # sort key), independent of bin input order.
+    red = ScreenshotBin(color=_color("#ff0000"), area_fraction=0.4)
+    blue = ScreenshotBin(color=_color("#0000ff"), area_fraction=0.4)
+
+    for bins in ([red, blue], [blue, red]):
+        clusters = build_inventory(_harvest(bins), [])
+        assert [c.color.hex for c in clusters] == ["#0000ff", "#ff0000"]
 
 
 def test_thresholds_relationship() -> None:
