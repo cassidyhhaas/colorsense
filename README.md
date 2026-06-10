@@ -65,6 +65,9 @@ See the [usage guide](https://github.com/cassidyhhaas/colorsense/blob/main/docs/
 - **Polite, controllable fetching** — configurable User-Agent, `robots.txt` gate with
   `Crawl-delay` support, per-host rate limiting, render caching, and a per-request egress
   filter.
+- **Server-grade guard rails** — a built-in private-network egress filter
+  (`block_private_networks`) plus opt-in bounds on render concurrency
+  (`max_concurrent_renders`) and total call time (`max_total_seconds`).
 - **Async-native and concurrent** — themes render concurrently in one shared browser; CPU
   work is offloaded so the event loop stays responsive.
 
@@ -72,9 +75,17 @@ See the [usage guide](https://github.com/cassidyhhaas/colorsense/blob/main/docs/
 
 colorsense fetches and fully renders third-party pages. If untrusted or user-supplied URLs
 can reach `analyze` from a server, treat it as an SSRF surface: validate hosts before
-calling, and use `PolitenessPolicy(request_filter=...)` to gate every request the rendered
-page makes. The threat model and required controls are documented in
+calling, and use `PolitenessPolicy(request_filter=block_private_networks())` to gate every
+request the rendered page makes; bound abuse with `max_concurrent_renders` and
+`max_total_seconds`. The threat model and required controls are documented in
 [SECURITY.md](https://github.com/cassidyhhaas/colorsense/blob/main/SECURITY.md) — **read it before exposing `analyze` to untrusted input.**
+
+## Examples
+
+The [`examples/`](https://github.com/cassidyhhaas/colorsense/tree/main/examples) directory has two runnable starting points:
+[`quickstart.py`](https://github.com/cassidyhhaas/colorsense/blob/main/examples/quickstart.py) for trusted, hardcoded URLs, and
+[`webservice/`](https://github.com/cassidyhhaas/colorsense/tree/main/examples/webservice) — a FastAPI service that is a reference
+implementation of the SECURITY.md controls for untrusted, user-supplied URLs.
 
 ## Documentation
 

@@ -1,0 +1,216 @@
+"""A library-shipped egress filter blocking private-network destinations.
+
+:func:`block_private_networks` builds a predicate suitable for
+``PolitenessPolicy(request_filter=...)``: it is applied by the library to **every** URL the
+browser requests while rendering (the navigation and all sub-resources), resolving each
+hostname and rejecting any URL whose resolution includes a non-public address — loopback,
+RFC 1918, link-local (including the cloud metadata endpoint 169.254.169.254), CGNAT
+(100.64.0.0/10), unspecified, multicast, reserved, and their IPv6 equivalents. Resolution
+failures fail **closed**. This is the shipped mechanism for the SECURITY.md §1
+"filter egress in-library" item.
+
+Honest limits — read before relying on this filter alone:
+
+* **DNS rebinding is not fully defeated.** The predicate sees URL *strings*; Chromium
+  resolves hostnames independently when it actually connects. A hostname can resolve to a
+  public address when this filter checks it and to an internal one moments later when the
+  browser connects. Per SECURITY.md, network isolation of the browser environment (egress
+  firewalling, no route to internal ranges) remains the primary control; this filter is
+  defense in depth, not a substitute.
+* **Resolution here is blocking.** ``request_filter`` is a synchronous callable invoked on
+  the event loop's request path, so DNS lookups in it block the loop. The trade-off is
+  deliberate: the alternative (no resolution) cannot catch hostnames pointing at internal
+  addresses at all. The per-hostname TTL+LRU verdict cache keeps the blocking lookups to
+  roughly one per distinct hostname per TTL; budget concurrency/deadlines accordingly.
+"""
+
+from __future__ import annotations
+
+import ipaddress
+import socket
+import time
+from collections import OrderedDict
+from collections.abc import Callable, Iterable
+from urllib.parse import urlsplit
+
+IPAddress = ipaddress.IPv4Address | ipaddress.IPv6Address
+Resolver = Callable[[str], list[IPAddress]]
+Clock = Callable[[], float]
+
+# Mirrors the policy's own scheme gate. The browser also requests non-network URLs while
+# rendering (data:, blob:, about:); aborting those is harmless for palette extraction and
+# keeps this predicate a pure allowlist.
+_FETCHABLE_SCHEMES = frozenset({"http", "https"})
+
+DEFAULT_GUARD_TTL_SECONDS = 60.0
+"""How long a hostname's public/non-public verdict is reused before re-resolving."""
+
+DEFAULT_GUARD_MAX_ENTRIES = 1024
+"""LRU bound on cached verdicts — a hostile page requesting many hostnames cannot grow
+the cache without bound."""
+
+
+def _default_resolver(host: str) -> list[IPAddress]:
+    """Resolve ``host`` to all of its addresses via stdlib ``socket.getaddrinfo``.
+
+    Blocking by design (see the module docstring); the guard caches the verdict. IP
+    literals pass straight through ``getaddrinfo`` without a network round trip. Raises
+    ``OSError`` on resolution failure — the guard treats that as fail-closed.
+    """
+    infos = socket.getaddrinfo(host, None, proto=socket.IPPROTO_TCP)
+    addresses: list[IPAddress] = []
+    for info in infos:
+        # sockaddr[0] is the textual address (str() pins that down for the typeshed union
+        # covering non-INET families); IPv6 link-local entries can carry a "%scope" suffix
+        # that ipaddress refuses, so strip it before parsing.
+        addresses.append(ipaddress.ip_address(str(info[4][0]).split("%", 1)[0]))
+    return addresses
+
+
+def _is_public_address(ip: IPAddress) -> bool:
+    """Whether ``ip`` is a globally routable destination we are willing to fetch.
+
+    The explicit flags name the classic SSRF targets; ``is_global`` then sweeps up the
+    ranges they miss — CGNAT (100.64.0.0/10), IETF protocol assignments, benchmarking
+    nets, IPv6 ULA/site-local, and friends. Both checks must agree.
+    """
+    if (
+        ip.is_loopback  # 127.0.0.0/8, ::1
+        or ip.is_private  # RFC 1918, IPv6 ULA, ...
+        or ip.is_link_local  # 169.254.0.0/16 (cloud metadata), fe80::/10
+        or ip.is_unspecified  # 0.0.0.0, ::
+        or ip.is_multicast  # some multicast is "global scope" — never a fetch target
+        or ip.is_reserved
+    ):
+        return False
+    return ip.is_global
+
+
+class _PrivateNetworkBlocker:
+    """The predicate :func:`block_private_networks` returns; see the factory docstring."""
+
+    def __init__(
+        self,
+        *,
+        allowed_hosts: frozenset[str] | None,
+        resolver: Resolver,
+        ttl: float,
+        max_entries: int,
+        clock: Clock,
+    ) -> None:
+        self._allowed_hosts = allowed_hosts
+        self._resolver = resolver
+        self._ttl = ttl
+        self._max_entries = max_entries
+        self._clock = clock
+        # hostname -> (expiry, verdict). Most-recently-used keys at the end; overflow
+        # evicts from the front. Negative verdicts are cached too — repeatedly re-resolving
+        # a hostile hostname would hand the page a blocking-lookup amplifier.
+        self._cache: OrderedDict[str, tuple[float, bool]] = OrderedDict()
+
+    def __call__(self, url: str) -> bool:
+        try:
+            parts = urlsplit(url)
+            host = parts.hostname
+        except ValueError:
+            # Malformed URL (e.g. broken IPv6 bracket syntax): fail closed.
+            return False
+        if parts.scheme.lower() not in _FETCHABLE_SCHEMES:
+            return False
+        if parts.username is not None or parts.password is not None:
+            return False
+        if not host:
+            return False
+        host = host.lower()
+        # The allowlist narrows, never widens: a host off the list is rejected outright
+        # (before any resolution), and a host ON the list must still resolve public.
+        if self._allowed_hosts is not None and host not in self._allowed_hosts:
+            return False
+        return self._host_is_public(host)
+
+    def _host_is_public(self, host: str) -> bool:
+        now = self._clock()
+        cached = self._cache.get(host)
+        if cached is not None and cached[0] > now:
+            self._cache.move_to_end(host)
+            return cached[1]
+        verdict = self._resolve_verdict(host)
+        self._cache[host] = (now + self._ttl, verdict)
+        self._cache.move_to_end(host)
+        while len(self._cache) > self._max_entries:
+            self._cache.popitem(last=False)
+        return verdict
+
+    def _resolve_verdict(self, host: str) -> bool:
+        try:
+            addresses = self._resolver(host)
+        except (OSError, ValueError):
+            # Resolution failure (or unparseable address) fails CLOSED: an unresolvable
+            # hostname is not a fetchable target, and a resolver error must never default
+            # to "allow".
+            return False
+        # Every resolved address must be public: a hostname with one public and one
+        # internal A record is exactly the split-horizon shape an attacker would use.
+        return bool(addresses) and all(_is_public_address(ip) for ip in addresses)
+
+
+def block_private_networks(
+    *,
+    allowed_hosts: Iterable[str] | None = None,
+    resolver: Resolver = _default_resolver,
+    ttl: float = DEFAULT_GUARD_TTL_SECONDS,
+    max_entries: int = DEFAULT_GUARD_MAX_ENTRIES,
+    clock: Clock = time.monotonic,
+) -> Callable[[str], bool]:
+    """Build a ``request_filter`` predicate that rejects non-public destinations.
+
+    The returned synchronous predicate (``guard(url) -> bool``; ``True`` permits, ``False``
+    aborts) is meant for ``PolitenessPolicy(request_filter=...)``, where the library applies
+    it to **every** URL the browser requests while rendering — the navigation, every
+    redirect hop, and all sub-resources, including the page's own ``fetch`` calls. It
+    implements the SECURITY.md §1 egress-filter item:
+
+    * only ``http(s)`` URLs pass; URLs carrying userinfo (``user:pass@host``) are rejected;
+    * the hostname is resolved (stdlib ``getaddrinfo``; IP literals pass through without a
+      network round trip) and the URL is rejected if **any** resolved address is non-public:
+      loopback, RFC 1918/private, link-local (including the 169.254.169.254 cloud metadata
+      endpoint), CGNAT 100.64.0.0/10, unspecified, multicast, reserved, and their IPv6
+      equivalents (IPv6 zone suffixes are stripped before classification);
+    * malformed URLs, resolution failures, and empty resolutions all fail **closed**.
+
+    The library treats a *raising* predicate as fail-closed, but this guard never relies on
+    that — it catches its own failure modes and returns ``False`` explicitly.
+
+    Honest residual gap: a URL-string predicate cannot fully defeat **DNS rebinding** —
+    Chromium resolves hostnames independently when it connects, so a hostname can flip from
+    public to internal between this check and the connection. Network isolation of the
+    browser environment remains the primary control per SECURITY.md; this filter is defense
+    in depth. Resolution is also **blocking** on the event loop's request path — hence the
+    per-hostname TTL+LRU verdict cache (negative verdicts cached too).
+
+    Parameters
+    ----------
+    allowed_hosts:
+        Optional exact (lowercase-compared) hostname allowlist applied *before* resolution:
+        a host not on the list is rejected, and a host on the list must still resolve to
+        only-public addresses. The allowlist narrows the filter, never widens it.
+    resolver:
+        ``host -> [addresses]`` seam, injectable for tests. Defaults to a blocking
+        ``socket.getaddrinfo`` lookup; raising ``OSError`` fails closed.
+    ttl:
+        Seconds a hostname's verdict is reused before re-resolving. Defaults to
+        :data:`DEFAULT_GUARD_TTL_SECONDS` (60).
+    max_entries:
+        LRU bound on the verdict cache. Defaults to :data:`DEFAULT_GUARD_MAX_ENTRIES`
+        (1024).
+    clock:
+        Monotonic time source for the TTL, injectable for tests.
+    """
+    hosts = None if allowed_hosts is None else frozenset(h.lower() for h in allowed_hosts)
+    return _PrivateNetworkBlocker(
+        allowed_hosts=hosts,
+        resolver=resolver,
+        ttl=ttl,
+        max_entries=max_entries,
+        clock=clock,
+    )

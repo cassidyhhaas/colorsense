@@ -34,8 +34,10 @@ regardless of where the navigation pointed — a perfectly public page can still
 `169.254.169.254` from inside the browser. The in-library mechanism for this is
 `PolitenessPolicy(request_filter=...)`: a predicate over **every** request URL the browser
 makes (the navigation included), aborting any request it rejects (and failing closed if the
-predicate itself errors). Deciding *which* destinations are safe remains your policy;
-network isolation (below) remains the strong recommendation even with a filter in place.
+predicate itself errors). `block_private_networks()` is a shipped filter for the common
+case (see "What you must do" below); deciding *which* destinations are safe remains your
+policy, and network isolation (below) remains the strong recommendation even with a filter
+in place.
 
 **Redirects make this worse.** A URL that *looks* public can bounce to an internal one:
 both the `robots.txt` fetch (`httpx` with `follow_redirects=True`) and the Chromium
@@ -47,18 +49,24 @@ If a user-supplied or otherwise untrusted URL can ever reach `analyze` from a se
 must enforce your own guard rails before and around the call**:
 
 - **Allowlist** the schemes and hosts you are willing to fetch; reject everything else.
-- **Block private, loopback, and link-local IP ranges** — resolve the host and check the
-  resolved address, not just the literal string (to defeat DNS rebinding and decimal/hex IP
-  encodings).
+- **Filter egress in-library** with `request_filter`, so the rendered page's sub-resource
+  requests are subject to the same rules as the navigation. The library ships an
+  implementation: `block_private_networks()` builds a filter that resolves each hostname
+  and rejects any URL resolving to a private, loopback, link-local (metadata), CGNAT,
+  multicast, or otherwise non-public address — failing closed on resolution failure, with
+  an optional narrowing host allowlist. It does **not** fully defeat DNS rebinding: the
+  filter sees URL strings, while Chromium resolves hostnames independently when it
+  connects, so a hostname can flip to an internal address between check and connection.
 - **Pin redirects**: re-validate the destination on every hop, or disallow redirects to
-  hosts/IPs outside your allowlist.
-- **Filter egress in-library** with `request_filter` so the rendered page's sub-resource
-  requests are subject to the same allowlist as the navigation.
+  hosts/IPs outside your allowlist (`request_filter` sees every hop).
 - Prefer running the browser in a **network-isolated environment** (see §2) so that even a
-  validation bypass cannot reach sensitive internal endpoints.
+  validation bypass — DNS rebinding included — cannot reach sensitive internal endpoints.
+  This remains the primary control; the egress filter is defense in depth.
 
-`colorsense` will not do any of this for you. If you accept untrusted URLs and skip these
-steps, you have an SSRF vulnerability.
+If you accept untrusted URLs and skip these steps, you have an SSRF vulnerability. A
+reference implementation wiring these controls together (plus the §2 concurrency cap and
+deadline) lives in [`examples/webservice/`](examples/webservice/) — a starting point, not
+a substitute for network isolation.
 
 ## 2. Resource exhaustion & denial of service
 
@@ -70,10 +78,13 @@ pages, heavy scripts, many sub-resource requests, large DOMs, memory balloons.
 The library's built-in bounds are the **navigation timeout**, the per-host **rate limiter**
 in `PolitenessPolicy` (including a capped `robots.txt` `Crawl-delay`), **capture dimension
 caps** on the full-page screenshot (~20k x 10k px), and a **decode pixel cap** rejecting
-decompression-bomb captures. There is still **no cap** on per-page memory, on the number of
-sub-requests a page may make, or on overall render concurrency. The library does not save
+decompression-bomb captures. Two further bounds exist but are **off by default — you must
+set them**: `PolitenessPolicy(max_concurrent_renders=...)` caps simultaneous renders
+through a policy, and `analyze(..., max_total_seconds=...)` deadlines a whole call (raising
+`AnalysisTimeoutError`, a `TimeoutError` subclass). There is still **no cap** on per-page
+memory or on the number of sub-requests a page may make. The library does not save
 downloaded files to disk — it captures an in-memory screenshot — but the *render itself* is
-the cost, and it is unbounded by default.
+the cost, and it is unbounded unless you bound it.
 
 ### What you must do
 
@@ -81,10 +92,13 @@ In any server handling many or large or untrusted targets, budget for abuse:
 
 - **Container / sandbox isolation** for the browser process, with **hard memory and CPU
   limits** (e.g. cgroup limits) so a single target cannot take down the host.
-- **Concurrency caps** on simultaneous `analyze` calls — a queue or semaphore — sized to
-  your resource budget. The library will gladly launch as many browsers as you ask it to.
+- **Concurrency caps** on simultaneous renders: set
+  `PolitenessPolicy(max_concurrent_renders=...)` on a shared policy instance, sized to your
+  resource budget. Unset, the library will gladly launch as many browsers as you ask it to.
+- **An overall deadline** per call: set `analyze(..., max_total_seconds=...)` — a page can
+  pass the navigation timeout and still stall in scripting.
 - **Network egress restrictions** on the browser's environment (which also hardens §1).
-- Conservative **timeouts** and per-host rate limits via `PolitenessPolicy`.
+- Per-host rate limits via `PolitenessPolicy(min_interval=...)`.
 
 ## 3. `robots.txt` is respected by default — and fails open
 
@@ -116,8 +130,8 @@ cannot stall your pipeline; raise the cap to honor longer delays. Two caveats:
 
 | Risk | Library's stance | Your responsibility |
 | --- | --- | --- |
-| **SSRF** | `http(s)` only by default (`file://` opt-in, other schemes rejected); no host/IP validation; follows redirects; optional `request_filter` over every browser request | Allowlist hosts, block private/loopback/link-local IPs, pin redirects, configure `request_filter`, isolate egress |
-| **Resource / DoS** | Timeout, rate limiter (incl. capped `Crawl-delay`), capture dimension + decode pixel caps; no memory/concurrency caps | Container limits, concurrency caps, timeouts, network isolation |
+| **SSRF** | `http(s)` only by default (`file://` opt-in, other schemes rejected); no host/IP validation unless configured; follows redirects; optional `request_filter` over every browser request, with `block_private_networks()` as the shipped filter (does not fully defeat DNS rebinding) | Allowlist hosts, configure `request_filter` (e.g. `block_private_networks()`), pin redirects, isolate egress — network isolation stays primary |
+| **Resource / DoS** | Timeout, rate limiter (incl. capped `Crawl-delay`), capture dimension + decode pixel caps; opt-in `max_concurrent_renders` and `max_total_seconds` (both unset by default); no memory cap | Container limits, set `max_concurrent_renders` + `max_total_seconds`, network isolation |
 | **`robots.txt`** | Respected by default (incl. `Crawl-delay`, capped at 30s), but fails open; can be disabled | Don't disable without authorization; gate authorization yourself before calling |
 
 `colorsense` makes it easy to fetch and render considerately once **you** have decided a

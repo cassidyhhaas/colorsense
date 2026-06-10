@@ -37,9 +37,11 @@ repos:
         types_or: [python, pyi]
         require_serial: true
 
+      # Targets come from [tool.mypy] files (src + examples); checking examples/ needs
+      # the `examples` dependency group synced (uv sync --group examples --group dev).
       - id: mypy
         name: mypy (strict)
-        entry: uv run mypy src
+        entry: uv run mypy
         language: system
         types: [python]
         pass_filenames: false
