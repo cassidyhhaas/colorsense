@@ -22,6 +22,7 @@ from __future__ import annotations
 import asyncio
 import time
 from collections import OrderedDict
+from importlib.metadata import PackageNotFoundError, version
 from collections.abc import Awaitable, Callable
 from typing import Protocol
 from urllib.parse import urljoin, urlsplit, urlunsplit
@@ -33,10 +34,20 @@ from colorsense.config import Config
 from colorsense.harvest import SharedBrowser, harvest_page
 from colorsense.models import Harvest, Theme, Viewport
 
+try:
+    _PACKAGE_VERSION = version("colorsense")
+except PackageNotFoundError:  # running from a source tree without an installed dist
+    _PACKAGE_VERSION = "unknown"
+
 DEFAULT_USER_AGENT = (
-    "Mozilla/5.0 (compatible; colorsense/0.1; +https://github.com/cassidyhhaas/colorsense)"
+    f"Mozilla/5.0 (compatible; colorsense/{_PACKAGE_VERSION}; "
+    "+https://github.com/cassidyhhaas/colorsense)"
 )
-"""A real browser-engine base token plus an identifiable ``colorsense`` token and a URL."""
+"""A real browser-engine base token plus an identifiable ``colorsense`` token and a URL.
+
+The version token is the installed package version (as the CLI's UA already does), so the
+wire identity tracks releases instead of going stale.
+"""
 
 DEFAULT_ROBOTS_AGENT = "colorsense"
 """The product token matched against ``robots.txt`` ``User-agent:`` groups.
