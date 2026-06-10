@@ -47,6 +47,19 @@ application (e.g. a FastAPI endpoint), just `result = await analyze(url)`.
 
 See the [usage guide](https://github.com/cassidyhhaas/colorsense/blob/main/docs/usage.md) for the full result schema, options, and fetch policy.
 
+### Command line
+
+`pip install colorsense` also ships a `colorsense` command, so a first look needs no code:
+
+```bash
+colorsense https://example.com
+colorsense https://example.com --dark --json > palette.json
+```
+
+The default output is a human-readable palette summary; `--json` emits the full
+`AnalysisResult` schema. All flags are documented in the
+[usage guide](https://github.com/cassidyhhaas/colorsense/blob/main/docs/usage.md#command-line).
+
 ## Features
 
 - **60/30/10 palette classification** — five roles, each with ranked candidates carrying a

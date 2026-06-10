@@ -9,6 +9,12 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **`colorsense` command-line interface** — a Typer-based console script wrapping
+  `analyze`: one or more URLs analyzed sequentially through a shared `PolitenessPolicy`,
+  with flags for dark mode, viewport/scale, config path, overall deadline, rate limiting,
+  User-Agent, the `block_private_networks()` egress filter, robots opt-out (warned on
+  stderr), and `--json` output (the `AnalysisResult` schema; the human-readable summary is
+  not a stable format). Adds a runtime dependency on `typer>=0.12`.
 - **`block_private_networks()`** — a library-shipped egress `request_filter` factory (new
   public export) that resolves each hostname and rejects URLs resolving to any non-public
   address (loopback, RFC 1918, link-local/cloud-metadata, CGNAT, multicast, reserved, and

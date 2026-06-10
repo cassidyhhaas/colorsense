@@ -9,6 +9,8 @@ to call :func:`analyze` and to consume its typed result is re-exported here, so
 Entry point
 -----------
 * :func:`analyze` — the one-call **async** pipeline: ``result = await analyze(url)``.
+* The ``colorsense`` console script (:mod:`colorsense.cli`) wraps it for the command
+  line — a convenience entry point; its symbols are not re-exported here.
 
 Result & contracts
 ------------------

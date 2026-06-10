@@ -27,7 +27,11 @@ dependencies = [
   "pyyaml>=6",
   "numpy>=1.26",
   "pillow>=10",
+  "typer>=0.12",
 ]
+
+[project.scripts]
+colorsense = "colorsense.cli:app"
 
 [project.urls]
 Homepage = "https://github.com/cassidyhhaas/colorsense"

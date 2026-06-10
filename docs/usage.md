@@ -52,6 +52,41 @@ page must not stall you (see [SECURITY.md](../SECURITY.md) §2). Must be positiv
 The default viewport is 1280×800 at 1× scale. A custom `Viewport` (e.g. mobile dimensions)
 captures a different layout, which can yield a different palette.
 
+## Command line
+
+The package installs a `colorsense` command — a convenience wrapper around `analyze` for
+quick evaluation. The typed API is the contract: the human-readable output is **not
+stable** across releases, while `--json` emits the full `AnalysisResult` schema
+(`model_dump_json`) and follows the library's compatibility story.
+
+```bash
+colorsense https://example.com
+colorsense https://a.example https://b.example --dark --json
+```
+
+URLs are analyzed sequentially through one shared `PolitenessPolicy` (paced per host,
+rendered pages cached). Exit status: 0 when every URL succeeded, 1 when any failed
+(the error goes to stderr and remaining URLs are still processed), 2 on bad arguments.
+stdout carries data only; warnings and errors go to stderr.
+
+| Flag | Effect |
+| --- | --- |
+| `--dark` / `--no-dark` | Also render dark mode (`themes=LIGHT_AND_DARK`). Default: light only. |
+| `--viewport WxH` | Render viewport (default `1280x800`). |
+| `--scale FLOAT` | Device scale factor (default `1.0`). |
+| `--config PATH` | Palette config YAML overriding the bundled default (`config_path`). |
+| `--max-total-seconds FLOAT` | Overall deadline per URL; unset by default. |
+| `--min-interval FLOAT` | Seconds between same-host fetches (default `1.0`). |
+| `--user-agent TEXT` | Wire User-Agent. Default: a CLI-identifying UA (`colorsense-cli/<version> (+repo URL)`); pass your own to identify *your* application. |
+| `--block-private-networks` | Install `block_private_networks()` as the policy's egress `request_filter`. |
+| `--no-robots` | Disable the `robots.txt` check (and its `Crawl-delay` honoring). An explicit, accountable choice — only for sites you own or are authorized to crawl (see [SECURITY.md](../SECURITY.md) §3); the CLI warns on stderr when used. |
+| `--json` | Emit the full `AnalysisResult` as JSON. stdout is always exactly one valid JSON document: one object for a single URL (`null` if it failed), an array of the successful results for multiple URLs (`[]` if all failed). |
+| `--version` | Print the installed version and exit. |
+
+The default (no `--json`) output prints, per theme, each role's best candidate — hex,
+probability, area — plus the overall fit score, in the spirit of
+[`examples/quickstart.py`](../examples/quickstart.py).
+
 ## The result
 
 `analyze` returns an `AnalysisResult` — a frozen Pydantic model; `result.model_dump_json()`
