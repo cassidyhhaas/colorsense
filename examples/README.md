@@ -46,9 +46,11 @@ curl -s -X POST localhost:8000/analyze \
 
 The webservice reads `COLORSENSE_ALLOWED_HOSTS` (comma-separated hostname allowlist;
 unset = any public host), `COLORSENSE_MAX_CONCURRENCY` (default 2),
-`COLORSENSE_DEADLINE_SECONDS` (default 60), and `COLORSENSE_BROWSER_ARGS` (comma-separated
-extra Chromium launch args; default `--js-flags=--max-old-space-size=512`, the V8-heap cap;
-set to an empty string for none).
+`COLORSENSE_DEADLINE_SECONDS` (default 60), and `COLORSENSE_BROWSER_ARGS`
+(whitespace-separated extra Chromium launch args with shell-style quoting, parsed via
+`shlex.split`; default `--js-flags=--max-old-space-size=512`, the V8-heap cap; set to an
+empty string for none). Quote flags that contain spaces or commas so they stay one
+argument — e.g. `--host-resolver-rules='MAP a 1.2.3.4, MAP b 5.6.7.8'`.
 
 The pre-call validation in `webservice/url_guard.py` is plain stdlib and unit-tested
 without a browser or FastAPI — see `tests/test_examples_url_guard.py`. The address-level

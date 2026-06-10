@@ -36,11 +36,40 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   (JS heap only — hard per-render memory/CPU caps stay container-level by design; see
   SECURITY.md §2). Non-string entries raise `TypeError` before any render.
 
+### Security
+
+- The policy's `robots.txt` fetch now applies the configured `request_filter` to the
+  robots URL **and** every redirect hop (redirects are followed manually, capped at 20
+  hops, each `Location` vetted before being requested). This closes a server-side SSRF
+  bypass where a hostile `robots.txt` redirect could reach private/metadata addresses
+  unfiltered — the robots GET is `httpx`, not the browser, so the browser-route filter
+  never saw it. A rejected hop aborts the fetch, which fails open as "no rules" while the
+  navigation stays gated browser-side.
+- `block_private_networks()` now classifies IPv4-mapped IPv6 addresses
+  (`::ffff:a.b.c.d`) by their embedded IPv4 address, so a resolver returning the mapped
+  form of a private address is rejected like the bare IPv4 form.
+
 ### Changed
 
 - The `examples/webservice/` reference implementation now uses the new library knobs
   (`block_private_networks`, `max_concurrent_renders`, `max_total_seconds`) instead of
   hand-rolled equivalents; only the pre-call navigation-URL validation remains app code.
+- **Breaking for injected loaders:** the `RobotsLoader` seam now receives the policy's
+  `request_filter` as a third argument — `(robots_url, user_agent, request_filter)`.
+  Custom loaders must adopt the new signature and are responsible for applying the filter
+  to the robots URL and every redirect hop they follow.
+- The webservice example parses `COLORSENSE_BROWSER_ARGS` with `shlex.split`
+  (whitespace-separated, shell-style quoting; was comma-split), so flags containing
+  commas or spaces are expressible by quoting — unbalanced quotes raise `ValueError` at
+  startup. Its `AnalyzeRequest.url` is now bounded to 2083 characters.
+
+### Fixed
+
+- Single-flight render coalescing no longer propagates a cancelled leader's
+  `CancelledError` to concurrent callers of the same URL (triggered by e.g. the leader's
+  `analyze(max_total_seconds=...)` deadline expiring, or its HTTP client disconnecting in
+  a server). Followers now re-elect a new leader and re-render instead; a caller's *own*
+  cancellation still raises normally.
 
 ## [0.2.0] - 2026-06-09
 

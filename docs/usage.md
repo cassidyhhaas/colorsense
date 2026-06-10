@@ -179,7 +179,11 @@ policy** — whether a fetch is authorized is the consumer's decision, made *bef
   an explicit opt-in (the test suite opts in to render its local fixtures).
 - **`request_filter`** — an optional predicate over **every URL the browser requests**
   while rendering (the navigation *and* the page's own sub-resources), aborting any request
-  it rejects. This is the in-library SSRF mechanism; see [SECURITY.md](../SECURITY.md).
+  it rejects. The same filter also gates the policy's own server-side `robots.txt` GET:
+  the robots URL and every redirect hop it follows are vetted before being requested, and
+  a rejected hop aborts the robots fetch (which then fails open as "no rules") while the
+  navigation itself stays filtered browser-side. This is the in-library SSRF mechanism;
+  see [SECURITY.md](../SECURITY.md).
   `block_private_networks()` builds one for the common case: it resolves each hostname and
   rejects URLs resolving to private/loopback/link-local (metadata)/CGNAT/other non-public
   addresses, failing closed, with an optional narrowing `allowed_hosts` allowlist. It does
