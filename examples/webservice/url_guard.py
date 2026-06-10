@@ -5,8 +5,9 @@ your service accepts (scheme, userinfo, an optional host allowlist) is applicati
 checked cheaply before a browser is ever involved so bad input gets a 400, not a render.
 
 Everything address-level — resolving hostnames and rejecting private/loopback/link-local/
-metadata destinations, on the navigation, every redirect hop, and every sub-resource —
-is the library's job now: :func:`colorsense.block_private_networks` builds the egress
+metadata destinations, on the navigation, every redirect hop, every sub-resource, and the
+policy's own ``robots.txt`` fetch (including each of *its* redirect hops) — is the
+library's job now: :func:`colorsense.block_private_networks` builds the egress
 ``request_filter`` that ``app.py`` installs on its :class:`~colorsense.PolitenessPolicy`.
 See that factory's docstring for the honest limits (DNS rebinding, blocking resolution).
 """

@@ -26,7 +26,9 @@ def config() -> Config:
     return load_default_config()
 
 
-async def _no_robots(_url: str, _user_agent: str) -> str | None:
+async def _no_robots(
+    _url: str, _user_agent: str, _request_filter: Callable[[str], bool] | None = None
+) -> str | None:
     return None
 
 

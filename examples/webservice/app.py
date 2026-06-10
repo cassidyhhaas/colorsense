@@ -11,7 +11,8 @@ most of them now as library knobs:
 * **Egress filtering** (§1 "Filter egress in-library"): the library-shipped
   :func:`colorsense.block_private_networks` is installed as the policy's
   ``request_filter``, so every request the rendered page makes — navigation, redirects,
-  sub-resources, the page's own ``fetch`` calls — is checked against
+  sub-resources, the page's own ``fetch`` calls — and the policy's own ``robots.txt``
+  fetch (each of its redirect hops vetted before being requested) is checked against
   private/loopback/link-local/metadata ranges, failing closed.
 * **Concurrency cap** (§2): ``PolitenessPolicy(max_concurrent_renders=...)`` bounds
   simultaneous renders process-wide (the policy instance is shared, so its semaphore is).
@@ -53,7 +54,7 @@ from __future__ import annotations
 import os
 
 from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from colorsense import (
     AnalysisResult,
@@ -93,6 +94,9 @@ ANALYZE_DEADLINE_SECONDS = float(os.environ.get("COLORSENSE_DEADLINE_SECONDS", "
 # renderer memory — so it complements, never replaces, the container/cgroup memory limit
 # (the enforceable cap; the library ships no in-process memory watchdog by design).
 # Override with COLORSENSE_BROWSER_ARGS (comma-separated; empty string = no extra args).
+# Caveat: the comma split means no single flag may itself contain a comma — e.g.
+# --host-resolver-rules with multiple comma-separated rules would be silently broken
+# into invalid fragments. Such flags cannot be passed via this env knob.
 BROWSER_ARGS = tuple(
     arg.strip()
     for arg in os.environ.get(
@@ -133,7 +137,9 @@ class AnalyzeRequest(BaseModel):
     """POST body: the page to analyze. Validation happens in the endpoint, not the model,
     so rejections produce a 400 with a reason rather than a generic 422."""
 
-    url: str
+    # Bounding untrusted input: cap the URL length (2083 is well above any legitimate
+    # URL) so a multi-megabyte string never reaches urlsplit/resolution.
+    url: str = Field(max_length=2083)
 
 
 class CandidateOut(BaseModel):

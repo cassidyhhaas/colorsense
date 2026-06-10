@@ -34,7 +34,9 @@ VIEWPORT = Viewport(width=1280, height=800, device_scale_factor=1.0)
 
 
 def _loader_for(text: str | None):
-    async def _loader(_url: str, _user_agent: str) -> str | None:
+    async def _loader(
+        _url: str, _user_agent: str, _request_filter: Callable[[str], bool] | None = None
+    ) -> str | None:
         return text
 
     return _loader
@@ -222,7 +224,9 @@ async def test_policy_passes_configured_user_agent_to_robots_loader() -> None:
     # (the bug: ``_default_robots_loader`` hardcoded DEFAULT_USER_AGENT).
     seen: list[tuple[str, str]] = []
 
-    async def recording_loader(url: str, user_agent: str) -> str | None:
+    async def recording_loader(
+        url: str, user_agent: str, _request_filter: Callable[[str], bool] | None = None
+    ) -> str | None:
         seen.append((url, user_agent))
         return None  # no rules => permitted
 
@@ -236,7 +240,9 @@ async def test_policy_passes_configured_user_agent_to_harvester() -> None:
     # forwarded it, so navigation used the stock HeadlessChrome UA).
     harvester = _RecordingHarvester()
 
-    async def no_robots(_url: str, _user_agent: str) -> str | None:
+    async def no_robots(
+        _url: str, _user_agent: str, _request_filter: Callable[[str], bool] | None = None
+    ) -> str | None:
         return None
 
     policy = PolitenessPolicy(user_agent=CUSTOM_UA, harvester=harvester, robots_loader=no_robots)
@@ -250,7 +256,9 @@ async def test_policy_passes_request_filter_to_harvester() -> None:
     # browser route), and the default (None) must pass through as None.
     harvester = _RecordingHarvester()
 
-    async def no_robots(_url: str, _user_agent: str) -> str | None:
+    async def no_robots(
+        _url: str, _user_agent: str, _request_filter: Callable[[str], bool] | None = None
+    ) -> str | None:
         return None
 
     def only_example(url: str) -> bool:
@@ -317,12 +325,10 @@ async def test_route_handler_fails_closed_on_predicate_error() -> None:
     assert (route.continued, route.aborted) == (0, 1)
 
 
-async def test_default_robots_loader_sends_given_user_agent(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    # The default loader must put the UA it is *given* on the wire. httpx.AsyncClient is
-    # swapped for one riding a MockTransport so the request headers can be captured
-    # without any network.
+async def test_default_robots_loader_sends_given_user_agent() -> None:
+    # The default loader must put the UA it is *given* on the wire. The loader's private
+    # ``_transport`` seam injects an httpx.MockTransport so the request headers can be
+    # captured without any network.
     sent_uas: list[str] = []
     robots_text = "User-agent: *\nDisallow:\n"
 
@@ -331,14 +337,10 @@ async def test_default_robots_loader_sends_given_user_agent(
         return httpx.Response(200, text=robots_text)
 
     transport = httpx.MockTransport(handler)
-    real_client = httpx.AsyncClient
 
-    def client_with_mock_transport(**kwargs: object) -> httpx.AsyncClient:
-        return real_client(transport=transport, **kwargs)  # type: ignore[arg-type]
-
-    monkeypatch.setattr(httpx, "AsyncClient", client_with_mock_transport)
-
-    text = await _default_robots_loader("https://example.test/robots.txt", CUSTOM_UA)
+    text = await _default_robots_loader(
+        "https://example.test/robots.txt", CUSTOM_UA, _transport=transport
+    )
     assert text == robots_text
     assert sent_uas == [CUSTOM_UA]
 

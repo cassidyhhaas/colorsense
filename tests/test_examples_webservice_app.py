@@ -106,6 +106,19 @@ def test_bad_urls_rejected_before_any_render(
     assert stub.calls == []  # validation must fire before analyze is ever awaited
 
 
+def test_oversized_url_rejected_by_model(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # AnalyzeRequest bounds untrusted input: URLs beyond max_length (2083) fail model
+    # validation with a 422 before urlsplit/resolution — or any render — is reached.
+    stub = AnalyzeStub(result=fake_result("https://example.com/"))
+    install_stub(monkeypatch, stub)
+    oversized = "https://example.com/" + "a" * 5000
+    response = client.post("/analyze", json={"url": oversized})
+    assert response.status_code == 422
+    assert stub.calls == []
+
+
 def test_allowlist_enforced_before_any_render(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -24,7 +24,7 @@ import time
 from collections import OrderedDict
 from collections.abc import Awaitable, Callable
 from typing import Protocol
-from urllib.parse import urlsplit, urlunsplit
+from urllib.parse import urljoin, urlsplit, urlunsplit
 from urllib.robotparser import RobotFileParser
 
 import httpx
@@ -102,8 +102,15 @@ class Harvester(Protocol):
     ) -> Awaitable[Harvest]: ...
 
 
-RobotsLoader = Callable[[str, str], Awaitable[str | None]]
-"""Robots seam: ``(robots_url, user_agent) -> text | None`` — the UA is sent on the wire."""
+RobotsLoader = Callable[[str, str, Callable[[str], bool] | None], Awaitable[str | None]]
+"""Robots seam: ``(robots_url, user_agent, request_filter) -> text | None``.
+
+The UA is sent on the wire. ``request_filter`` is the policy's egress predicate (or
+``None``): a loader must apply it to the robots URL itself *and* to every redirect hop it
+follows, returning ``None`` (no rules) instead of fetching a rejected destination — the
+robots GET is server-side ``httpx``, not the browser, so it would otherwise bypass the
+browser-route filter entirely (SSRF via a robots redirect).
+"""
 Clock = Callable[[], float]
 Sleeper = Callable[[float], Awaitable[None]]
 
@@ -141,23 +148,67 @@ def _robots_url_for(url: str) -> str | None:
     return urlunsplit((parts.scheme, parts.netloc, "/robots.txt", "", ""))
 
 
-async def _default_robots_loader(robots_url: str, user_agent: str) -> str | None:
+_MAX_ROBOTS_REDIRECTS = 20
+"""Redirect-hop cap for the robots GET (httpx's own default ``max_redirects``)."""
+
+
+async def _default_robots_loader(
+    robots_url: str,
+    user_agent: str,
+    request_filter: Callable[[str], bool] | None = None,
+    *,
+    _transport: httpx.AsyncBaseTransport | None = None,
+) -> str | None:
     """Fetch ``robots.txt`` text over http(s); return ``None`` on any failure.
 
     ``user_agent`` is the policy's configured wire UA, sent as the ``User-Agent`` header so
     the robots GET is attributable to the same identity as the page render. A missing or
     unreachable ``robots.txt`` is treated by callers as "no rules", which permits fetching —
     the conventional interpretation.
+
+    ``request_filter`` is the policy's egress predicate. Redirects are followed *manually*
+    (``follow_redirects=False`` plus a loop capped at :data:`_MAX_ROBOTS_REDIRECTS` hops)
+    so the filter can vet **each** URL before it is requested — the initial robots URL and
+    every redirect ``Location`` (resolved against the current URL). A rejected — or
+    raising, which fails closed — verdict aborts the fetch and returns ``None``: the robots
+    rules fail open as usual, while the navigation itself stays gated by the browser-side
+    filter. Without a filter (``None``), redirects are simply followed up to the cap.
+
+    ``_transport`` is a private test seam: an injected ``httpx`` transport (e.g.
+    ``httpx.MockTransport``) standing in for the network.
     """
+
+    def _permitted(candidate: str) -> bool:
+        if request_filter is None:
+            return True
+        try:
+            return bool(request_filter(candidate))
+        except Exception:
+            # A buggy/raising predicate must block, not permit (fail closed).
+            return False
+
     try:
         async with httpx.AsyncClient(
             timeout=10.0,
             headers={"User-Agent": user_agent},
-            follow_redirects=True,
+            follow_redirects=False,
+            transport=_transport,
         ) as client:
-            response = await client.get(robots_url)
-            response.raise_for_status()
-            return response.text
+            url = robots_url
+            for _ in range(_MAX_ROBOTS_REDIRECTS + 1):
+                if not _permitted(url):
+                    return None
+                response = await client.get(url)
+                if response.is_redirect:
+                    location = response.headers.get("location")
+                    if not location:
+                        return None
+                    url = urljoin(url, location)
+                    continue
+                response.raise_for_status()
+                return response.text
+            # Redirect cap exhausted without reaching a terminal response.
+            return None
     except (httpx.HTTPError, ValueError):
         return None
 
@@ -196,8 +247,11 @@ class PolitenessPolicy:
     request_filter:
         Optional synchronous predicate over **every request URL the browser makes** while
         rendering — the navigation itself *and* all sub-resources (scripts, images, XHR/
-        ``fetch`` issued by the page's own JS). Returning ``False`` aborts that request.
-        This is the in-library mechanism against sub-resource SSRF: validating the
+        ``fetch`` issued by the page's own JS) — **and** over the policy's own
+        ``robots.txt`` GET (the initial robots URL and each redirect hop it follows; a
+        rejected hop aborts the fetch, which fails open as "no rules" while the navigation
+        stays gated by this same filter browser-side). Returning ``False`` aborts that
+        request. This is the in-library mechanism against sub-resource SSRF: validating the
         navigation URL alone cannot stop the rendered page from requesting internal
         endpoints (e.g. ``169.254.169.254``). A predicate that *raises* fails closed (the
         request is aborted). ``None`` (default) installs no interception at all — zero
@@ -335,8 +389,11 @@ class PolitenessPolicy:
         """Load and memoize a parser for ``robots_url``; ``None`` when no rules apply."""
         if robots_url in self._robots_cache:
             return self._robots_cache[robots_url]
-        # The configured wire UA identifies the robots GET, same as the page render.
-        text = await self._robots_loader(robots_url, self.user_agent)
+        # The configured wire UA identifies the robots GET, same as the page render; the
+        # egress filter rides along so the loader gates the robots URL and every redirect
+        # hop — without it, a robots redirect would be a server-side SSRF bypassing the
+        # browser-route filter.
+        text = await self._robots_loader(robots_url, self.user_agent, self.request_filter)
         parser: RobotFileParser | None
         if text is None:
             parser = None
