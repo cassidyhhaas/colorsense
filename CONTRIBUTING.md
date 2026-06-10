@@ -12,12 +12,14 @@ management, and requires Python 3.12+:
 ```bash
 git clone https://github.com/cassidyhhaas/colorsense
 cd colorsense
-uv sync
+uv sync --group examples
 uv run playwright install chromium
 ```
 
 `uv sync` creates the virtualenv and installs the package plus the dev dependency group
-(ruff, mypy, pytest, pre-commit, …) pinned by `uv.lock`. The Playwright Chromium download
+(ruff, mypy, pytest, pre-commit, …) pinned by `uv.lock`; `--group examples` adds the
+FastAPI/uvicorn dependencies of `examples/`, which the mypy gate type-checks (without
+them, `uv run mypy` and the pre-commit mypy hook fail on the examples imports). The Playwright Chromium download
 is needed for the browser-marked tests; on Linux, `uv run playwright install --with-deps
 chromium` also pulls the OS libraries Chromium needs.
 
@@ -39,7 +41,7 @@ check. Locally, the same gates are:
 ```bash
 uv run ruff check .            # lint
 uv run ruff format --check .   # formatting
-uv run mypy src                # strict type checking
+uv run mypy                    # strict type checking (src + examples)
 uv run pytest                  # full test suite
 ```
 
