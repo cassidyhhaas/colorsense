@@ -45,13 +45,14 @@ Run from the repository root (needs the ``examples`` dependency group):
 Environment knobs: ``COLORSENSE_ALLOWED_HOSTS`` (comma-separated exact hostnames; unset =
 any public host), ``COLORSENSE_MAX_CONCURRENCY`` (default 2),
 ``COLORSENSE_DEADLINE_SECONDS`` (default 60), and ``COLORSENSE_BROWSER_ARGS``
-(comma-separated extra Chromium launch args; default caps each renderer's V8 heap at
-512 MB).
+(whitespace-separated, shell-quoted (shlex) extra Chromium launch args; default caps each
+renderer's V8 heap at 512 MB).
 """
 
 from __future__ import annotations
 
 import os
+import shlex
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
@@ -93,17 +94,20 @@ ANALYZE_DEADLINE_SECONDS = float(os.environ.get("COLORSENSE_DEADLINE_SECONDS", "
 # Chromium launch via analyze(browser_args=...). This bounds the JS heap only — not total
 # renderer memory — so it complements, never replaces, the container/cgroup memory limit
 # (the enforceable cap; the library ships no in-process memory watchdog by design).
-# Override with COLORSENSE_BROWSER_ARGS (comma-separated; empty string = no extra args).
-# Caveat: the comma split means no single flag may itself contain a comma — e.g.
-# --host-resolver-rules with multiple comma-separated rules would be silently broken
-# into invalid fragments. Such flags cannot be passed via this env knob.
-BROWSER_ARGS = tuple(
-    arg.strip()
-    for arg in os.environ.get(
-        "COLORSENSE_BROWSER_ARGS", "--js-flags=--max-old-space-size=512"
-    ).split(",")
-    if arg.strip()
-)
+# Override with COLORSENSE_BROWSER_ARGS (whitespace-separated, with shell-style quoting
+# via shlex; empty string = no extra args). Flags containing commas or spaces are
+# expressible by quoting — e.g. --host-resolver-rules='MAP a 1.2.3.4, MAP b 5.6.7.8'
+# stays one argument. Unbalanced quotes raise ValueError at import/startup: a loud
+# failure for a misconfigured env var, deliberately preferred over silently mangled args.
+
+
+def _browser_args_from_env() -> tuple[str, ...]:
+    """Extra Chromium launch args from the env, shlex-split (see comment above)."""
+    raw = os.environ.get("COLORSENSE_BROWSER_ARGS", "--js-flags=--max-old-space-size=512")
+    return tuple(shlex.split(raw))
+
+
+BROWSER_ARGS = _browser_args_from_env()
 
 # One policy for the process: its render cache, per-host rate limiter, robots cache, and
 # render-concurrency semaphore are all per-policy state, so sharing the instance is what
