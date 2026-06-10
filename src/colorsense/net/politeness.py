@@ -202,6 +202,18 @@ class PolitenessPolicy:
         endpoints (e.g. ``169.254.169.254``). A predicate that *raises* fails closed (the
         request is aborted). ``None`` (default) installs no interception at all — zero
         overhead.
+    max_concurrent_renders:
+        Optional cap on simultaneous *renders* through this policy — the SECURITY.md §2
+        concurrency bound, shipped as a knob. ``None`` (default) is unbounded, the previous
+        behavior. When set, an :class:`asyncio.Semaphore` bounds concurrent harvester
+        calls. Composition with the other gates: **cache hits never take a slot** (they
+        return before the limiter), **single-flight followers never take a slot** (they
+        await the leader's future), and the throttle/robots wait happens *outside* the
+        slot — the semaphore wraps strictly the render itself, so a leader parked in a
+        long ``Crawl-delay`` sleep does not starve renders to other hosts. The semaphore is
+        created lazily inside the running event loop (and re-created if the policy is later
+        used from a different loop), so one policy can serve sequential ``asyncio.run``
+        calls and two policies never share a limiter. Must be ``>= 1`` when set.
     min_interval:
         Minimum seconds between same-host fetches (per-host rate limiter). When the host's
         ``robots.txt`` declares a ``Crawl-delay`` for this policy's ``robots_agent``, the
@@ -237,6 +249,7 @@ class PolitenessPolicy:
         respect_robots: bool = True,
         allow_file_urls: bool = False,
         request_filter: Callable[[str], bool] | None = None,
+        max_concurrent_renders: int | None = None,
         min_interval: float = DEFAULT_MIN_INTERVAL,
         max_crawl_delay: float = DEFAULT_MAX_CRAWL_DELAY,
         max_cache_entries: int | None = DEFAULT_MAX_CACHE_ENTRIES,
@@ -250,6 +263,15 @@ class PolitenessPolicy:
         self.respect_robots = respect_robots
         self.allow_file_urls = allow_file_urls
         self.request_filter = request_filter
+        if max_concurrent_renders is not None and max_concurrent_renders < 1:
+            raise ValueError("max_concurrent_renders must be >= 1 (or None for unbounded)")
+        self.max_concurrent_renders = max_concurrent_renders
+        # Lazily created inside the running loop (see _render_slots): asyncio primitives
+        # bind to the loop they are first awaited on, so creating it here (often outside
+        # any loop) or pinning it to one loop would break a policy reused across
+        # sequential ``asyncio.run`` calls.
+        self._render_semaphore: asyncio.Semaphore | None = None
+        self._render_semaphore_loop: asyncio.AbstractEventLoop | None = None
         self.min_interval = min_interval
         self.max_crawl_delay = max_crawl_delay
         # ``0``/``None`` mean unbounded; any positive value is the LRU ceiling.
@@ -396,6 +418,25 @@ class PolitenessPolicy:
         if wait > 0:
             await self._sleeper(wait)
 
+    # -- render concurrency --------------------------------------------------
+
+    def _render_slots(self) -> asyncio.Semaphore | None:
+        """The render-bounding semaphore, or ``None`` when unbounded.
+
+        Created lazily inside the running loop, and re-created if the policy is later used
+        from a *different* loop (e.g. sequential ``asyncio.run`` calls sharing one policy):
+        an asyncio Semaphore binds to the loop it is first awaited on, so reusing one
+        across loops would raise. Re-creation is safe — by the time a new loop runs, no
+        task from the old loop can still hold a slot.
+        """
+        if self.max_concurrent_renders is None:
+            return None
+        loop = asyncio.get_running_loop()
+        if self._render_semaphore is None or self._render_semaphore_loop is not loop:
+            self._render_semaphore = asyncio.Semaphore(self.max_concurrent_renders)
+            self._render_semaphore_loop = loop
+        return self._render_semaphore
+
     # -- fetch ---------------------------------------------------------------
 
     async def fetch(
@@ -468,17 +509,32 @@ class PolitenessPolicy:
             await self._throttle(url)
             if not await self.can_fetch(url):
                 raise RobotsDisallowedError(url)
-            # The configured wire UA rides along so the page render is attributable too,
-            # and the egress request filter (if any) gates every request the browser makes.
-            harvest = await self._harvester(
-                url,
-                theme,
-                config,
-                viewport,
-                user_agent=self.user_agent,
-                request_filter=self.request_filter,
-                browser=browser,
-            )
+            # The render slot (when ``max_concurrent_renders`` is set) wraps STRICTLY the
+            # harvester await — deliberately not the throttle/robots sequence above. The
+            # alternative (acquire around throttle+robots+render) is simpler but means a
+            # leader sleeping out a long per-host ``Crawl-delay`` holds a slot the whole
+            # time, starving renders to unrelated hosts; with this placement a slot is only
+            # ever held while a browser is genuinely rendering. Cache hits and single-flight
+            # followers returned earlier and never reach this point, so neither takes a slot.
+            slots = self._render_slots()
+            if slots is not None:
+                await slots.acquire()
+            try:
+                # The configured wire UA rides along so the page render is attributable
+                # too, and the egress request filter (if any) gates every request the
+                # browser makes.
+                harvest = await self._harvester(
+                    url,
+                    theme,
+                    config,
+                    viewport,
+                    user_agent=self.user_agent,
+                    request_filter=self.request_filter,
+                    browser=browser,
+                )
+            finally:
+                if slots is not None:
+                    slots.release()
         except BaseException as err:  # re-raised after fanning out to followers
             # Fan the failure out to every waiting follower, then re-raise to the leader.
             # The failure is never cached. ``set_exception`` is skipped if the Future was

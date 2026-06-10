@@ -18,6 +18,7 @@ result = asyncio.run(
         themes=LIGHT_AND_DARK,                          # default is light only
         politeness=PolitenessPolicy(min_interval=2.0),  # see "Fetch policy" below
         config_path="my_palette_config.yaml",           # see the advanced guide
+        max_total_seconds=60.0,                         # overall deadline; default: none
     )
 )
 ```
@@ -37,6 +38,14 @@ theme; `result.metadata` records when that happened.
 
 The first theme in the tuple is "primary" and supplies the top-level `tokens`,
 `divergence`, and `fit_score` fields.
+
+### Overall deadline
+
+`max_total_seconds` bounds the **entire call** — every theme render plus the CPU
+classification — via `asyncio.timeout`. On expiry, in-flight renders are cancelled, the
+shared browser is closed, and `AnalysisTimeoutError` is raised (a `TimeoutError` subclass
+carrying the URL and budget). There is no deadline by default; set one wherever a stalling
+page must not stall you (see [SECURITY.md](../SECURITY.md) §2). Must be positive when set.
 
 ### Viewport
 
@@ -94,6 +103,9 @@ detecting the single-theme collapse.
 - **`UnsupportedSchemeError`** — the URL scheme is not fetchable under the policy: only
   `http(s)` by default; `file://` requires `PolitenessPolicy(allow_file_urls=True)`, and
   every other scheme is always rejected.
+- **`AnalysisTimeoutError`** — `max_total_seconds` was set and expired before the analysis
+  finished. Subclasses the builtin `TimeoutError`, so `except TimeoutError` catches it;
+  carries `url` and `max_total_seconds`.
 
 ## Fetch policy
 
@@ -115,6 +127,16 @@ policy** — whether a fetch is authorized is the consumer's decision, made *bef
 - **`request_filter`** — an optional predicate over **every URL the browser requests**
   while rendering (the navigation *and* the page's own sub-resources), aborting any request
   it rejects. This is the in-library SSRF mechanism; see [SECURITY.md](../SECURITY.md).
+  `block_private_networks()` builds one for the common case: it resolves each hostname and
+  rejects URLs resolving to private/loopback/link-local (metadata)/CGNAT/other non-public
+  addresses, failing closed, with an optional narrowing `allowed_hosts` allowlist. It does
+  not fully defeat DNS rebinding (Chromium resolves hostnames independently), and its DNS
+  lookups block the event loop (cached per hostname with a TTL) — network isolation remains
+  the primary control.
+- **`max_concurrent_renders`** — optional cap on simultaneous renders through the policy
+  (unbounded by default — set it on servers; see [SECURITY.md](../SECURITY.md) §2). Cache
+  hits and coalesced duplicate fetches never count against the cap, and a fetch waiting out
+  the rate limiter holds no slot. Share one policy instance to make the cap process-wide.
 - **`max_cache_entries`** — bound on the URL→render LRU cache (256 by default).
 
 Choose your posture by where colorsense runs:

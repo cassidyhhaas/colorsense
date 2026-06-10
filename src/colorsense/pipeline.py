@@ -60,6 +60,22 @@ _COLLAPSE_DELTA_E = 0.06
 _COLLAPSE_TOP_BINS = 4
 
 
+class AnalysisTimeoutError(TimeoutError):
+    """Raised by :func:`analyze` when ``max_total_seconds`` expires.
+
+    Subclasses the builtin :class:`TimeoutError`, so a generic ``except TimeoutError``
+    still catches it. The offending URL and the configured budget are available as
+    :attr:`url` and :attr:`max_total_seconds`.
+    """
+
+    def __init__(self, url: str, max_total_seconds: float) -> None:
+        super().__init__(
+            f"analysis of {url!r} exceeded its overall deadline of {max_total_seconds:g}s"
+        )
+        self.url = url
+        self.max_total_seconds = max_total_seconds
+
+
 @dataclass
 class _ThemeOutput:
     """Everything derived for one rendered theme."""
@@ -79,6 +95,7 @@ async def analyze(
     viewport: Viewport = DEFAULT_VIEWPORT,
     themes: tuple[Theme, ...] = DEFAULT_THEMES,
     politeness: PolitenessPolicy | None = None,
+    max_total_seconds: float | None = None,
 ) -> AnalysisResult:
     """Analyze ``url`` and return a typed :class:`AnalysisResult`.
 
@@ -111,6 +128,14 @@ async def analyze(
         Fetch policy (robots gate, rate limit, render cache). A conservative default
         :class:`PolitenessPolicy` is created when omitted. The **consumer** is responsible
         for authorization — see ``SECURITY.md``.
+    max_total_seconds:
+        Optional overall deadline for the entire call — every theme render *plus* the CPU
+        classification — enforced via :class:`asyncio.timeout` (the SECURITY.md §2
+        deadline, shipped as a knob). ``None`` (default) imposes no deadline, the previous
+        behavior. On expiry, all in-flight renders are cancelled, the shared browser is
+        closed on the way out, and :class:`AnalysisTimeoutError` is raised (a
+        :class:`TimeoutError` subclass carrying the url and budget). Must be positive when
+        set (``<= 0`` raises :class:`ValueError`).
 
     Raises
     ------
@@ -122,6 +147,37 @@ async def analyze(
         If ``robots.txt`` disallows the fetch and the policy respects it.
     colorsense.harvest.RenderError
         If the page fails to render or navigate (DNS, timeout, TLS, or navigation error).
+    AnalysisTimeoutError
+        If ``max_total_seconds`` is set and the whole analysis does not finish within it.
+    """
+    if max_total_seconds is None:
+        return await _analyze(url, config_path, viewport, themes, politeness)
+    if max_total_seconds <= 0:
+        raise ValueError("max_total_seconds must be positive (or None for no deadline)")
+    try:
+        async with asyncio.timeout(max_total_seconds) as deadline:
+            return await _analyze(url, config_path, viewport, themes, politeness)
+    except TimeoutError as err:
+        # Only OUR deadline expiring becomes AnalysisTimeoutError; any other TimeoutError
+        # surfacing from inside the pipeline propagates untranslated.
+        if deadline.expired():
+            raise AnalysisTimeoutError(url, max_total_seconds) from err
+        raise
+
+
+async def _analyze(
+    url: str,
+    config_path: str | Path | None,
+    viewport: Viewport,
+    themes: tuple[Theme, ...],
+    politeness: PolitenessPolicy | None,
+) -> AnalysisResult:
+    """The deadline-free body of :func:`analyze` (which owns ``max_total_seconds``).
+
+    On cancellation (including an ``analyze`` deadline expiring mid-render), the
+    ``async with SharedBrowser()`` below unwinds: the ``TaskGroup`` cancels in-flight
+    renders, then ``SharedBrowser.__aexit__`` closes the browser — so no headless Chromium
+    outlives a timed-out call.
     """
     config = load_default_config() if config_path is None else load_config(config_path)
     policy = politeness if politeness is not None else PolitenessPolicy()
@@ -309,4 +365,10 @@ def _build_metadata(
 # ``colorsense.pipeline`` is an internal orchestration module; the supported public surface
 # is the top-level ``colorsense`` package (see ``colorsense.__all__``). ``__all__`` here only
 # scopes ``from colorsense.pipeline import *`` and the names the package facade re-exports.
-__all__ = ["DEFAULT_THEMES", "DEFAULT_VIEWPORT", "LIGHT_AND_DARK", "analyze"]
+__all__ = [
+    "DEFAULT_THEMES",
+    "DEFAULT_VIEWPORT",
+    "LIGHT_AND_DARK",
+    "AnalysisTimeoutError",
+    "analyze",
+]

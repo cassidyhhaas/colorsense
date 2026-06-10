@@ -7,6 +7,28 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **`block_private_networks()`** — a library-shipped egress `request_filter` factory (new
+  public export) that resolves each hostname and rejects URLs resolving to any non-public
+  address (loopback, RFC 1918, link-local/cloud-metadata, CGNAT, multicast, reserved, and
+  IPv6 equivalents), failing closed, with a per-hostname TTL+LRU verdict cache and an
+  optional narrowing `allowed_hosts` allowlist. Implements the SECURITY.md §1 egress-filter
+  item; does not fully defeat DNS rebinding — network isolation remains the primary control.
+- **`PolitenessPolicy(max_concurrent_renders=...)`** — an opt-in semaphore bounding
+  simultaneous renders through a policy (unbounded by default). Cache hits and coalesced
+  duplicate fetches never take a slot, and rate-limit waits happen outside the slot.
+- **`analyze(..., max_total_seconds=...)`** — an opt-in overall deadline on the whole call
+  (renders plus classification) via `asyncio.timeout`; expiry cancels in-flight renders,
+  closes the shared browser, and raises the new **`AnalysisTimeoutError`** (a public
+  export subclassing the builtin `TimeoutError`, carrying the url and budget).
+
+### Changed
+
+- The `examples/webservice/` reference implementation now uses the new library knobs
+  (`block_private_networks`, `max_concurrent_renders`, `max_total_seconds`) instead of
+  hand-rolled equivalents; only the pre-call navigation-URL validation remains app code.
+
 ## [0.2.0] - 2026-06-09
 
 First release to include the SSRF hardening work; also the first to ship the restructured

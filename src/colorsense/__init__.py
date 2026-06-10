@@ -28,11 +28,16 @@ Inputs & policy
 * :class:`Config` / :func:`load_default_config` / :func:`load_config` — load and inspect
   the palette config (the bundled default, or your own YAML by path).
 * :class:`PolitenessPolicy` — opt-in fetch policy (robots, rate limit, cache, scheme gate,
-  egress ``request_filter``); the consumer owns authorization.
-* :class:`RenderError` / :class:`RobotsDisallowedError` / :class:`UnsupportedSchemeError` —
-  raised by :func:`analyze` when a page fails to render/navigate, when ``robots.txt``
-  disallows the fetch, or when the URL scheme is not fetchable under the policy (only
-  ``http(s)`` by default; ``file://`` requires ``PolitenessPolicy(allow_file_urls=True)``).
+  egress ``request_filter``, ``max_concurrent_renders`` render cap); the consumer owns
+  authorization.
+* :func:`block_private_networks` — factory for a ``request_filter`` predicate that rejects
+  non-public destinations (loopback, RFC 1918, link-local/metadata, CGNAT, ...), failing
+  closed; the shipped SECURITY.md §1 egress filter.
+* :class:`RenderError` / :class:`RobotsDisallowedError` / :class:`UnsupportedSchemeError` /
+  :class:`AnalysisTimeoutError` — raised by :func:`analyze` when a page fails to
+  render/navigate, when ``robots.txt`` disallows the fetch, when the URL scheme is not
+  fetchable under the policy (only ``http(s)`` by default; ``file://`` requires
+  ``PolitenessPolicy(allow_file_urls=True)``), or when ``max_total_seconds`` expires.
 """
 
 from __future__ import annotations
@@ -54,17 +59,19 @@ from colorsense.models import (
     TokenSemanticRole,
     Viewport,
 )
+from colorsense.net.guard import block_private_networks
 from colorsense.net.politeness import (
     PolitenessPolicy,
     RobotsDisallowedError,
     UnsupportedSchemeError,
 )
-from colorsense.pipeline import DEFAULT_VIEWPORT, LIGHT_AND_DARK, analyze
+from colorsense.pipeline import DEFAULT_VIEWPORT, LIGHT_AND_DARK, AnalysisTimeoutError, analyze
 
 __all__ = [
     "DEFAULT_VIEWPORT",
     "LIGHT_AND_DARK",
     "AnalysisResult",
+    "AnalysisTimeoutError",
     "ClassifiedToken",
     "Color",
     "Config",
@@ -83,6 +90,7 @@ __all__ = [
     "UnsupportedSchemeError",
     "Viewport",
     "analyze",
+    "block_private_networks",
     "load_config",
     "load_default_config",
 ]

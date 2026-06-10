@@ -48,6 +48,9 @@ include = ["src", "tests", "docs", "README.md", "LICENSE", "pyproject.toml", "SE
 
 [dependency-groups]
 dev = ["ruff", "mypy", "pytest", "pytest-asyncio", "pytest-cov", "pytest-randomly", "types-pyyaml", "types-Pillow", "pre-commit"]
+# Used only by examples/ (and the tests that exercise them); never part of the library's
+# runtime dependencies. Install with: uv sync --group examples --group dev
+examples = ["fastapi>=0.110", "uvicorn>=0.29"]
 
 [tool.ruff]
 target-version = "py312"
@@ -58,6 +61,10 @@ select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
 
 [tool.mypy]
 python_version = "3.12"
+# Default check targets: the library plus the examples suite (CI and pre-commit run plain
+# `uv run mypy`). Checking examples/ requires the `examples` dependency group for the
+# FastAPI types.
+files = ["src", "examples"]
 strict = true
 warn_unused_ignores = true
 warn_redundant_casts = true
