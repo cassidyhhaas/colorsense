@@ -28,6 +28,13 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   (renders plus classification) via `asyncio.timeout`; expiry cancels in-flight renders,
   closes the shared browser, and raises the new **`AnalysisTimeoutError`** (a public
   export subclassing the builtin `TimeoutError`, carrying the url and budget).
+- **`analyze(..., browser_args=...)` / `--browser-arg`** — extra Chromium launch arguments
+  appended to the library's own and passed verbatim to every render of the call (the
+  themes share one browser launched with them); `harvest_page`, `SharedBrowser`, and
+  `RenderSession` accept the same knob for direct use. Canonical use case:
+  `browser_args=("--js-flags=--max-old-space-size=512",)` caps each renderer's V8 heap
+  (JS heap only — hard per-render memory/CPU caps stay container-level by design; see
+  SECURITY.md §2). Non-string entries raise `TypeError` before any render.
 
 ### Changed
 

@@ -80,7 +80,8 @@ The default output is a human-readable palette summary; `--json` emits the full
   filter.
 - **Server-grade guard rails** — a built-in private-network egress filter
   (`block_private_networks`) plus opt-in bounds on render concurrency
-  (`max_concurrent_renders`) and total call time (`max_total_seconds`).
+  (`max_concurrent_renders`) and total call time (`max_total_seconds`), and a browser
+  launch-arg pass-through (`browser_args`) for e.g. capping the V8 heap per renderer.
 - **Async-native and concurrent** — themes render concurrently in one shared browser; CPU
   work is offloaded so the event loop stays responsive.
 

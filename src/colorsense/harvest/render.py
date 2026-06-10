@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from types import TracebackType
 from typing import Literal, Self
 
@@ -121,6 +121,30 @@ _CONSENT_RECTS_JS: str = r"""
 """
 
 
+def normalize_browser_args(browser_args: Sequence[str]) -> tuple[str, ...]:
+    """Lightly validate extra Chromium launch arguments and return them as a tuple.
+
+    Mechanism, not policy: entries are appended to the library's own launch arguments and
+    passed **verbatim** to Chromium — no attempt is made to validate or allowlist the flags
+    themselves. Only obviously broken input is rejected, *before* any browser is involved:
+
+    * a bare string (almost certainly a forgotten one-tuple: pass ``("--flag",)``, not
+      ``"--flag"``) raises :class:`TypeError`;
+    * any non-string entry raises :class:`TypeError`.
+    """
+    if isinstance(browser_args, str):
+        raise TypeError(
+            "browser_args must be a sequence of strings, not a bare string "
+            "(pass ('--flag',), not '--flag')"
+        )
+    for arg in browser_args:
+        if not isinstance(arg, str):
+            raise TypeError(
+                f"browser_args entries must be strings, got {type(arg).__name__}: {arg!r}"
+            )
+    return tuple(browser_args)
+
+
 def _route_handler(
     request_filter: Callable[[str], bool],
 ) -> Callable[[Route], Awaitable[None]]:
@@ -163,9 +187,21 @@ class SharedBrowser:
             # each render opens its own context inside the one browser
             await harvest_page(url, Theme.light, config, viewport, browser=shared)
             await harvest_page(url, Theme.dark, config, viewport, browser=shared)
+
+    Parameters
+    ----------
+    browser_args:
+        Extra command-line arguments appended to the library's own launch arguments and
+        passed **verbatim** to the Chromium launch (the library does not validate or
+        allowlist the flags — mechanism, not policy). Canonical use case:
+        ``("--js-flags=--max-old-space-size=512",)`` caps each renderer process's V8 heap
+        at 512 MB. Note this bounds the **JS heap only**, not total renderer memory —
+        container/cgroup limits remain the enforceable bound (see ``SECURITY.md`` §2).
+        Non-string entries (or a bare string) raise :class:`TypeError` at construction.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, *, browser_args: Sequence[str] = ()) -> None:
+        self._browser_args = normalize_browser_args(browser_args)
         self._playwright: Playwright | None = None
         self._browser: Browser | None = None
         self._closed = False
@@ -206,7 +242,9 @@ class SharedBrowser:
             if self._browser is None:
                 if self._playwright is None:
                     self._playwright = await async_playwright().start()
-                self._browser = await self._playwright.chromium.launch(headless=True)
+                self._browser = await self._playwright.chromium.launch(
+                    headless=True, args=list(self._browser_args)
+                )
             return self._browser
 
 
@@ -242,6 +280,13 @@ class RenderSession:
         context but never the external browser, whose lifecycle stays with the caller
         (see :class:`SharedBrowser`). ``None`` (the default) launches and tears down a
         dedicated Playwright + Chromium pair as before.
+    browser_args:
+        Extra Chromium launch arguments for the session's **own** launch, appended to the
+        library's launch arguments and passed verbatim (see
+        :class:`SharedBrowser` for the canonical V8-heap-cap use case and caveats). Launch
+        arguments only exist at launch time, so combining a non-empty ``browser_args`` with
+        an external ``browser`` (already launched, by someone else) raises
+        :class:`ValueError` — put the args on the :class:`SharedBrowser` instead.
     """
 
     def __init__(
@@ -252,7 +297,14 @@ class RenderSession:
         user_agent: str | None = None,
         request_filter: Callable[[str], bool] | None = None,
         browser: Browser | None = None,
+        browser_args: Sequence[str] = (),
     ) -> None:
+        self._browser_args = normalize_browser_args(browser_args)
+        if browser is not None and self._browser_args:
+            raise ValueError(
+                "browser_args apply at launch time and cannot be combined with an external "
+                "browser; pass them to SharedBrowser (or whoever launches the browser) instead"
+            )
         self._theme = theme
         self._viewport = viewport
         self._user_agent = user_agent
@@ -269,7 +321,9 @@ class RenderSession:
     async def __aenter__(self) -> Self:
         if self._owns_browser:
             self._playwright = await async_playwright().start()
-            self._browser = await self._playwright.chromium.launch(headless=True)
+            self._browser = await self._playwright.chromium.launch(
+                headless=True, args=list(self._browser_args)
+            )
         assert self._browser is not None  # external browser, or just launched above
         # ``user_agent=None`` is Playwright's own default (stock headless-Chromium UA), so a
         # configured UA overrides it and ``None`` passes through unchanged.

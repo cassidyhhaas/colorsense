@@ -97,6 +97,7 @@ class _FakePlaywrightStack:
         self.launches = 0
         self.stops = 0
         self.browsers: list[_FakeBrowser] = []
+        self.launch_kwargs: list[dict[str, object]] = []
         self.chromium = self  # launch() lives on .chromium in the real API
 
     def __call__(self) -> _FakePlaywrightStack:
@@ -106,8 +107,9 @@ class _FakePlaywrightStack:
         self.starts += 1
         return self  # the started Playwright (carries .chromium and .stop)
 
-    async def launch(self, **_kwargs: object) -> _FakeBrowser:
+    async def launch(self, **kwargs: object) -> _FakeBrowser:
         self.launches += 1
+        self.launch_kwargs.append(dict(kwargs))
         browser = _FakeBrowser()
         self.browsers.append(browser)
         return browser
@@ -245,6 +247,83 @@ async def test_two_sessions_share_browser_with_isolated_contexts(
 
 
 # ---------------------------------------------------------------------------
+# browser_args: extra Chromium launch arguments reach the launch call verbatim.
+# ---------------------------------------------------------------------------
+
+V8_CAP = "--js-flags=--max-old-space-size=512"
+
+
+async def test_shared_browser_args_reach_launch_verbatim(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The extras are appended after the library's own launch arguments (currently none
+    # beyond headless=True) and passed verbatim — order preserved, nothing rewritten.
+    stack = _patch_playwright(monkeypatch)
+    async with SharedBrowser(browser_args=(V8_CAP, "--disable-dev-shm-usage")) as shared:
+        await shared.get()
+    (kwargs,) = stack.launch_kwargs
+    assert kwargs == {"headless": True, "args": [V8_CAP, "--disable-dev-shm-usage"]}
+
+
+async def test_shared_browser_default_args_unchanged(monkeypatch: pytest.MonkeyPatch) -> None:
+    # No extras (the default) keeps the launch exactly as before: no behavior change.
+    stack = _patch_playwright(monkeypatch)
+    async with SharedBrowser() as shared:
+        await shared.get()
+    (kwargs,) = stack.launch_kwargs
+    assert kwargs == {"headless": True, "args": []}
+
+
+async def test_render_session_args_reach_owned_launch(monkeypatch: pytest.MonkeyPatch) -> None:
+    # The dedicated-launch path (no external browser) honors browser_args too.
+    stack = _patch_playwright(monkeypatch)
+    async with RenderSession(Theme.light, VIEWPORT, browser_args=(V8_CAP,)):
+        pass
+    (kwargs,) = stack.launch_kwargs
+    assert kwargs == {"headless": True, "args": [V8_CAP]}
+
+
+async def test_render_session_rejects_args_with_external_browser(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Launch args only exist at launch time: combining them with an already-launched
+    # external browser is a contradiction and must fail loudly, not silently no-op.
+    stack = _patch_playwright(monkeypatch)
+    external = _FakeBrowser()
+    with pytest.raises(ValueError, match="browser_args"):
+        RenderSession(Theme.light, VIEWPORT, browser=external, browser_args=(V8_CAP,))  # type: ignore[arg-type]
+    assert stack.starts == 0
+
+
+async def test_harvest_page_rejects_args_with_shared_browser(
+    monkeypatch: pytest.MonkeyPatch, config: Config
+) -> None:
+    # Same contradiction at the harvest_page seam — rejected as a plain ValueError BEFORE
+    # any render, never wrapped into RenderError, and the handle is never resolved.
+    stack = _patch_playwright(monkeypatch)
+    async with SharedBrowser() as shared:
+        with pytest.raises(ValueError, match="browser_args"):
+            await harvest_page(
+                URL, Theme.light, config, VIEWPORT, browser=shared, browser_args=(V8_CAP,)
+            )
+    assert (stack.starts, stack.launches) == (0, 0)
+
+
+@pytest.mark.parametrize("bad", [("--ok", 512), (None,), "--bare-string"])
+async def test_invalid_browser_args_raise_type_error(
+    monkeypatch: pytest.MonkeyPatch, bad: object
+) -> None:
+    # Light validation only: non-string entries and a bare string (a forgotten one-tuple)
+    # are rejected eagerly at construction; the flags themselves are never validated.
+    stack = _patch_playwright(monkeypatch)
+    with pytest.raises(TypeError, match="browser_args"):
+        SharedBrowser(browser_args=bad)  # type: ignore[arg-type]
+    with pytest.raises(TypeError, match="browser_args"):
+        RenderSession(Theme.light, VIEWPORT, browser_args=bad)  # type: ignore[arg-type]
+    assert stack.starts == 0
+
+
+# ---------------------------------------------------------------------------
 # PolitenessPolicy.fetch threads the handle through opaquely.
 # ---------------------------------------------------------------------------
 
@@ -378,6 +457,43 @@ async def test_analyze_passes_one_shared_handle_to_all_theme_renders(
     assert stack.starts == 0  # lazy: the fake harvester never resolved the handle
 
 
+async def test_analyze_forwards_browser_args_to_shared_browser(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The analyze kwarg must land on the one SharedBrowser the call constructs — that
+    # handle carries the args to the (single) Chromium launch every theme render shares.
+    constructed: list[tuple[str, ...]] = []
+    real_shared_browser = SharedBrowser
+
+    def recording_shared_browser(*, browser_args: tuple[str, ...] = ()) -> SharedBrowser:
+        constructed.append(browser_args)
+        return real_shared_browser(browser_args=browser_args)
+
+    monkeypatch.setattr("colorsense.pipeline.SharedBrowser", recording_shared_browser)
+    stack = _patch_playwright(monkeypatch)
+    harvester = _MiniHarvester()
+    policy = PolitenessPolicy(harvester=harvester, robots_loader=_no_robots)
+
+    await analyze(URL, themes=LIGHT_AND_DARK, politeness=policy, browser_args=(V8_CAP,))
+
+    assert constructed == [(V8_CAP,)]
+    assert stack.starts == 0  # the fake harvester never resolved the handle
+
+
+async def test_analyze_invalid_browser_args_raise_before_any_render(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stack = _patch_playwright(monkeypatch)
+    harvester = _MiniHarvester()
+    policy = PolitenessPolicy(harvester=harvester, robots_loader=_no_robots)
+
+    with pytest.raises(TypeError, match="browser_args"):
+        await analyze(URL, politeness=policy, browser_args=("--ok", 256))  # type: ignore[arg-type]
+
+    assert harvester.browsers == []  # rejected before the policy/harvester saw anything
+    assert stack.starts == 0
+
+
 async def test_analyze_uses_fresh_handle_per_call(monkeypatch: pytest.MonkeyPatch) -> None:
     # Each analyze() call owns (and tears down) its own browser: handles must not leak
     # across calls, where a closed shared browser would poison the next run.
@@ -414,6 +530,21 @@ async def test_harvest_page_renders_both_themes_in_one_browser(fixtures_dir: Pat
     assert dark.theme is Theme.dark
     # tokens.html declares CSS custom properties: both context renders genuinely harvested.
     assert light.tokens and dark.tokens
+
+
+@pytest.mark.browser
+async def test_analyze_succeeds_with_real_browser_args(fixtures_dir: Path) -> None:
+    # Proof the plumbing survives a real Chromium launch: the V8-heap cap is a legitimate
+    # flag, so the analysis must succeed exactly as without it.
+    url = (fixtures_dir / "tokens.html").as_uri()
+    result = await analyze(
+        url,
+        viewport=VIEWPORT,
+        politeness=file_policy(),
+        browser_args=("--js-flags=--max-old-space-size=256",),
+    )
+    assert result.url == url
+    assert all(palette.roles.mapping for palette in result.themes.values())
 
 
 @pytest.mark.browser

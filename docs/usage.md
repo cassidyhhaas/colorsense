@@ -19,6 +19,7 @@ result = asyncio.run(
         politeness=PolitenessPolicy(min_interval=2.0),  # see "Fetch policy" below
         config_path="my_palette_config.yaml",           # see the advanced guide
         max_total_seconds=60.0,                         # overall deadline; default: none
+        browser_args=("--js-flags=--max-old-space-size=512",),  # extra Chromium flags
     )
 )
 ```
@@ -46,6 +47,22 @@ classification — via `asyncio.timeout`. On expiry, in-flight renders are cance
 shared browser is closed, and `AnalysisTimeoutError` is raised (a `TimeoutError` subclass
 carrying the URL and budget). There is no deadline by default; set one wherever a stalling
 page must not stall you (see [SECURITY.md](../SECURITY.md) §2). Must be positive when set.
+
+### Browser launch arguments
+
+`browser_args` is a tuple of extra command-line arguments appended to the library's own
+launch arguments and passed **verbatim** to the Chromium launch; every render of the call
+launches with them (all themes share one browser). The canonical use case caps each
+renderer process's V8 heap:
+
+```python
+result = await analyze(url, browser_args=("--js-flags=--max-old-space-size=512",))
+```
+
+This bounds the **JS heap only**, not total renderer memory — hard per-render memory/CPU
+caps are the container/cgroup layer's job (see [SECURITY.md](../SECURITY.md) §2). The
+library does not validate the flags themselves; non-string entries (or a bare string
+instead of a tuple) raise `TypeError` before any render.
 
 ### Viewport
 
@@ -76,6 +93,7 @@ stdout carries data only; warnings and errors go to stderr.
 | `--scale FLOAT` | Device scale factor (default `1.0`). |
 | `--config PATH` | Palette config YAML overriding the bundled default (`config_path`). |
 | `--max-total-seconds FLOAT` | Overall deadline per URL; unset by default. |
+| `--browser-arg TEXT` | Extra Chromium launch argument, passed verbatim (`browser_args`); repeatable. E.g. `--browser-arg='--js-flags=--max-old-space-size=512'` caps each renderer's V8 heap (JS heap only; see [SECURITY.md](../SECURITY.md) §2). |
 | `--min-interval FLOAT` | Seconds between same-host fetches (default `1.0`). |
 | `--user-agent TEXT` | Wire User-Agent. Default: a CLI-identifying UA (`colorsense-cli/<version> (+repo URL)`); pass your own to identify *your* application. |
 | `--block-private-networks` | Install `block_private_networks()` as the policy's egress `request_filter`. |

@@ -27,6 +27,7 @@ from colorsense.classify.tokens import classify_tokens
 from colorsense.color.primitives import delta_e
 from colorsense.config import Config, load_config, load_default_config
 from colorsense.harvest import SharedBrowser
+from colorsense.harvest.render import normalize_browser_args
 from colorsense.models import (
     AnalysisResult,
     ClassifiedToken,
@@ -96,6 +97,7 @@ async def analyze(
     themes: tuple[Theme, ...] = DEFAULT_THEMES,
     politeness: PolitenessPolicy | None = None,
     max_total_seconds: float | None = None,
+    browser_args: tuple[str, ...] = (),
 ) -> AnalysisResult:
     """Analyze ``url`` and return a typed :class:`AnalysisResult`.
 
@@ -136,6 +138,17 @@ async def analyze(
         closed on the way out, and :class:`AnalysisTimeoutError` is raised (a
         :class:`TimeoutError` subclass carrying the url and budget). Must be positive when
         set (``<= 0`` raises :class:`ValueError`).
+    browser_args:
+        Extra command-line arguments for the call's Chromium launch, appended to the
+        library's own launch arguments and passed **verbatim** to Chromium (the library
+        does not validate or allowlist the flags — mechanism, not policy). Every render of
+        this call — all themes share one browser — launches with them. Canonical use case:
+        ``browser_args=("--js-flags=--max-old-space-size=512",)`` caps each renderer
+        process's V8 heap at 512 MB. Note this bounds the **JS heap only**, not total
+        renderer memory; hard per-render memory/CPU caps are the container/cgroup layer's
+        job (see ``SECURITY.md`` §2). Default ``()``: no extra arguments, behavior
+        unchanged. Non-string entries (or a bare string) raise :class:`TypeError` before
+        any render.
 
     Raises
     ------
@@ -150,13 +163,16 @@ async def analyze(
     AnalysisTimeoutError
         If ``max_total_seconds`` is set and the whole analysis does not finish within it.
     """
+    # Validate eagerly: a broken browser_args value must raise here, before any robots
+    # fetch or render starts (and on the deadline path, before the timer even exists).
+    extra_args = normalize_browser_args(browser_args)
     if max_total_seconds is None:
-        return await _analyze(url, config_path, viewport, themes, politeness)
+        return await _analyze(url, config_path, viewport, themes, politeness, extra_args)
     if max_total_seconds <= 0:
         raise ValueError("max_total_seconds must be positive (or None for no deadline)")
     try:
         async with asyncio.timeout(max_total_seconds) as deadline:
-            return await _analyze(url, config_path, viewport, themes, politeness)
+            return await _analyze(url, config_path, viewport, themes, politeness, extra_args)
     except TimeoutError as err:
         # Only OUR deadline expiring becomes AnalysisTimeoutError; any other TimeoutError
         # surfacing from inside the pipeline propagates untranslated.
@@ -171,6 +187,7 @@ async def _analyze(
     viewport: Viewport,
     themes: tuple[Theme, ...],
     politeness: PolitenessPolicy | None,
+    browser_args: tuple[str, ...],
 ) -> AnalysisResult:
     """The deadline-free body of :func:`analyze` (which owns ``max_total_seconds``).
 
@@ -195,7 +212,10 @@ async def _analyze(
     # are all cache hits pays none. The ``async with`` closes the shared browser as soon as
     # the renders finish (before the CPU phase), including on the exception path.
     try:
-        async with SharedBrowser() as shared_browser, asyncio.TaskGroup() as tg:
+        async with (
+            SharedBrowser(browser_args=browser_args) as shared_browser,
+            asyncio.TaskGroup() as tg,
+        ):
             fetch_tasks = [
                 tg.create_task(policy.fetch(url, theme, config, viewport, browser=shared_browser))
                 for theme in ordered_themes

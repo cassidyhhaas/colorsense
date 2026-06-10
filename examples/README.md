@@ -9,14 +9,16 @@ Two ends of the trust spectrum, per [SECURITY.md](../SECURITY.md):
   user-supplied URLs and wires up the SECURITY.md checklist around `analyze` — pre-call URL
   validation ([`webservice/url_guard.py`](webservice/url_guard.py), the one control that
   stays app code), the library's `block_private_networks()` egress `request_filter`, a
-  `max_concurrent_renders` cap, and a `max_total_seconds` deadline
-  ([`webservice/app.py`](webservice/app.py)), with library errors mapped to HTTP statuses.
+  `max_concurrent_renders` cap, a `max_total_seconds` deadline, and a `browser_args`
+  V8-heap cap ([`webservice/app.py`](webservice/app.py)), with library errors mapped to
+  HTTP statuses.
 
 > **The webservice is a reference implementation, not a security guarantee.** It shows how
 > to configure the in-process controls [SECURITY.md](../SECURITY.md) requires, but a
 > URL-string filter cannot fully defeat DNS rebinding (Chromium resolves hostnames
-> independently), and nothing here bounds per-render memory or CPU. Run the browser in a
-> network-isolated, resource-limited environment regardless.
+> independently), and nothing here hard-bounds per-render memory or CPU — the `browser_args`
+> V8 cap bounds the JS heap only. Run the browser in a network-isolated, resource-limited
+> environment regardless.
 
 ## Setup
 
@@ -43,8 +45,10 @@ curl -s -X POST localhost:8000/analyze \
 ```
 
 The webservice reads `COLORSENSE_ALLOWED_HOSTS` (comma-separated hostname allowlist;
-unset = any public host), `COLORSENSE_MAX_CONCURRENCY` (default 2), and
-`COLORSENSE_DEADLINE_SECONDS` (default 60).
+unset = any public host), `COLORSENSE_MAX_CONCURRENCY` (default 2),
+`COLORSENSE_DEADLINE_SECONDS` (default 60), and `COLORSENSE_BROWSER_ARGS` (comma-separated
+extra Chromium launch args; default `--js-flags=--max-old-space-size=512`, the V8-heap cap;
+set to an empty string for none).
 
 The pre-call validation in `webservice/url_guard.py` is plain stdlib and unit-tested
 without a browser or FastAPI — see `tests/test_examples_url_guard.py`. The address-level

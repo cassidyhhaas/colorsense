@@ -157,7 +157,8 @@ def test_endpoint_passes_policy_and_deadline_to_analyze(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     # The §2 bounds are library knobs now: the endpoint must hand analyze the shared
-    # policy (which carries max_concurrent_renders) and the overall deadline.
+    # policy (which carries max_concurrent_renders), the overall deadline, and the
+    # browser_args V8-heap cap.
     url = "https://example.com/"
     stub = AnalyzeStub(result=fake_result(url))
     install_stub(monkeypatch, stub)
@@ -166,4 +167,7 @@ def test_endpoint_passes_policy_and_deadline_to_analyze(
     (kwargs,) = stub.kwargs
     assert kwargs["politeness"] is app_module._policy
     assert kwargs["max_total_seconds"] == app_module.ANALYZE_DEADLINE_SECONDS
+    assert kwargs["browser_args"] == app_module.BROWSER_ARGS
     assert app_module._policy.max_concurrent_renders == app_module.MAX_CONCURRENT_ANALYSES
+    # The default (no COLORSENSE_BROWSER_ARGS override) is the documented V8-heap cap.
+    assert app_module.BROWSER_ARGS == ("--js-flags=--max-old-space-size=512",)

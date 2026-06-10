@@ -86,12 +86,27 @@ memory or on the number of sub-requests a page may make. The library does not sa
 downloaded files to disk — it captures an in-memory screenshot — but the *render itself* is
 the cost, and it is unbounded unless you bound it.
 
+**Hard per-render memory/CPU caps are container-level by design.** The library does not —
+and will not — enforce them in-process: a userland watchdog cannot hold under exactly the
+memory pressure it is supposed to guard against, and shipping one would invite false
+confidence. Hard caps are the container/cgroup layer's job. What the library ships instead:
+`max_total_seconds` bounds how *long* an abusive render runs, and
+`analyze(..., browser_args=("--js-flags=--max-old-space-size=512",))` passes launch
+arguments verbatim to Chromium — that one caps each renderer process's V8 heap at 512 MB.
+The V8 flag bounds the **JS heap only**, not total renderer memory (DOM, images, GPU
+buffers); the container limit remains the enforceable bound.
+
 ### What you must do
 
 In any server handling many or large or untrusted targets, budget for abuse:
 
 - **Container / sandbox isolation** for the browser process, with **hard memory and CPU
-  limits** (e.g. cgroup limits) so a single target cannot take down the host.
+  limits** (e.g. cgroup limits) so a single target cannot take down the host. This is the
+  enforceable cap; the library deliberately does not duplicate it in-process (above).
+- **Cap the V8 heap in-browser**: pass
+  `analyze(..., browser_args=("--js-flags=--max-old-space-size=512",))` so a script-driven
+  memory balloon dies inside the renderer instead of growing until the container kills the
+  whole browser. JS heap only — keep the container limit regardless.
 - **Concurrency caps** on simultaneous renders: set
   `PolitenessPolicy(max_concurrent_renders=...)` on a shared policy instance, sized to your
   resource budget. Unset, the library will gladly launch as many browsers as you ask it to.
@@ -131,7 +146,7 @@ cannot stall your pipeline; raise the cap to honor longer delays. Two caveats:
 | Risk | Library's stance | Your responsibility |
 | --- | --- | --- |
 | **SSRF** | `http(s)` only by default (`file://` opt-in, other schemes rejected); no host/IP validation unless configured; follows redirects; optional `request_filter` over every browser request, with `block_private_networks()` as the shipped filter (does not fully defeat DNS rebinding) | Allowlist hosts, configure `request_filter` (e.g. `block_private_networks()`), pin redirects, isolate egress — network isolation stays primary |
-| **Resource / DoS** | Timeout, rate limiter (incl. capped `Crawl-delay`), capture dimension + decode pixel caps; opt-in `max_concurrent_renders` and `max_total_seconds` (both unset by default); no memory cap | Container limits, set `max_concurrent_renders` + `max_total_seconds`, network isolation |
+| **Resource / DoS** | Timeout, rate limiter (incl. capped `Crawl-delay`), capture dimension + decode pixel caps; opt-in `max_concurrent_renders` and `max_total_seconds` (both unset by default); opt-in V8-heap cap via `browser_args`; no in-process memory/CPU cap (by design) | Container limits (the enforceable cap), set `max_concurrent_renders` + `max_total_seconds`, cap the V8 heap via `browser_args`, network isolation |
 | **`robots.txt`** | Respected by default (incl. `Crawl-delay`, capped at 30s), but fails open; can be disabled | Don't disable without authorization; gate authorization yourself before calling |
 
 `colorsense` makes it easy to fetch and render considerately once **you** have decided a
