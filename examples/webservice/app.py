@@ -18,14 +18,20 @@ most of them now as library knobs:
 * **Overall deadline** (§2): ``analyze(..., max_total_seconds=...)`` bounds each call end
   to end and raises ``AnalysisTimeoutError`` (mapped to 504). Note the budget covers any
   wait for a render slot too — size deadline and concurrency together.
+* **V8 heap cap** (§2): ``analyze(..., browser_args=...)`` passes
+  ``--js-flags=--max-old-space-size=512`` verbatim to the Chromium launch, so a
+  script-driven memory balloon dies inside the renderer. JS heap only — the container
+  memory limit stays mandatory.
 * **Politeness** (§3): robots stays respected, the User-Agent is identifiable, and
   same-host fetches are paced.
 
 What this app deliberately does NOT give you (also per SECURITY.md): a URL-string filter
 cannot fully defeat DNS rebinding (Chromium resolves hostnames itself — see the
-``block_private_networks`` docstring), and there are no per-render memory/CPU bounds here.
-Run the service in a network-isolated, resource-limited container; this code is the
-in-process half of the controls, not the whole story.
+``block_private_networks`` docstring), and there are no hard per-render memory/CPU bounds
+here — the V8-heap cap bounds the JS heap only, and the library ships no in-process memory
+watchdog by design (SECURITY.md §2). Run the service in a network-isolated,
+resource-limited container; this code is the in-process half of the controls, not the
+whole story.
 
 Run from the repository root (needs the ``examples`` dependency group):
 
@@ -36,8 +42,10 @@ Run from the repository root (needs the ``examples`` dependency group):
         -H 'content-type: application/json' -d '{"url": "https://example.com"}'
 
 Environment knobs: ``COLORSENSE_ALLOWED_HOSTS`` (comma-separated exact hostnames; unset =
-any public host), ``COLORSENSE_MAX_CONCURRENCY`` (default 2), and
-``COLORSENSE_DEADLINE_SECONDS`` (default 60).
+any public host), ``COLORSENSE_MAX_CONCURRENCY`` (default 2),
+``COLORSENSE_DEADLINE_SECONDS`` (default 60), and ``COLORSENSE_BROWSER_ARGS``
+(comma-separated extra Chromium launch args; default caps each renderer's V8 heap at
+512 MB).
 """
 
 from __future__ import annotations
@@ -79,6 +87,19 @@ MAX_CONCURRENT_ANALYSES = int(os.environ.get("COLORSENSE_MAX_CONCURRENCY", "2"))
 # analyze(max_total_seconds=...); covers render-slot queueing too, so size it with the
 # concurrency cap in mind.
 ANALYZE_DEADLINE_SECONDS = float(os.environ.get("COLORSENSE_DEADLINE_SECONDS", "60"))
+
+# SECURITY.md §2: cap each renderer process's V8 heap in-browser, passed verbatim to the
+# Chromium launch via analyze(browser_args=...). This bounds the JS heap only — not total
+# renderer memory — so it complements, never replaces, the container/cgroup memory limit
+# (the enforceable cap; the library ships no in-process memory watchdog by design).
+# Override with COLORSENSE_BROWSER_ARGS (comma-separated; empty string = no extra args).
+BROWSER_ARGS = tuple(
+    arg.strip()
+    for arg in os.environ.get(
+        "COLORSENSE_BROWSER_ARGS", "--js-flags=--max-old-space-size=512"
+    ).split(",")
+    if arg.strip()
+)
 
 # One policy for the process: its render cache, per-host rate limiter, robots cache, and
 # render-concurrency semaphore are all per-policy state, so sharing the instance is what
@@ -172,10 +193,14 @@ async def analyze_palette(request: AnalyzeRequest) -> AnalyzeResponse:
         raise HTTPException(status_code=400, detail=str(err)) from err
 
     # The §2 bounds are library knobs now: the policy's max_concurrent_renders caps
-    # simultaneous renders, and max_total_seconds deadlines the whole call.
+    # simultaneous renders, max_total_seconds deadlines the whole call, and browser_args
+    # caps each renderer's V8 heap at the Chromium launch.
     try:
         result = await analyze(
-            request.url, politeness=_policy, max_total_seconds=ANALYZE_DEADLINE_SECONDS
+            request.url,
+            politeness=_policy,
+            max_total_seconds=ANALYZE_DEADLINE_SECONDS,
+            browser_args=BROWSER_ARGS,
         )
     except AnalysisTimeoutError as err:
         raise HTTPException(

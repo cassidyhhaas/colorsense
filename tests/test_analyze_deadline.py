@@ -157,7 +157,8 @@ class _FakeSharedBrowser:
 
     instances: ClassVar[list[_FakeSharedBrowser]] = []
 
-    def __init__(self) -> None:
+    def __init__(self, *, browser_args: tuple[str, ...] = ()) -> None:
+        self.browser_args = browser_args
         self.entered = False
         self.exited = False
         _FakeSharedBrowser.instances.append(self)

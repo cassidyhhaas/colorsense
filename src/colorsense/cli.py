@@ -99,6 +99,7 @@ async def _run(
     viewport: Viewport,
     config_path: Path | None,
     max_total_seconds: float | None,
+    browser_args: tuple[str, ...],
     json_output: bool,
 ) -> int:
     """Analyze ``urls`` sequentially through one shared policy; return the failure count."""
@@ -113,6 +114,7 @@ async def _run(
                 politeness=policy,
                 config_path=config_path,
                 max_total_seconds=max_total_seconds,
+                browser_args=browser_args,
             )
         except (
             RobotsDisallowedError,
@@ -165,6 +167,17 @@ def main(
         typer.Option(
             metavar="FLOAT",
             help="Overall deadline per URL (renders plus classification); no deadline if unset.",
+        ),
+    ] = None,
+    browser_arg: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--browser-arg",
+            metavar="TEXT",
+            help="Extra Chromium launch argument, passed verbatim; repeatable. "
+            "E.g. --browser-arg='--js-flags=--max-old-space-size=512' caps each "
+            "renderer's V8 heap (JS heap only — container limits remain the hard bound; "
+            "see SECURITY.md).",
         ),
     ] = None,
     min_interval: Annotated[
@@ -233,6 +246,7 @@ def main(
                 viewport=parsed_viewport,
                 config_path=config,
                 max_total_seconds=max_total_seconds,
+                browser_args=tuple(browser_arg or ()),
                 json_output=json_output,
             )
         )

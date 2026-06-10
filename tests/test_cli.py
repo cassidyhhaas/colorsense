@@ -176,6 +176,38 @@ def test_options_reach_analyze(monkeypatch: pytest.MonkeyPatch) -> None:
     assert policy.request_filter is None
 
 
+def test_browser_arg_repeatable_reaches_analyze(monkeypatch: pytest.MonkeyPatch) -> None:
+    # --browser-arg is repeatable and maps to the analyze browser_args tuple verbatim,
+    # in order; without the flag the tuple is empty (no behavior change).
+    stub = AnalyzeStub()
+    install_stub(monkeypatch, stub)
+    result = runner.invoke(
+        cli_module.app,
+        [
+            "https://example.com",
+            "--browser-arg",
+            "--js-flags=--max-old-space-size=512",
+            "--browser-arg",
+            "--disable-dev-shm-usage",
+        ],
+    )
+    assert result.exit_code == 0
+    (kwargs,) = stub.kwargs
+    assert kwargs["browser_args"] == (
+        "--js-flags=--max-old-space-size=512",
+        "--disable-dev-shm-usage",
+    )
+
+
+def test_browser_args_default_to_empty_tuple(monkeypatch: pytest.MonkeyPatch) -> None:
+    stub = AnalyzeStub()
+    install_stub(monkeypatch, stub)
+    result = runner.invoke(cli_module.app, ["https://example.com"])
+    assert result.exit_code == 0
+    (kwargs,) = stub.kwargs
+    assert kwargs["browser_args"] == ()
+
+
 def test_one_shared_policy_across_urls(monkeypatch: pytest.MonkeyPatch) -> None:
     stub = AnalyzeStub()
     install_stub(monkeypatch, stub)

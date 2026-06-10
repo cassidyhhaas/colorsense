@@ -14,14 +14,19 @@ Public interface
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 
 from playwright.async_api import Error as PlaywrightError
 from pydantic import ValidationError
 
 from colorsense.config import Config
 from colorsense.harvest.dom import harvest_elements
-from colorsense.harvest.render import DEFAULT_NAV_TIMEOUT_MS, RenderSession, SharedBrowser
+from colorsense.harvest.render import (
+    DEFAULT_NAV_TIMEOUT_MS,
+    RenderSession,
+    SharedBrowser,
+    normalize_browser_args,
+)
 from colorsense.harvest.screenshot import _OversizedCaptureError, harvest_screenshot
 from colorsense.harvest.states import probe_hover_states
 from colorsense.harvest.tokens import harvest_tokens
@@ -71,6 +76,7 @@ async def harvest_page(
     user_agent: str | None = None,
     request_filter: Callable[[str], bool] | None = None,
     browser: SharedBrowser | None = None,
+    browser_args: Sequence[str] = (),
 ) -> Harvest:
     """Render ``url`` under ``theme``/``viewport`` and harvest everything into a Harvest.
 
@@ -108,6 +114,16 @@ async def harvest_page(
     launching the shared browser surfaces as :class:`RenderError` like any other render
     failure.
 
+    ``browser_args`` is a sequence of extra command-line arguments for the **dedicated**
+    Chromium launch (the ``browser=None`` path), appended to the library's own launch
+    arguments and passed verbatim — canonically
+    ``("--js-flags=--max-old-space-size=512",)`` to cap the renderer's V8 heap (JS heap
+    only, not total renderer memory; container limits remain the enforceable bound, see
+    ``SECURITY.md`` §2). Launch arguments only exist at launch time, so combining a
+    non-empty ``browser_args`` with a shared ``browser`` handle raises :class:`ValueError`
+    *before* any render — pass them to ``SharedBrowser(browser_args=...)`` instead (that is
+    what ``analyze(browser_args=...)`` does). Non-string entries raise :class:`TypeError`.
+
     Calling ``harvest_page`` directly bypasses :class:`PolitenessPolicy` entirely — scheme
     validation, the robots gate, the rate limiter, and the cache all live in the policy,
     the only place networking policy is enforced.
@@ -120,6 +136,15 @@ async def harvest_page(
     themes concurrently).
     """
     vendor_prefixes = config.component_classifier.third_party.vendor_prefixes
+
+    # Validate eagerly, OUTSIDE the try below: these are caller programming errors and must
+    # surface as themselves (TypeError/ValueError), never wrapped into RenderError.
+    extra_args = normalize_browser_args(browser_args)
+    if browser is not None and extra_args:
+        raise ValueError(
+            "browser_args apply at launch time and cannot be combined with a shared "
+            "browser handle; construct SharedBrowser(browser_args=...) instead"
+        )
 
     # The whole render body is wrapped so the harvest's failure modes all surface as the one
     # public ``RenderError`` rather than version-private or incidental types:
@@ -140,7 +165,12 @@ async def harvest_page(
         # failure inside RenderSession.__aenter__ on the dedicated-browser path.
         shared = await browser.get() if browser is not None else None
         async with RenderSession(
-            theme, viewport, user_agent=user_agent, request_filter=request_filter, browser=shared
+            theme,
+            viewport,
+            user_agent=user_agent,
+            request_filter=request_filter,
+            browser=shared,
+            browser_args=extra_args,
         ) as session:
             await session.goto(url, nav_timeout_ms=nav_timeout_ms)
             page = session.page
