@@ -532,27 +532,65 @@ class PolitenessPolicy:
         leader's :class:`Harvest` — or, if the leader's gate/render fails, the *same*
         exception (the failure is not cached, and the next fetch re-renders). Distinct keys
         never share, so unrelated renders still run in parallel.
+
+        Cancellation does **not** fan out like a failure: if the *leader's* task is
+        cancelled (e.g. its caller's ``analyze(max_total_seconds=...)`` deadline expires,
+        or its HTTP client disconnects in a server), followers never inherit the
+        ``CancelledError``. They re-elect instead — exactly one follower becomes the new
+        leader (re-running throttle → robots gate → render) and the rest follow *it*; if
+        the render somehow completed first, the re-checking loop serves it from the cache.
+        A follower whose *own* task is cancelled still raises ``CancelledError`` normally,
+        and the cancelled leader still propagates its own ``CancelledError`` to its caller.
         """
         # Gate the scheme BEFORE the cache lookup: order matters for clarity (each policy
         # owns its cache, but the gate must visibly come first) and ensures a cached
         # ``file://`` harvest is never served once file URLs are forbidden.
         self._validate_scheme(url)
         key = _cache_key(url, theme, viewport)
-        cached = self._cache.get(key)
-        if cached is not None:
-            # A hit is fresh usage: move it to the most-recently-used end so it survives
-            # eviction. Safe under the single-threaded event loop (no await in between).
-            self._cache.move_to_end(key)
-            return cached
-        # Coalesce concurrent misses. The check-and-register below must have no ``await``
-        # between them so it is race-free under the single-threaded event loop: either we
-        # find an existing leader's Future (follower path) or we install our own (leader
-        # path) atomically.
-        existing = self._inflight.get(key)
-        if existing is not None:
-            # Follower: share the leader's single render; do not re-run robots/throttle/render.
-            return await existing
         loop = asyncio.get_running_loop()
+        # Coalesce concurrent misses (single-flight). Each iteration's check sequence
+        # (cache, then ``_inflight``) contains no ``await``, so it is race-free under the
+        # single-threaded event loop: either we find a leader's Future (follower path) or
+        # we fall through and install our own atomically (leader path). The loop exists for
+        # cancellation recovery: a follower whose leader was cancelled comes back around to
+        # re-check the cache and either follow a fresh leader or become one itself.
+        while True:
+            cached = self._cache.get(key)
+            if cached is not None:
+                # A hit is fresh usage: move it to the most-recently-used end so it survives
+                # eviction. Safe under the single-threaded event loop (no await in between).
+                # On a re-election iteration this also catches a render that completed in
+                # the meantime, so it is never redone.
+                self._cache.move_to_end(key)
+                return cached
+            existing = self._inflight.get(key)
+            if existing is None:
+                break  # no leader in flight — fall through and become the leader
+            # Follower: share the leader's single render; do not re-run robots/throttle/
+            # render. ``asyncio.shield`` keeps the follower's OWN cancellation from
+            # cancelling the shared future (which the leader and other followers still
+            # use) and lets the two cancellation sources be told apart below.
+            try:
+                return await asyncio.shield(existing)
+            except asyncio.CancelledError:
+                if not existing.cancelled():
+                    # The shared future is intact, so this CancelledError is the
+                    # follower's own task being cancelled — propagate it normally.
+                    raise
+                # The LEADER was cancelled (its fan-out cancels the shared future). That
+                # cancellation belongs to the leader's caller (deadline expiry, client
+                # disconnect), not to this follower — except in the race where the
+                # follower's own cancellation lands in the same tick the future is
+                # cancelled: then the follower's task has a pending ``Task.cancel()``
+                # (``cancelling() > 0``) that must be honored, not swallowed by
+                # re-electing.
+                current = asyncio.current_task()
+                if current is not None and current.cancelling() > 0:
+                    raise
+                # Leader cancelled, follower not: re-elect. Loop back, re-check the cache,
+                # then either follow a fresh leader that registered first or become the
+                # new leader (re-running throttle → robots → render).
+                continue
         future: asyncio.Future[Harvest] = loop.create_future()
         self._inflight[key] = future
         try:
@@ -594,10 +632,17 @@ class PolitenessPolicy:
                     slots.release()
         except BaseException as err:  # re-raised after fanning out to followers
             # Fan the failure out to every waiting follower, then re-raise to the leader.
-            # The failure is never cached. ``set_exception`` is skipped if the Future was
-            # already resolved/cancelled (e.g. leader cancellation) to avoid InvalidStateError.
+            # The failure is never cached. Cancellation is special: the leader's
+            # ``CancelledError`` belongs to the leader's caller, so it is NOT set as the
+            # followers' exception — the future is *cancelled* instead, which the shielded
+            # followers detect (``existing.cancelled()``) and recover from by re-electing a
+            # new leader. Both calls are skipped if the future is already resolved, to
+            # avoid InvalidStateError.
             if not future.done():
-                future.set_exception(err)
+                if isinstance(err, asyncio.CancelledError):
+                    future.cancel()
+                else:
+                    future.set_exception(err)
             raise
         else:
             self._cache[key] = harvest
