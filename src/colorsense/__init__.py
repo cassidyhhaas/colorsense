@@ -27,10 +27,12 @@ Inputs & policy
   ``viewport`` arguments (the default is light only).
 * :class:`Config` / :func:`load_default_config` / :func:`load_config` — load and inspect
   the palette config (the bundled default, or your own YAML by path).
-* :class:`PolitenessPolicy` — opt-in fetch policy (robots, rate limit, cache); the consumer
-  owns authorization.
-* :class:`RenderError` / :class:`RobotsDisallowedError` — raised by :func:`analyze` when a
-  page fails to render/navigate, or when ``robots.txt`` disallows the fetch.
+* :class:`PolitenessPolicy` — opt-in fetch policy (robots, rate limit, cache, scheme gate,
+  egress ``request_filter``); the consumer owns authorization.
+* :class:`RenderError` / :class:`RobotsDisallowedError` / :class:`UnsupportedSchemeError` —
+  raised by :func:`analyze` when a page fails to render/navigate, when ``robots.txt``
+  disallows the fetch, or when the URL scheme is not fetchable under the policy (only
+  ``http(s)`` by default; ``file://`` requires ``PolitenessPolicy(allow_file_urls=True)``).
 """
 
 from __future__ import annotations
@@ -52,7 +54,11 @@ from colorsense.models import (
     TokenSemanticRole,
     Viewport,
 )
-from colorsense.net.politeness import PolitenessPolicy, RobotsDisallowedError
+from colorsense.net.politeness import (
+    PolitenessPolicy,
+    RobotsDisallowedError,
+    UnsupportedSchemeError,
+)
 from colorsense.pipeline import DEFAULT_VIEWPORT, LIGHT_AND_DARK, analyze
 
 __all__ = [
@@ -74,6 +80,7 @@ __all__ = [
     "ThemePalette",
     "TokenRecord",
     "TokenSemanticRole",
+    "UnsupportedSchemeError",
     "Viewport",
     "analyze",
     "load_config",

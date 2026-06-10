@@ -1,0 +1,4 @@
+/* Painted only if the sub-resource request is allowed through the egress filter. */
+body {
+  background-color: rgb(255, 0, 0);
+}

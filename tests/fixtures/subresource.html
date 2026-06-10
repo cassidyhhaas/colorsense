@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Subresource fixture</title>
+  <style>
+    body { background-color: rgb(255, 255, 255); margin: 0; }
+    main { padding: 2rem; color: rgb(17, 24, 39); }
+  </style>
+  <!-- External stylesheet AFTER the inline one so it wins the cascade when it loads: a
+       sub-resource request the egress filter can block. When it loads, the body turns
+       red; when blocked, the inline white background stays. -->
+  <link rel="stylesheet" href="subresource_asset.css">
+</head>
+<body>
+  <main>
+    <h1>Subresource fixture</h1>
+    <p>The body background depends on whether the external stylesheet loaded.</p>
+  </main>
+</body>
+</html>

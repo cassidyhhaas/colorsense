@@ -10,7 +10,8 @@ are collapsed to a single theme. The whole thing is assembled into a typed
 
 Networking lives entirely behind ``PolitenessPolicy``/``harvest_page``; everything else is
 pure given a :class:`~colorsense.models.Harvest`, so tests drive the pipeline against local
-``file://`` fixtures with no public network.
+``file://`` fixtures with no public network. The pure per-theme CPU work is offloaded to
+worker threads (``asyncio.to_thread``) so it never blocks the event loop.
 """
 
 from __future__ import annotations
@@ -19,11 +20,13 @@ import asyncio
 from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import NoReturn
 
 from colorsense.classify.components import classify_components
 from colorsense.classify.tokens import classify_tokens
 from colorsense.color.primitives import delta_e
 from colorsense.config import Config, load_config, load_default_config
+from colorsense.harvest import SharedBrowser
 from colorsense.models import (
     AnalysisResult,
     ClassifiedToken,
@@ -79,15 +82,18 @@ async def analyze(
 ) -> AnalysisResult:
     """Analyze ``url`` and return a typed :class:`AnalysisResult`.
 
-    Async-native: the requested themes are rendered concurrently (each its own headless
-    Chromium), gated by ``politeness``, and the rest of the pipeline is pure CPU work.
+    Async-native: the requested themes are rendered concurrently — sharing one lazily
+    launched headless Chromium, each theme in its own browser context — gated by
+    ``politeness``; the rest of the pipeline is pure CPU work, offloaded
+    to worker threads via ``asyncio.to_thread`` so the event loop stays responsive.
     Awaitable directly from an asyncio event loop (e.g. a FastAPI ``async def`` endpoint).
 
     Parameters
     ----------
     url:
-        Page to analyze. ``file://`` URLs are supported (and used by the test suite); any
-        ``http(s)`` fetch is gated by ``politeness``.
+        Page to analyze. Any ``http(s)`` fetch is gated by ``politeness``. ``file://`` URLs
+        (used by the test suite) are an explicit opt-in via
+        ``PolitenessPolicy(allow_file_urls=True)``; all other schemes are rejected.
     config_path:
         Path to a palette config YAML to override the default. When ``None`` (the default)
         the configuration bundled with the package is used, so no file needs to exist on
@@ -108,6 +114,10 @@ async def analyze(
 
     Raises
     ------
+    colorsense.net.politeness.UnsupportedSchemeError
+        If the URL scheme is not fetchable under the policy: only ``http(s)`` by default;
+        ``file://`` requires ``PolitenessPolicy(allow_file_urls=True)``; every other scheme
+        is always rejected.
     colorsense.net.politeness.RobotsDisallowedError
         If ``robots.txt`` disallows the fetch and the policy respects it.
     colorsense.harvest.RenderError
@@ -121,16 +131,42 @@ async def analyze(
         raise ValueError("analyze() requires at least one theme")
 
     # Render every requested theme concurrently; the per-host rate limiter inside
-    # ``policy.fetch`` still spaces the underlying navigations.
-    rendered = await asyncio.gather(
-        *(policy.fetch(url, theme, config, viewport) for theme in ordered_themes)
-    )
-    harvests: dict[Theme, Harvest] = dict(zip(ordered_themes, rendered, strict=True))
+    # ``policy.fetch`` still spaces the underlying navigations. ``TaskGroup`` (unlike a bare
+    # ``gather``) cancels sibling in-flight renders as soon as one fetch fails, so a robots
+    # block or render error doesn't leave an abandoned headless Chromium running. All themes
+    # share ONE lazily-launched Chromium (each render opens its own browser context inside
+    # it), so a multi-theme analysis pays a single browser launch — and a run whose fetches
+    # are all cache hits pays none. The ``async with`` closes the shared browser as soon as
+    # the renders finish (before the CPU phase), including on the exception path.
+    try:
+        async with SharedBrowser() as shared_browser, asyncio.TaskGroup() as tg:
+            fetch_tasks = [
+                tg.create_task(policy.fetch(url, theme, config, viewport, browser=shared_browser))
+                for theme in ordered_themes
+            ]
+    except ExceptionGroup as eg:
+        _reraise_first_leaf(eg)
+    harvests: dict[Theme, Harvest] = {
+        theme: task.result() for theme, task in zip(ordered_themes, fetch_tasks, strict=True)
+    }
 
     kept_themes = _collapse_themes(ordered_themes, harvests)
 
+    # The per-theme analysis is pure CPU (O(n^2) perceptual clustering) over immutable
+    # inputs; offload each kept theme to a worker thread so the event loop stays free,
+    # running them concurrently.
+    try:
+        async with asyncio.TaskGroup() as tg:
+            analyze_tasks = {
+                theme: tg.create_task(
+                    asyncio.to_thread(_analyze_theme, harvests[theme], config, viewport)
+                )
+                for theme in kept_themes
+            }
+    except ExceptionGroup as eg:
+        _reraise_first_leaf(eg)
     outputs: dict[Theme, _ThemeOutput] = {
-        theme: _analyze_theme(harvests[theme], config, viewport) for theme in kept_themes
+        theme: task.result() for theme, task in analyze_tasks.items()
     }
 
     primary = outputs[kept_themes[0]]
@@ -152,8 +188,26 @@ async def analyze(
     )
 
 
+def _reraise_first_leaf(eg: ExceptionGroup[Exception]) -> NoReturn:
+    """Re-raise the first leaf exception of a (possibly nested) exception group.
+
+    ``analyze`` documents plain exceptions (``RobotsDisallowedError``, ``RenderError``,
+    ``ValueError``) — the ``TaskGroup`` wrapping is an implementation detail and must not
+    leak ``ExceptionGroup`` to callers. The leaf keeps its original traceback; the group is
+    attached as ``__cause__`` so the full failure context stays inspectable.
+    """
+    leaf: BaseException = eg
+    while isinstance(leaf, BaseExceptionGroup):
+        leaf = leaf.exceptions[0]
+    raise leaf from eg
+
+
 def _analyze_theme(harvest: Harvest, config: Config, viewport: Viewport) -> _ThemeOutput:
-    """Run the per-theme classify → inventory → roles → reconcile chain."""
+    """Run the per-theme classify → inventory → roles → reconcile chain.
+
+    Pure CPU over immutable inputs (no I/O, no shared mutable state); ``analyze`` runs it
+    on a worker thread via ``asyncio.to_thread`` to keep the event loop responsive.
+    """
     classified_tokens, status_colors = classify_tokens(harvest.tokens, config)
     classified_elements = classify_components(harvest.elements, config, viewport)
     clusters = build_inventory(harvest, classified_elements)

@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import itertools
+
+import pytest
+
 from colorsense.color.primitives import parse_css_color
 from colorsense.models import (
     Color,
@@ -140,6 +144,39 @@ def test_evidence_trail_populated() -> None:
     assert "chroma" in accent_top.evidence
     assert "contrast_to_primary" in accent_top.evidence
     assert "component_assoc" in accent_top.evidence
+
+
+def test_assign_roles_is_input_order_independent() -> None:
+    """Every permutation of the cluster list yields the identical role assignment.
+
+    Pins the claimed hex tie-breaking / sorted-iteration determinism: a regression
+    that lets Python list order leak into argmax or candidate ranking shows up as a
+    different candidate order or drifted probabilities under some permutation.
+    Probabilities are compared to 1e-12 (softmax sums the same floats in a
+    different order, so the last few ulps may differ), candidate hex order exactly.
+    """
+    clusters = [
+        _cluster("#f3f4f6", 0.60, {ComponentType.page_bg: 1.0}),
+        _cluster("#fde68a", 0.25, {ComponentType.card_bg: 1.0}),
+        _cluster("#e11d48", 0.10, {ComponentType.cta_bg: 1.0}),
+        _cluster("#1f2937", 0.05, {ComponentType.footer_bg: 1.0}),
+    ]
+    base_results, base_fit = assign_roles(clusters)
+    base = {
+        role: [(c.color.hex, c.probability, c.area) for c in cands]
+        for role, cands in base_results.mapping.items()
+    }
+
+    for perm in itertools.permutations(clusters):
+        results, fit = assign_roles(list(perm))
+        assert fit == pytest.approx(base_fit, abs=1e-12)
+        assert set(results.mapping) == set(base)
+        for role, expected in base.items():
+            actual = [(c.color.hex, c.probability, c.area) for c in results.mapping[role]]
+            assert [a[0] for a in actual] == [e[0] for e in expected], (role, perm)
+            for (_, a_prob, a_area), (_, e_prob, e_area) in zip(actual, expected, strict=True):
+                assert a_prob == pytest.approx(e_prob, abs=1e-12)
+                assert a_area == e_area
 
 
 def test_all_five_roles_present() -> None:

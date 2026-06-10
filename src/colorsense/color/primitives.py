@@ -127,8 +127,19 @@ def delta_e(a: Color, b: Color) -> float:
     """Perceptual distance between two colors via OKLab ``deltaEOK``.
 
     Identical colors return ``~0.0``; perceptually different colors return ``> 0``.
+
+    Computed directly from the OKLCH coordinates cached on :class:`Color` (no coloraide
+    object construction): ``deltaEOK`` is Euclidean distance in OKLab, and OKLab is
+    recovered from OKLCH as ``a = C*cos(h)``, ``b = C*sin(h)``. Achromatic colors store
+    ``hue = 0.0`` with ``chroma ~ 0``, which is consistent under this formula. Alpha is
+    ignored, matching coloraide's ``delta_e(..., method="ok")``.
     """
-    return float(_to_coloraide(a).delta_e(_to_coloraide(b), method="ok"))
+    a_hue = math.radians(a.hue)
+    b_hue = math.radians(b.hue)
+    da = a.chroma * math.cos(a_hue) - b.chroma * math.cos(b_hue)
+    db = a.chroma * math.sin(a_hue) - b.chroma * math.sin(b_hue)
+    dl = a.lightness - b.lightness
+    return math.sqrt(dl * dl + da * da + db * db)
 
 
 def relative_luminance(c: Color) -> float:

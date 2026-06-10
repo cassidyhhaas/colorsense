@@ -93,6 +93,23 @@ async def test_elements_extracted_with_colors_and_exclusions(
     assert all(el.visible and not el.aria_hidden for el in harvest.elements)
 
 
+async def test_border_only_reported_when_painted(fixtures_dir: Path, config: Config) -> None:
+    """``border`` is width-gated: only elements that paint a border carry a color.
+
+    Regression: ungated computed ``borderTopColor`` resolves for every element, which used
+    to make ``border`` non-None (usually black) on borderless elements.
+    """
+    harvest = await _harvest(fixtures_dir / "tokens.html", config)
+
+    btn = next(el for el in harvest.elements if "btn" in el.class_tokens)
+    assert btn.border is not None
+    assert btn.border.hex == "#aa0044"
+
+    primary = next(el for el in harvest.elements if "primary-box" in el.class_tokens)
+    assert primary.border is None
+    assert primary.has_box_shadow is False
+
+
 async def test_vendor_match_detected(fixtures_dir: Path, config: Config) -> None:
     harvest = await _harvest(fixtures_dir / "tokens.html", config)
     intercom = next(el for el in harvest.elements if "intercom-launcher" in el.class_tokens)
@@ -156,6 +173,33 @@ async def test_consent_region_masked(fixtures_dir: Path, config: Config) -> None
 # ---------------------------------------------------------------------------
 # RenderSession contract
 # ---------------------------------------------------------------------------
+
+
+async def test_request_filter_blocks_subresource_but_page_still_harvests(
+    fixtures_dir: Path,
+) -> None:
+    # subresource.html links an external stylesheet that paints the body red. A filter that
+    # blocks the stylesheet URL must abort that one request (the inline white background
+    # survives) while the navigation itself still renders and is harvestable.
+    page_url = (fixtures_dir / "subresource.html").as_uri()
+
+    def block_asset(url: str) -> bool:
+        return not url.endswith("subresource_asset.css")
+
+    async with RenderSession(Theme.light, VIEWPORT, request_filter=block_asset) as session:
+        await session.goto(page_url)
+        bg = await session.page.evaluate("() => getComputedStyle(document.body).backgroundColor")
+    assert bg == "rgb(255, 255, 255)"  # the blocked stylesheet never painted the body red
+
+
+async def test_no_request_filter_lets_subresource_load(fixtures_dir: Path) -> None:
+    # Control for the blocking test above: without a filter the stylesheet loads and paints
+    # the body red — proving the blocked-case assertion is meaningful.
+    page_url = (fixtures_dir / "subresource.html").as_uri()
+    async with RenderSession(Theme.light, VIEWPORT) as session:
+        await session.goto(page_url)
+        bg = await session.page.evaluate("() => getComputedStyle(document.body).backgroundColor")
+    assert bg == "rgb(255, 0, 0)"
 
 
 async def test_render_session_exposes_page_and_consent(fixtures_dir: Path) -> None:

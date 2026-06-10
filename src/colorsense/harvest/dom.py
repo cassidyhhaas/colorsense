@@ -3,9 +3,14 @@
 Walks the rendered DOM in-page, capturing for each element its computed
 ``background-color`` / ``color`` / ``border-color`` (parsed to :class:`Color`), bounding rect,
 position, tag/role/id/class tokens, and structural flags (iframe, cross-origin, shadow
-host, clickable, vendor match, visible, aria-hidden). Hidden, zero-area, or aria-hidden
-elements are excluded from the returned list (their flags are still computed on what is
-returned).
+host, clickable, box shadow, vendor match, visible, aria-hidden). Hidden, zero-area, or
+aria-hidden elements are excluded from the returned list (their flags are still computed
+on what is returned).
+
+The border color is reported only when the element actually paints a border
+(``border-top-width`` > 0): computed ``border-top-color`` resolves to a color for *every*
+element regardless of width, so an ungated read would make ``border`` non-None on
+virtually everything and feed meaningless (usually black) "border colors" downstream.
 
 ``has_hover_color_change`` / ``hover_bg`` are left at their defaults here; pseudo-state
 probing fills them.
@@ -35,6 +40,7 @@ class _RawElement(TypedDict):
     bg: str
     text: str
     border: str
+    has_box_shadow: bool
     is_iframe: bool
     cross_origin: bool
     shadow_host: bool
@@ -111,6 +117,14 @@ _COLLECT_DOM_JS: str = r"""
         const clickable = tag === 'a' || tag === 'button' || role === 'button'
             || el.hasAttribute('onclick') || isSubmit || cursorPointer;
 
+        // Only report a border color when a border is actually painted: computed
+        // borderTopColor is a color for every element, so gate on a non-zero width and
+        // send '' otherwise (parses to None in Python). Computed boxShadow is the
+        // literal string 'none' when absent.
+        const borderWidth = parseFloat(style.borderTopWidth) || 0;
+        const borderColor = borderWidth > 0 ? style.borderTopColor : '';
+        const hasBoxShadow = style.boxShadow !== 'none';
+
         const vendorBlob = (
             (el.id || '') + ' ' + classList.join(' ') + ' ' + (el.getAttribute('src') || '')
         ).toLowerCase();
@@ -125,7 +139,8 @@ _COLLECT_DOM_JS: str = r"""
             position: style.position,
             bg: style.backgroundColor,
             text: style.color,
-            border: style.borderTopColor,
+            border: borderColor,
+            has_box_shadow: hasBoxShadow,
             is_iframe: isIframe,
             cross_origin: crossOrigin,
             shadow_host: shadowHost,
@@ -171,6 +186,7 @@ async def harvest_elements(
                 bg=parse_css_color(raw["bg"]),
                 text=parse_css_color(raw["text"]),
                 border=parse_css_color(raw["border"]),
+                has_box_shadow=raw["has_box_shadow"],
                 is_iframe=raw["is_iframe"],
                 cross_origin=raw["cross_origin"],
                 shadow_host=raw["shadow_host"],

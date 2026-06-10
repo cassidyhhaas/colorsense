@@ -156,8 +156,11 @@ def _repetition_member_indices(
     def satisfies_requires_any(element: HarvestedElement) -> bool:
         if not requires_any:
             return True
-        if "box_shadow" in requires_any and element.border is not None:
+        if "box_shadow" in requires_any and element.has_box_shadow:
             return True
+        # ``border`` is now width-gated at harvest time, so non-None means the element
+        # genuinely paints a border. ``distinct_bg_from_parent`` remains approximated as
+        # "has any background" (no parent info at this layer).
         if "border" in requires_any and element.border is not None:
             return True
         return "distinct_bg_from_parent" in requires_any and element.bg is not None

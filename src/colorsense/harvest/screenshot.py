@@ -1,10 +1,9 @@
-"""Full-page screenshot quantization and logo-color sampling.
+"""Full-page screenshot quantization.
 
 Takes a full-page Playwright screenshot, masks out consent/overlay regions (so a cookie
 banner cannot pollute the palette), downscales, and quantizes pixels into
 :class:`~colorsense.models.ScreenshotBin` objects each carrying an ``area_fraction`` (the
-fraction of *sampled* pixels). Also samples dominant colors from a discoverable logo /
-favicon into ``logo_colors``.
+fraction of *sampled* pixels).
 
 Quantization is deterministic given a fixed fixture: Pillow's adaptive palette with a
 fixed max-color count, computed over the masked, downscaled image.
@@ -13,6 +12,7 @@ fixed max-color count, computed over the masked, downscaled image.
 from __future__ import annotations
 
 import io
+import warnings
 from typing import Literal, TypedDict, cast
 
 import numpy as np
@@ -41,34 +41,37 @@ _PALETTE_COLORS: int = 16
 # Drop bins covering less than this fraction of sampled pixels (noise floor).
 _MIN_BIN_FRACTION: float = 0.005
 
-# Max distinct logo colors to keep.
-_MAX_LOGO_COLORS: int = 5
-
-# Cap the full-page capture height (CSS pixels). A page is decoded into a
+# Cap the full-page capture dimensions (CSS pixels). A page is decoded into a
 # (height x width x 3) uint8 array PLUS a (height x width) bool keep-mask before any
-# downscaling, and themes render concurrently, so an attacker-controlled tall page (e.g.
-# 100,000px) could force hundreds of MB-GBs of RAM. 20,000px is far above any genuine page
-# (real captures are a few thousand px) yet bounds a single channel to ~20k x ~2k = ~40M px.
-# Pages at or under this cap are captured ``full_page=True`` exactly as before; taller pages
-# fall back to a top-anchored clip of this height so the harvest still succeeds, bounded.
+# downscaling, and themes render concurrently, so an attacker-controlled tall *or wide*
+# page (e.g. 100,000px in either direction) could force hundreds of MB-GBs of RAM. The
+# caps are far above any genuine page (real captures are a few thousand px each way) yet
+# bound a single channel to ~20k x ~10k worst case. Pages within both caps are captured
+# ``full_page=True`` exactly as before; an oversized page falls back to a top-left-anchored
+# clip with each dimension clamped to its cap, so the harvest still succeeds, bounded.
 _MAX_CAPTURE_HEIGHT_PX: int = 20_000
+_MAX_CAPTURE_WIDTH_PX: int = 10_000
 
-# Decompression-bomb guard for decoding fetched/captured images. Sized to admit the bounded
-# full-page capture (~40M px above, ~2x device-scale headroom) while rejecting tiny-file,
-# huge-dimension bombs (e.g. a malicious favicon) before they allocate. Applied process-wide
-# via ``Image.MAX_IMAGE_PIXELS`` so decoding such an image raises rather than silently
-# allocating gigabytes; the callers treat the raise as a best-effort failure.
-_MAX_IMAGE_PIXELS: int = 90_000_000
-Image.MAX_IMAGE_PIXELS = _MAX_IMAGE_PIXELS
+# Decompression-bomb guard for decoding the captured screenshot. ``Image.open`` lazily
+# parses only the header, so the declared dimensions are checked against this cap *before*
+# ``.convert("RGB")`` triggers full pixel decoding; an oversized image raises
+# ``_OversizedCaptureError`` instead of silently allocating gigabytes. Sized to admit the
+# clipped full-page capture above with ~2x device-scale headroom. Deliberately a local
+# per-decode check, not a process-wide ``Image.MAX_IMAGE_PIXELS`` mutation: a library must
+# not overwrite host-process Pillow state on import.
+_MAX_DECODE_PIXELS: int = 90_000_000
 
-# Cap the bytes read from a page-controlled logo/favicon body, and the request timeout. A
-# logo is downscaled to 64x64, so a few MB is already generous; this bounds memory against a
-# huge body regardless of any (spoofable) Content-Length header.
-_MAX_LOGO_BYTES: int = 5 * 1024 * 1024
-_LOGO_REQUEST_TIMEOUT_MS: float = 10_000.0
+
+class _OversizedCaptureError(Exception):
+    """A captured screenshot's declared dimensions exceed the decode pixel cap.
+
+    Module-internal: :func:`colorsense.harvest.harvest_page` catches it and surfaces it as
+    a public ``RenderError``.
+    """
+
 
 # JS reporting the full document dimensions (CSS pixels) so an oversized capture can be
-# clipped to a bounded height instead of decoding the whole page.
+# clipped to bounded dimensions instead of decoding the whole page.
 _DOCUMENT_SIZE_JS: str = r"""
 () => {
     const d = document.documentElement;
@@ -88,12 +91,6 @@ class _DocumentSize(TypedDict):
     height: float
 
 
-class _LogoSource(TypedDict):
-    """A candidate logo image: its resolved URL."""
-
-    url: str
-
-
 def _rgb_to_color(r: int, g: int, b: int) -> Color | None:
     """Convert an 8-bit RGB triple to a :class:`Color`."""
     return parse_css_color(f"rgb({r}, {g}, {b})")
@@ -108,28 +105,47 @@ async def harvest_screenshot(
 
     ``consent_rects`` are CSS-pixel rects (from :class:`RenderSession`); they are scaled by
     ``device_scale_factor`` and zeroed out of the raw screenshot before quantizing.
+
+    Raises :class:`_OversizedCaptureError` if the captured image's declared dimensions
+    exceed the decode pixel cap (surfaced by ``harvest_page`` as ``RenderError``).
     """
-    # Bound capture height: a pathologically tall (e.g. attacker-controlled) page would decode
-    # into a huge array + keep-mask before any downscaling. Pages at/under the cap are captured
-    # full-page exactly as before; taller pages fall back to a top-anchored clip.
+    # Bound capture dimensions: a pathologically tall or wide (e.g. attacker-controlled)
+    # page would decode into a huge array + keep-mask before any downscaling. Pages within
+    # both caps are captured full-page exactly as before; an oversized page falls back to a
+    # top-left-anchored clip with each dimension clamped to its cap.
     size = cast(_DocumentSize, await page.evaluate(_DOCUMENT_SIZE_JS))
-    if size["height"] > _MAX_CAPTURE_HEIGHT_PX:
+    if size["height"] > _MAX_CAPTURE_HEIGHT_PX or size["width"] > _MAX_CAPTURE_WIDTH_PX:
         raw_bytes = await page.screenshot(
             type=_SCREENSHOT_TYPE,
             quality=_SCREENSHOT_QUALITY,
             clip={
                 "x": 0,
                 "y": 0,
-                "width": size["width"],
-                "height": _MAX_CAPTURE_HEIGHT_PX,
+                "width": min(size["width"], _MAX_CAPTURE_WIDTH_PX),
+                "height": min(size["height"], _MAX_CAPTURE_HEIGHT_PX),
             },
         )
     else:
         raw_bytes = await page.screenshot(
             full_page=True, type=_SCREENSHOT_TYPE, quality=_SCREENSHOT_QUALITY
         )
-    image = Image.open(io.BytesIO(raw_bytes)).convert("RGB")
-    array = np.asarray(image, dtype=np.uint8).copy()
+    # ``Image.open`` parses only the header; guard the declared pixel count before
+    # ``.convert`` triggers the full decode (decompression-bomb defense). Pillow runs its
+    # own default-limit check at open time — silence its advisory warning (our explicit cap
+    # below is the authoritative guard) and fold its hard raise (at 2x its default limit)
+    # into the same dedicated error. The filter is scoped to this decode, never global.
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", Image.DecompressionBombWarning)
+        try:
+            image = Image.open(io.BytesIO(raw_bytes))
+        except Image.DecompressionBombError as err:
+            raise _OversizedCaptureError(str(err)) from err
+    if image.width * image.height > _MAX_DECODE_PIXELS:
+        raise _OversizedCaptureError(
+            f"captured screenshot declares {image.width}x{image.height} px, "
+            f"exceeding the {_MAX_DECODE_PIXELS} px decode cap"
+        )
+    array = np.asarray(image.convert("RGB"), dtype=np.uint8).copy()
 
     height, width = array.shape[0], array.shape[1]
 
@@ -199,105 +215,3 @@ def _quantize(array: np.ndarray, keep: np.ndarray) -> list[ScreenshotBin]:
     # regardless of palette-index order.
     bins.sort(key=lambda item: (-item.area_fraction, item.color.hex))
     return bins
-
-
-# JS discovering a logo/favicon image URL.
-_LOGO_SOURCES_JS: str = r"""
-() => {
-    const out = [];
-    const add = (href) => {
-        if (!href) return;
-        try {
-            out.push({url: new URL(href, window.location.href).href});
-        } catch (e) {}
-    };
-    // Favicons / declared icons.
-    for (const link of document.querySelectorAll('link[rel~="icon"], link[rel="shortcut icon"]')) {
-        add(link.getAttribute('href'));
-    }
-    // Header logo images.
-    const header = document.querySelector('header') || document.body;
-    if (header) {
-        const img = header.querySelector('img');
-        if (img) add(img.getAttribute('src'));
-    }
-    // Any element whose id/class hints "logo".
-    const logoish = document.querySelector('[class*="logo" i], [id*="logo" i]');
-    if (logoish) {
-        const tag = logoish.tagName.toLowerCase();
-        if (tag === 'img') add(logoish.getAttribute('src'));
-    }
-    return out;
-}
-"""
-
-
-async def harvest_logo_colors(page: Page) -> list[Color]:
-    """Sample dominant colors from a discoverable logo/favicon image.
-
-    Best-effort: returns an empty list if no logo is discoverable or fetching/decoding
-    fails. Colors are ordered by coverage (most dominant first), opaque pixels only.
-    """
-    try:
-        sources = cast(list[_LogoSource], await page.evaluate(_LOGO_SOURCES_JS))
-    except Exception:  # discovery is best-effort
-        return []
-
-    for source in sources:
-        colors = await _sample_logo(page, source["url"])
-        if colors:
-            return colors
-    return []
-
-
-async def _sample_logo(page: Page, url: str) -> list[Color]:
-    """Fetch and quantize a single logo image URL into dominant colors."""
-    try:
-        response = await page.request.get(url, timeout=_LOGO_REQUEST_TIMEOUT_MS)
-        if not response.ok:
-            return []
-        # Reject an oversized body up front via the (spoofable) Content-Length header...
-        content_length = response.headers.get("content-length")
-        if content_length is not None and int(content_length) > _MAX_LOGO_BYTES:
-            return []
-        data = await response.body()
-        # ...and again on the actual bytes, since the header may lie or be absent.
-        if len(data) > _MAX_LOGO_BYTES:
-            return []
-        # ``Image.MAX_IMAGE_PIXELS`` makes a tiny-file/huge-dimension bomb raise here.
-        image = Image.open(io.BytesIO(data)).convert("RGBA")
-    except Exception:  # fetch/decode best-effort (incl. timeout, bad header, decomp bomb)
-        return []
-
-    image.thumbnail((64, 64), Image.Resampling.NEAREST)
-    array = np.asarray(image, dtype=np.uint8)
-    if array.ndim != 3 or array.shape[2] != 4:
-        return []
-
-    rgb = array[:, :, :3].reshape(-1, 3)
-    alpha = array[:, :, 3].reshape(-1)
-    opaque = rgb[alpha > 128]
-    if opaque.shape[0] == 0:
-        return []
-
-    quant = Image.fromarray(opaque.reshape(1, -1, 3)).quantize(
-        colors=_MAX_LOGO_COLORS, method=Image.Quantize.MEDIANCUT
-    )
-    indices = np.asarray(quant, dtype=np.int64).reshape(-1)
-    palette = quant.getpalette()
-    if palette is None:
-        return []
-    counts = np.bincount(indices, minlength=_MAX_LOGO_COLORS)
-
-    order = np.argsort(counts)[::-1]
-    colors: list[Color] = []
-    for index in order.tolist():
-        if int(counts[index]) == 0:
-            continue
-        base = index * 3
-        color = _rgb_to_color(palette[base], palette[base + 1], palette[base + 2])
-        if color is not None:
-            colors.append(color)
-        if len(colors) >= _MAX_LOGO_COLORS:
-            break
-    return colors

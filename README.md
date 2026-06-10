@@ -114,9 +114,16 @@ responsibility** — the library provides *mechanism, not policy*. `PolitenessPo
 (in [`net/politeness.py`](src/colorsense/net/politeness.py)) gives you the controls:
 
 - a configurable, identifiable **User-Agent**;
+- a **scheme gate**: only `http(s)` URLs are fetched by default — `file://` is an explicit
+  opt-in (`allow_file_urls=True`), and every other scheme raises `UnsupportedSchemeError`;
 - a **`robots.txt` gate**, on by default (`respect_robots=True`) — a disallow raises
   `RobotsDisallowedError`;
-- a per-host **rate limiter** (`min_interval` seconds between same-host fetches);
+- a per-host **rate limiter** (`min_interval` seconds between same-host fetches), which also
+  honors the site's `robots.txt` **`Crawl-delay`** when one is declared (capped at
+  `max_crawl_delay`, 30s by default, so a hostile directive cannot stall you);
+- an optional **egress `request_filter`** — a predicate over every URL the browser requests
+  while rendering (the navigation *and* the page's own sub-resources), aborting any request
+  it rejects;
 - a simple URL→render **cache**.
 
 Choose your posture by where colorsense runs:
@@ -141,15 +148,19 @@ Choose your posture by where colorsense runs:
 colorsense never decides whether a fetch is permitted; it only makes it easy to fetch
 considerately once you have decided.
 
-**Security (SSRF + local-file reads).** `analyze` fetches and renders whatever URL it is
-given, so passing **untrusted** URLs exposes a server-side request forgery and local-file-read
-surface. `file://` URLs read arbitrary local files (intentional, for the test fixtures), and
+**Security (SSRF + local-file reads).** `analyze` renders whatever `http(s)` URL it is
+given, so passing **untrusted** URLs exposes a server-side request forgery surface:
 `http(s)://` URLs can reach internal hosts and cloud metadata endpoints (e.g.
-`169.254.169.254`, `localhost`). This is by design — the politeness controls above gate
-*network* schemes for robots/rate-limiting, but nothing validates the destination host. If
-you accept user-supplied URLs, validate the scheme and host **before** calling `analyze`:
-allowlist public hosts, and reject `file://` and private / link-local IP ranges. As above,
-this is the consumer's responsibility — the library provides mechanism, not policy.
+`169.254.169.254`, `localhost`). `file://` URLs — which read arbitrary local files — are
+**disabled by default** and require an explicit `PolitenessPolicy(allow_file_urls=True)`
+opt-in (the test suite opts in to render its local fixtures); all other schemes are always
+rejected. Beyond the scheme gate, nothing validates the destination host — and validating
+the navigation URL alone is not enough, because the rendered page's own JavaScript and
+sub-resources can request internal endpoints too. `request_filter` is the in-library
+mechanism for that (it gates every browser request), but deciding *which* hosts are safe
+remains yours. If you accept user-supplied URLs, validate the host **before** calling
+`analyze`: allowlist public hosts and reject private / link-local IP ranges. As above, this
+is the consumer's responsibility — the library provides mechanism, not policy.
 
 Because `colorsense` fetches and fully renders arbitrary URLs, the risks you take on — SSRF,
 resource exhaustion / DoS, and the fail-open `robots.txt` gate — and the controls you are
