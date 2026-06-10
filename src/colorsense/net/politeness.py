@@ -235,7 +235,10 @@ async def _default_robots_loader(
                     return bytes(body).decode(response.encoding or "utf-8", errors="replace")
             # Redirect cap exhausted without reaching a terminal response.
             return None
-    except (httpx.HTTPError, ValueError):
+    except (httpx.HTTPError, httpx.InvalidURL, ValueError):
+        # InvalidURL subclasses neither HTTPError nor ValueError; a redirect Location that
+        # survives urljoin but fails httpx's URL parsing must fail open like any other
+        # fetch failure, not propagate out of the loader.
         return None
 
 

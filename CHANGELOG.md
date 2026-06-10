@@ -78,6 +78,11 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `analyze(max_total_seconds=...)` deadline expiring, or its HTTP client disconnecting in
   a server). Followers now re-elect a new leader and re-render instead; a caller's *own*
   cancellation still raises normally.
+- The robots loader's failure handling now also catches `httpx.InvalidURL` (which
+  subclasses neither `HTTPError` nor `ValueError`), so a redirect `Location` that a
+  stricter future httpx refuses to parse fails open as "no rules" instead of propagating
+  out of the loader. Not reachable with the current httpx (it parses leniently); pinned
+  by a regression test via the transport seam.
 
 ## [0.2.0] - 2026-06-09
 

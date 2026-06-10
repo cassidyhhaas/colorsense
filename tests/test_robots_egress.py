@@ -167,6 +167,21 @@ async def test_redirect_without_location_returns_none() -> None:
     assert requested == [ROBOTS_URL]
 
 
+async def test_invalid_url_from_httpx_fails_open() -> None:
+    # ``httpx.InvalidURL`` subclasses neither HTTPError nor ValueError. The current httpx
+    # parses leniently, so it is not reachable via a crafted Location today — the
+    # transport seam raises it directly to pin that a stricter future httpx still fails
+    # open as "no rules" instead of propagating out of the loader.
+    def handler(_request: httpx.Request) -> httpx.Response:
+        raise httpx.InvalidURL("simulated URL parse failure")
+
+    text = await _default_robots_loader(
+        ROBOTS_URL, UA, None, _transport=httpx.MockTransport(handler)
+    )
+
+    assert text is None
+
+
 class _ChunkStream(httpx.AsyncByteStream):
     """A response body served as raw chunks, with no Content-Length header."""
 
