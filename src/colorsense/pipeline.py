@@ -110,7 +110,7 @@ async def analyze(
     politeness:
         Fetch policy (robots gate, rate limit, render cache). A conservative default
         :class:`PolitenessPolicy` is created when omitted. The **consumer** is responsible
-        for authorization — see the README.
+        for authorization — see ``SECURITY.md``.
 
     Raises
     ------
