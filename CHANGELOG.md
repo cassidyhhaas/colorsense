@@ -7,6 +7,13 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-06-10
+
+Ships the safe-consumption controls for server-side use — the `block_private_networks()`
+egress filter, render-concurrency cap, and overall deadline — plus the `colorsense` CLI,
+and hardens the policy's own `robots.txt` fetch (per-hop egress filtering, redirect and
+body-size caps).
+
 ### Added
 
 - **`colorsense` command-line interface** — a Typer-based console script wrapping
@@ -137,6 +144,7 @@ Initial public release.
 - Bundled, overridable palette configuration (`config_path=` / `load_config`).
 - Fully typed (`py.typed`), Python 3.12+.
 
-[Unreleased]: https://github.com/cassidyhhaas/colorsense/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/cassidyhhaas/colorsense/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/cassidyhhaas/colorsense/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/cassidyhhaas/colorsense/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/cassidyhhaas/colorsense/releases/tag/v0.1.0
