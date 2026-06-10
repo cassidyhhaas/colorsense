@@ -45,6 +45,14 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   unfiltered — the robots GET is `httpx`, not the browser, so the browser-route filter
   never saw it. A rejected hop aborts the fetch, which fails open as "no rules" while the
   navigation stays gated browser-side.
+- The policy's `robots.txt` fetch now caps the response body at 512 KiB (Google's
+  documented robots.txt processing limit), read in a streaming fashion: a declared
+  `Content-Length` over the cap aborts before the body is read, and a body streaming past
+  the cap aborts mid-read. Previously the entire body was materialized in memory and the
+  httpx timeout is per-read (not total), so a hostile or misconfigured server could
+  stream an arbitrarily large body to the server-side loader — outside the browser's
+  resource caps. An oversized body is treated like any other fetch failure (no rules;
+  fails open).
 - `block_private_networks()` now classifies IPv4-mapped IPv6 addresses
   (`::ffff:a.b.c.d`) by their embedded IPv4 address, so a resolver returning the mapped
   form of a private address is rejected like the bare IPv4 form.
@@ -70,6 +78,11 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `analyze(max_total_seconds=...)` deadline expiring, or its HTTP client disconnecting in
   a server). Followers now re-elect a new leader and re-render instead; a caller's *own*
   cancellation still raises normally.
+- The robots loader's failure handling now also catches `httpx.InvalidURL` (which
+  subclasses neither `HTTPError` nor `ValueError`), so a redirect `Location` that a
+  stricter future httpx refuses to parse fails open as "no rules" instead of propagating
+  out of the loader. Not reachable with the current httpx (it parses leniently); pinned
+  by a regression test via the transport seam.
 
 ## [0.2.0] - 2026-06-09
 
