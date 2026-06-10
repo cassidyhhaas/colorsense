@@ -66,6 +66,9 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `request_filter` as a third argument — `(robots_url, user_agent, request_filter)`.
   Custom loaders must adopt the new signature and are responsible for applying the filter
   to the robots URL and every redirect hop they follow.
+- `DEFAULT_USER_AGENT`'s version token now reflects the installed package version
+  (was hardcoded `colorsense/0.1`, two releases stale), matching how the CLI's UA is
+  already derived.
 - The webservice example parses `COLORSENSE_BROWSER_ARGS` with `shlex.split`
   (whitespace-separated, shell-style quoting; was comma-split), so flags containing
   commas or spaces are expressible by quoting — unbalanced quotes raise `ValueError` at

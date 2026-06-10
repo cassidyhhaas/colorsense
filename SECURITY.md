@@ -82,8 +82,10 @@ pages, heavy scripts, many sub-resource requests, large DOMs, memory balloons.
 
 The library's built-in bounds are the **navigation timeout**, the per-host **rate limiter**
 in `PolitenessPolicy` (including a capped `robots.txt` `Crawl-delay`), **capture dimension
-caps** on the full-page screenshot (~20k x 10k px), and a **decode pixel cap** rejecting
-decompression-bomb captures. Two further bounds exist but are **off by default — you must
+caps** on the full-page screenshot (~20k x 10k px), a **decode pixel cap** rejecting
+decompression-bomb captures, and **caps on the policy's own `robots.txt` fetch** (request
+timeout, 20-redirect cap, 512 KiB body cap — so a hostile robots host cannot stream
+unbounded data into the server-side loader). Two further bounds exist but are **off by default — you must
 set them**: `PolitenessPolicy(max_concurrent_renders=...)` caps simultaneous renders
 through a policy, and `analyze(..., max_total_seconds=...)` deadlines a whole call (raising
 `AnalysisTimeoutError`, a `TimeoutError` subclass). There is still **no cap** on per-page
@@ -151,7 +153,7 @@ cannot stall your pipeline; raise the cap to honor longer delays. Two caveats:
 | Risk | Library's stance | Your responsibility |
 | --- | --- | --- |
 | **SSRF** | `http(s)` only by default (`file://` opt-in, other schemes rejected); no host/IP validation unless configured; follows redirects; optional `request_filter` over every browser request and the policy's own `robots.txt` fetch (each redirect hop included), with `block_private_networks()` as the shipped filter (does not fully defeat DNS rebinding) | Allowlist hosts, configure `request_filter` (e.g. `block_private_networks()`), pin redirects, isolate egress — network isolation stays primary |
-| **Resource / DoS** | Timeout, rate limiter (incl. capped `Crawl-delay`), capture dimension + decode pixel caps; opt-in `max_concurrent_renders` and `max_total_seconds` (both unset by default); opt-in V8-heap cap via `browser_args`; no in-process memory/CPU cap (by design) | Container limits (the enforceable cap), set `max_concurrent_renders` + `max_total_seconds`, cap the V8 heap via `browser_args`, network isolation |
+| **Resource / DoS** | Timeout, rate limiter (incl. capped `Crawl-delay`), capture dimension + decode pixel caps, robots-fetch caps (timeout, redirects, body size); opt-in `max_concurrent_renders` and `max_total_seconds` (both unset by default); opt-in V8-heap cap via `browser_args`; no in-process memory/CPU cap (by design) | Container limits (the enforceable cap), set `max_concurrent_renders` + `max_total_seconds`, cap the V8 heap via `browser_args`, network isolation |
 | **`robots.txt`** | Respected by default (incl. `Crawl-delay`, capped at 30s), but fails open; can be disabled | Don't disable without authorization; gate authorization yourself before calling |
 
 `colorsense` makes it easy to fetch and render considerately once **you** have decided a
