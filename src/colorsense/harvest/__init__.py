@@ -90,7 +90,7 @@ async def harvest_page(
     ``user_agent``, when not ``None``, is forwarded to :class:`RenderSession` and set on the
     browser context, so the page navigation identifies itself with the configured UA instead
     of the stock headless-Chromium one. :meth:`PolitenessPolicy.fetch` passes its configured
-    ``user_agent`` through here, making the README's "identifiable User-Agent" hold on the
+    ``user_agent`` through here, making the documented "identifiable User-Agent" hold on the
     actual render, not just the ``robots.txt`` GET.
 
     ``request_filter``, when not ``None``, is forwarded to :class:`RenderSession`, which

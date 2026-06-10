@@ -3,7 +3,7 @@
 This module gives a consumer the tools to fetch pages considerately — a configurable
 User-Agent, an opt-out ``robots.txt`` gate, a per-host rate limiter, and a render cache —
 but it deliberately does **not** decide whether a given fetch is authorized. Authorization
-is the caller's responsibility (see the README note on embedded vs server-side use). The
+is the caller's responsibility (see ``docs/usage.md`` on embedded vs server-side use). The
 defaults are conservative: ``robots.txt`` is respected (including its ``Crawl-delay``,
 capped), same-host fetches are spaced by one second, and only ``http(s)`` URLs are fetched
 (``file://`` is an explicit opt-in).

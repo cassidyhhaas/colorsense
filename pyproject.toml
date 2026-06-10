@@ -42,8 +42,9 @@ build-backend = "hatchling.build"
 packages = ["src/colorsense"]
 
 [tool.hatch.build.targets.sdist]
-# Ship the source tree needed to build and to run the test suite from a release.
-include = ["src", "tests", "README.md", "LICENSE", "pyproject.toml"]
+# Ship the source tree needed to build and to run the test suite from a release,
+# plus the documentation set.
+include = ["src", "tests", "docs", "README.md", "LICENSE", "pyproject.toml", "SECURITY.md", "CONTRIBUTING.md", "CHANGELOG.md"]
 
 [dependency-groups]
 dev = ["ruff", "mypy", "pytest", "pytest-asyncio", "pytest-cov", "pytest-randomly", "types-pyyaml", "types-Pillow", "pre-commit"]
