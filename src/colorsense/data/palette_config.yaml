@@ -170,21 +170,24 @@ token_vocabulary:
       radix:    [9, 10]      # 1..12
     scale_present_confidence_boost: 1.3
 
-  # --- Semantic token role -> prior distribution over 60/30/10 palette roles. -
-  # *** This is the most consequential table. *** Distributions need not sum to
-  # 1 exactly; loader normalizes. `_text` / `_on` channels are not 60/30/10
-  # roles — they are reported on the classified token, not used in palette ranking.
-  role_to_palette_prior:
-    brand_primary:   {accent: 0.55, secondary: 0.35, primary: 0.10}
-    brand_secondary: {secondary: 0.60, accent: 0.25, primary: 0.15}
-    brand_accent:    {accent: 0.85, secondary: 0.15}
-    interactive:     {accent: 0.90, secondary: 0.10}
-    surface_base:    {primary: 0.85, secondary: 0.15}
-    surface_raised:  {secondary: 0.70, primary: 0.20, neutral_light: 0.10}
-    text_body:       {primary: 0.70, neutral_dark: 0.30}
-    neutral:         {neutral_light: 0.50, neutral_dark: 0.50}  # measured L reassigns
-    border:          {neutral_dark: 0.40, neutral_light: 0.30, secondary: 0.30}
-    text_on:         {channel: text_on}     # reported on token, not palette-ranked
+  # --- Semantic token role -> prior distribution over usage categories. -------
+  # *** This is the most consequential table. *** Each row is the prior on HOW a
+  # token's color is used when rendered: surface (backgrounds at any layer),
+  # text (typography), interactive (links/CTAs/buttons/badges), border
+  # (borders/dividers). Distributions need not sum to 1 exactly; loader
+  # normalizes. `_on` / status / ignore channels are not usage categories —
+  # they are reported on the classified token, not used in usage ranking.
+  role_to_usage_prior:
+    brand_primary:   {interactive: 0.5, surface: 0.4, text: 0.1}
+    brand_secondary: {surface: 0.5, interactive: 0.3, border: 0.2}
+    brand_accent:    {interactive: 0.9, surface: 0.1}
+    interactive:     {interactive: 1.0}
+    surface_base:    {surface: 1.0}
+    surface_raised:  {surface: 1.0}
+    text_body:       {text: 1.0}
+    neutral:         {surface: 0.4, text: 0.35, border: 0.25}
+    border:          {border: 1.0}
+    text_on:         {channel: text_on}     # reported on token, not usage-ranked
     status:          {channel: status}      # excluded from palette, reported separately
     ignore:          {channel: ignore}      # dropped
 
@@ -196,8 +199,8 @@ component_classifier:
 
   # Final component label of an element. Color-channel routing is a fixed
   # code-level convention (see palette/inventory.py): components named
-  # <component>_text are fed by the element's text color, `border` by its
-  # border color, and everything else by its background color.
+  # <component>_text and `link` are fed by the element's text color, `border`
+  # by its border color, and everything else by its background color.
   component_types:
     [page_bg, page_text, header_bg, header_text, nav_bg, nav_text,
      footer_bg, footer_text, hero_bg, hero_text, card_bg, card_text,
@@ -226,7 +229,11 @@ component_classifier:
     - {match: "dialog",            votes: {modal_bg: 4.0}}
     - {match: "role=dialog",       votes: {modal_bg: 3.5}}
     - {match: "aside",             votes: {nav_bg: 2.5}}
-    - {match: "input",             votes: {input_bg: 3.0, border: 2.0}}
+    # border 2.5 (not 2.0): every <input> also matches the input[submit] cta rule,
+    # and at 2.0 the border vote falls just below min_component_prob after softmax —
+    # which would leave the usage view's border category structurally empty on
+    # input-bearing pages.
+    - {match: "input",             votes: {input_bg: 3.0, border: 2.5}}
 
   # --- Feature family 2: geometry / position. --------------------------------
   geometry:

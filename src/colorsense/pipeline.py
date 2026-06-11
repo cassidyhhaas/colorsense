@@ -2,8 +2,9 @@
 
 ``analyze`` wires every stage into one typed call: render each requested
 theme (gated by :class:`~colorsense.net.politeness.PolitenessPolicy`), classify tokens
-and components, build a color inventory, assign palette roles, and
-reconcile usage against declared intent — per theme. Sites that ignore
+and components, build a color inventory, build the usage-keyed palette view, reconcile
+it against declared token intent, and derive the 60/30/10 roles view — per theme.
+Sites that ignore
 ``prefers-color-scheme`` (near-identical light/dark renders)
 are collapsed to a single theme. The whole thing is assembled into a typed
 :class:`~colorsense.models.AnalysisResult`.
@@ -34,17 +35,19 @@ from colorsense.models import (
     Color,
     ColorCluster,
     ComponentType,
-    DivergenceItem,
+    DesignToken,
     Harvest,
     RunMetadata,
     Theme,
     ThemePalette,
+    TokenSemanticRole,
     Viewport,
 )
 from colorsense.net.politeness import PolitenessPolicy
 from colorsense.palette.inventory import build_inventory
 from colorsense.palette.reconcile import reconcile
 from colorsense.palette.roles import assign_roles
+from colorsense.palette.usage import build_usage
 
 DEFAULT_VIEWPORT = Viewport(width=1280, height=800, device_scale_factor=1.0)
 
@@ -79,14 +82,14 @@ class AnalysisTimeoutError(TimeoutError):
 
 @dataclass
 class _ThemeOutput:
-    """Everything derived for one rendered theme."""
+    """Everything derived for one rendered theme.
+
+    The per-theme analysis (usage view, roles view, fit score, divergence, tokens) lives
+    on the :class:`ThemePalette` itself; only the cross-theme aggregates ride alongside.
+    """
 
     palette: ThemePalette
-    tokens: list[ClassifiedToken]
-    status_colors: list[Color]
     third_party_colors: list[Color]
-    divergence: list[DivergenceItem]
-    fit_score: float
 
 
 async def analyze(
@@ -98,6 +101,7 @@ async def analyze(
     politeness: PolitenessPolicy | None = None,
     max_total_seconds: float | None = None,
     browser_args: tuple[str, ...] = (),
+    include_tokens: bool = False,
 ) -> AnalysisResult:
     """Analyze ``url`` and return a typed :class:`AnalysisResult`.
 
@@ -120,8 +124,8 @@ async def analyze(
     viewport:
         Render viewport; defaults to 1280x800 at 1x scale.
     themes:
-        Themes to render, in priority order (the first is "primary" and supplies the
-        top-level token/divergence/fit-score fields). Duplicates are ignored. Defaults to
+        Themes to render, in priority order (the first is "primary": it is the theme
+        kept when near-identical renders collapse). Duplicates are ignored. Defaults to
         **light only** — most sites have no dark mode and a second theme roughly doubles the
         work. Pass ``themes=(Theme.light, Theme.dark)`` (or the exported
         :data:`LIGHT_AND_DARK`) to also analyze dark mode; near-identical renders still
@@ -149,6 +153,12 @@ async def analyze(
         job (see ``SECURITY.md`` §2). Default ``()``: no extra arguments, behavior
         unchanged. Non-string entries (or a bare string) raise :class:`TypeError` before
         any render.
+    include_tokens:
+        When ``True``, each :class:`ThemePalette` carries its declared design tokens as
+        ``tokens`` (a tuple of :class:`~colorsense.models.DesignToken`; ``()`` when the
+        page declares none). When ``False`` (the default) ``tokens`` is ``None``. The
+        flag gates **only output assembly**: token classification and reconciliation
+        always run, so every other field is identical either way.
 
     Raises
     ------
@@ -167,12 +177,16 @@ async def analyze(
     # fetch or render starts (and on the deadline path, before the timer even exists).
     extra_args = normalize_browser_args(browser_args)
     if max_total_seconds is None:
-        return await _analyze(url, config_path, viewport, themes, politeness, extra_args)
+        return await _analyze(
+            url, config_path, viewport, themes, politeness, extra_args, include_tokens
+        )
     if max_total_seconds <= 0:
         raise ValueError("max_total_seconds must be positive (or None for no deadline)")
     try:
         async with asyncio.timeout(max_total_seconds) as deadline:
-            return await _analyze(url, config_path, viewport, themes, politeness, extra_args)
+            return await _analyze(
+                url, config_path, viewport, themes, politeness, extra_args, include_tokens
+            )
     except TimeoutError as err:
         # Only OUR deadline expiring becomes AnalysisTimeoutError; any other TimeoutError
         # surfacing from inside the pipeline propagates untranslated.
@@ -188,6 +202,7 @@ async def _analyze(
     themes: tuple[Theme, ...],
     politeness: PolitenessPolicy | None,
     browser_args: tuple[str, ...],
+    include_tokens: bool,
 ) -> AnalysisResult:
     """The deadline-free body of :func:`analyze` (which owns ``max_total_seconds``).
 
@@ -235,7 +250,9 @@ async def _analyze(
         async with asyncio.TaskGroup() as tg:
             analyze_tasks = {
                 theme: tg.create_task(
-                    asyncio.to_thread(_analyze_theme, harvests[theme], config, viewport)
+                    asyncio.to_thread(
+                        _analyze_theme, harvests[theme], config, viewport, include_tokens
+                    )
                 )
                 for theme in kept_themes
             }
@@ -245,21 +262,13 @@ async def _analyze(
         theme: task.result() for theme, task in analyze_tasks.items()
     }
 
-    primary = outputs[kept_themes[0]]
-
     return AnalysisResult(
         url=url,
         viewport=viewport,
         themes={theme: out.palette for theme, out in outputs.items()},
-        tokens=tuple(primary.tokens),
         third_party_colors=tuple(
             _dedupe_colors(color for out in outputs.values() for color in out.third_party_colors)
         ),
-        status_colors=tuple(
-            _dedupe_colors(color for out in outputs.values() for color in out.status_colors)
-        ),
-        divergence=tuple(primary.divergence),
-        fit_score=primary.fit_score,
         metadata=_build_metadata(ordered_themes, kept_themes, policy),
     )
 
@@ -278,28 +287,67 @@ def _reraise_first_leaf(eg: ExceptionGroup[Exception]) -> NoReturn:
     raise leaf from eg
 
 
-def _analyze_theme(harvest: Harvest, config: Config, viewport: Viewport) -> _ThemeOutput:
-    """Run the per-theme classify → inventory → roles → reconcile chain.
+def _analyze_theme(
+    harvest: Harvest, config: Config, viewport: Viewport, include_tokens: bool
+) -> _ThemeOutput:
+    """Run the per-theme classify → inventory → usage → reconcile → roles chain.
 
     Pure CPU over immutable inputs (no I/O, no shared mutable state); ``analyze`` runs it
     on a worker thread via ``asyncio.to_thread`` to keep the event loop responsive.
     """
-    classified_tokens, status_colors = classify_tokens(harvest.tokens, config)
+    classified_tokens = classify_tokens(harvest.tokens, config)
     classified_elements = classify_components(harvest.elements, config, viewport)
     clusters = build_inventory(harvest, classified_elements)
 
-    usage_roles, fit_score = assign_roles(clusters)
-    reconciled_roles, divergence = reconcile(usage_roles, classified_tokens)
+    measured_usage = build_usage(clusters)
+    posterior_usage, divergence = reconcile(measured_usage, classified_tokens)
+    measured_roles, fit_score = assign_roles(clusters)
 
-    palette = ThemePalette(theme=harvest.theme, roles=reconciled_roles)
+    palette = ThemePalette(
+        theme=harvest.theme,
+        usage=posterior_usage,
+        roles=measured_roles,
+        fit_score=fit_score,
+        divergence=tuple(divergence),
+        tokens=_design_tokens(classified_tokens) if include_tokens else None,
+    )
     return _ThemeOutput(
         palette=palette,
-        tokens=classified_tokens,
-        status_colors=status_colors,
         third_party_colors=_third_party_colors(clusters),
-        divergence=divergence,
-        fit_score=fit_score,
     )
+
+
+def _design_tokens(classified: list[ClassifiedToken]) -> tuple[DesignToken, ...]:
+    """Project classified tokens onto the public :class:`DesignToken` shape.
+
+    Keeps only meaningful tokens: a resolved color present, a semantic role other than
+    ``ignore``, and a positive classification weight. Dedupes by name keeping the FIRST
+    occurrence in document order — the harvester resolves every record against the
+    rendered ``:root``, so duplicate-name records share one resolved color and dropping
+    later ones loses nothing. Sorted by name for stable output.
+    """
+    out: list[DesignToken] = []
+    seen: set[str] = set()
+    for token in classified:
+        resolved = token.record.resolved
+        if resolved is None:
+            continue
+        if token.semantic_role is TokenSemanticRole.ignore:
+            continue
+        if token.weight <= 0.0:
+            continue
+        if token.record.name in seen:
+            continue
+        seen.add(token.record.name)
+        out.append(
+            DesignToken(
+                name=token.record.name,
+                color=resolved,
+                semantic_role=token.semantic_role,
+            )
+        )
+    out.sort(key=lambda t: t.name)
+    return tuple(out)
 
 
 def _collapse_themes(ordered_themes: list[Theme], harvests: dict[Theme, Harvest]) -> list[Theme]:
@@ -372,11 +420,10 @@ def _dedupe_colors(colors: Iterable[Color]) -> list[Color]:
 def _build_metadata(
     requested: list[Theme], kept: list[Theme], policy: PolitenessPolicy
 ) -> RunMetadata:
-    """Provenance for the run: themes requested vs analyzed, collapse flag, fetch policy."""
+    """Provenance for the run: themes requested vs analyzed, and the fetch policy."""
     return RunMetadata(
         themes_requested=tuple(requested),
         themes_analyzed=tuple(kept),
-        single_theme=len(kept) == 1,
         user_agent=policy.user_agent,
         respect_robots=policy.respect_robots,
     )

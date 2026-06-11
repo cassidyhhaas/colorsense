@@ -11,10 +11,14 @@ objects:
   :class:`~colorsense.models.ClassifiedElement` carries a ``component_dist`` over
   :class:`~colorsense.models.ComponentType`. The distribution is split per color
   channel and attributed to the nearest screenshot-bin color of the *matching*
-  measured color: ``*_text`` components route to ``element.text``,
-  :attr:`~colorsense.models.ComponentType.border` to ``element.border``, and
-  everything else to ``element.bg``. This channel routing is a fixed code-level
-  convention (see :func:`_channel_for`).
+  measured color: ``*_text`` components and ``link`` route to ``element.text``
+  (a link paints its typography), :attr:`~colorsense.models.ComponentType.border`
+  to ``element.border``, and everything else to ``element.bg``. This channel
+  routing is a fixed code-level convention (see :func:`_channel_for`). A channel
+  whose measured color is **fully transparent** (``alpha == 0``) paints nothing
+  and donates no mass — without this gate, every transparent-background element
+  (links, paragraphs, wrappers) piles its votes onto a phantom ``#000000``
+  zero-area cluster.
 
 Perceptual distance is measured exclusively with
 :func:`colorsense.color.primitives.delta_e` (OKLab ``deltaEOK``), whose units are small;
@@ -57,12 +61,13 @@ def _channel_for(component: ComponentType) -> str:
     """Return the color channel a component's vote mass routes to.
 
     The routing convention is fixed in code: components whose value ends with
-    ``_text`` are painted by the element's ``color`` (its ``text`` channel),
-    :attr:`~colorsense.models.ComponentType.border` by its ``border-color``,
-    and everything else (including ``link``, ``badge``, ``third_party`` and
-    ``button_secondary``) by its ``background-color``.
+    ``_text`` — plus ``link``, whose painted color is its typography color, not
+    its (usually transparent) background — are painted by the element's
+    ``color`` (its ``text`` channel), :attr:`~colorsense.models.ComponentType.border`
+    by its ``border-color``, and everything else (including ``badge``,
+    ``third_party`` and ``button_secondary``) by its ``background-color``.
     """
-    if component.value.endswith("_text"):
+    if component.value.endswith("_text") or component is ComponentType.link:
         return "text"
     if component is ComponentType.border:
         return "border"
@@ -122,8 +127,9 @@ def build_inventory(harvest: Harvest, classified: list[ClassifiedElement]) -> li
        emit one :class:`~colorsense.models.ColorCluster`: representative color =
        member with the largest area weight (ties / all-zero broken by ``hex``);
        ``area_weight`` = sum of member weights; ``member_count`` = group size;
-       ``component_mix`` = summed member mixes normalized to sum ~1.0 (empty stays
-       empty).
+       ``component_mass`` = the raw summed member mixes (un-normalized vote mass —
+       the usage view needs cross-cluster magnitude); ``component_mix`` = the same
+       sums normalized to ~1.0 (empty stays empty).
 
     Returns clusters sorted by ``area_weight`` descending, ties broken by ``hex``.
     """
@@ -149,7 +155,10 @@ def build_inventory(harvest: Harvest, classified: list[ClassifiedElement]) -> li
             ("border", ce.element.border),
         ):
             sub_dist = sub_dists[channel]
-            if color is None or not sub_dist:
+            # A fully-transparent channel color (alpha == 0, e.g. the default
+            # ``background-color: transparent``) paints nothing: attributing its
+            # mass would invent a phantom #000000 cluster.
+            if color is None or color.alpha == 0.0 or not sub_dist:
                 continue
 
             best_idx: int | None = None
@@ -209,6 +218,7 @@ def build_inventory(harvest: Harvest, classified: list[ClassifiedElement]) -> li
                 area_weight=total_area,
                 member_count=len(group),
                 component_mix=mix,
+                component_mass=dict(summed),
             )
         )
 

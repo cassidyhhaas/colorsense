@@ -76,19 +76,46 @@ def _parse_viewport(value: str, scale: float) -> Viewport:
 
 
 def _print_palette(result: AnalysisResult) -> None:
-    """Human summary: best candidate per role for every analyzed theme, plus fit score."""
-    typer.echo(f"{result.url}  (fit score {result.fit_score:.2f})")
+    """Human summary per theme: the usage view first, then roles + fit score, divergence,
+    and (when requested) the declared tokens."""
+    typer.echo(result.url)
     for theme, palette in result.themes.items():
         typer.echo(f"  [{theme}]")
+
+        typer.echo("    usage:")
+        for category, entries in palette.usage.mapping.items():
+            if not entries:
+                typer.echo(f"      {category:<13}(none detected)")
+                continue
+            typer.echo(f"      {category}:")
+            for entry in entries:
+                typer.echo(
+                    f"        {entry.color.hex}"
+                    f"  probability={entry.probability:.2f}  area={entry.area:.2f}"
+                )
+
+        typer.echo(f"    roles (60/30/10 view, fit score {palette.fit_score:.2f}):")
         for role, candidates in palette.roles.mapping.items():
             if not candidates:
-                typer.echo(f"    {role:<14}(none detected)")
+                typer.echo(f"      {role:<14}(none detected)")
                 continue
             best = candidates[0]
             typer.echo(
-                f"    {role:<14}{best.color.hex}"
+                f"      {role:<14}{best.color.hex}"
                 f"  probability={best.probability:.2f}  area={best.area:.2f}"
             )
+
+        if palette.divergence:
+            typer.echo("    divergence:")
+            for item in palette.divergence:
+                typer.echo(f"      {item.category:<13}{item.color.hex}  {item.note}")
+
+        if palette.tokens is not None:
+            typer.echo("    tokens:")
+            if not palette.tokens:
+                typer.echo("      (none declared)")
+            for token in palette.tokens:
+                typer.echo(f"      {token.name}  {token.color.hex}  {token.semantic_role}")
 
 
 async def _run(
@@ -100,6 +127,7 @@ async def _run(
     config_path: Path | None,
     max_total_seconds: float | None,
     browser_args: tuple[str, ...],
+    include_tokens: bool,
     json_output: bool,
 ) -> int:
     """Analyze ``urls`` sequentially through one shared policy; return the failure count."""
@@ -115,6 +143,7 @@ async def _run(
                 config_path=config_path,
                 max_total_seconds=max_total_seconds,
                 browser_args=browser_args,
+                include_tokens=include_tokens,
             )
         except (
             RobotsDisallowedError,
@@ -196,6 +225,13 @@ def main(
             "(installs block_private_networks() as the egress filter).",
         ),
     ] = False,
+    tokens: Annotated[
+        bool,
+        typer.Option(
+            "--tokens",
+            help="Include the declared design tokens (CSS custom properties) per theme.",
+        ),
+    ] = False,
     no_robots: Annotated[
         bool,
         typer.Option(
@@ -247,6 +283,7 @@ def main(
                 config_path=config,
                 max_total_seconds=max_total_seconds,
                 browser_args=tuple(browser_arg or ()),
+                include_tokens=tokens,
                 json_output=json_output,
             )
         )

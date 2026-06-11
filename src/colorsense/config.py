@@ -31,7 +31,7 @@ from pathlib import Path
 import yaml
 from pydantic import BaseModel, ConfigDict, model_validator
 
-from colorsense.models import PaletteRole, TokenSemanticRole
+from colorsense.models import TokenSemanticRole, UsageCategory
 
 __all__ = [
     "ChannelPrior",
@@ -130,7 +130,7 @@ class ScaleDetectionConfig(BaseModel):
 
 
 class ChannelPrior(BaseModel):
-    """A ``role_to_palette_prior`` row that names a non-palette channel."""
+    """A ``role_to_usage_prior`` row that names a non-palette channel."""
 
     model_config = ConfigDict(frozen=True)
 
@@ -138,11 +138,11 @@ class ChannelPrior(BaseModel):
 
 
 class DistributionPrior(BaseModel):
-    """A ``role_to_palette_prior`` row: a normalized distribution over palette roles."""
+    """A ``role_to_usage_prior`` row: a normalized distribution over usage categories."""
 
     model_config = ConfigDict(frozen=True)
 
-    distribution: dict[PaletteRole, float]
+    distribution: dict[UsageCategory, float]
 
 
 # A prior row is either a normalized distribution or a tagged channel.
@@ -160,7 +160,7 @@ class TokenVocabularyConfig(BaseModel):
     name_rules: tuple[NameRule, ...]
     relational_modifiers: tuple[RelationalModifier, ...]
     scale_detection: ScaleDetectionConfig
-    role_to_palette_prior: dict[TokenSemanticRole, PriorRow]
+    role_to_usage_prior: dict[TokenSemanticRole, PriorRow]
     status_excluded_from_palette: bool
 
     @model_validator(mode="before")
@@ -174,14 +174,14 @@ class TokenVocabularyConfig(BaseModel):
         """
         if not isinstance(data, dict):
             return data
-        raw_priors = data.get("role_to_palette_prior")
+        raw_priors = data.get("role_to_usage_prior")
         if not isinstance(raw_priors, dict):
             return data
 
         normalized: dict[object, object] = {}
         for role, row in raw_priors.items():
             if not isinstance(row, dict):
-                raise ValueError(f"role_to_palette_prior[{role!r}] must be a mapping")
+                raise ValueError(f"role_to_usage_prior[{role!r}] must be a mapping")
             if "channel" in row:
                 normalized[role] = {"channel": row["channel"]}
                 continue
@@ -190,13 +190,13 @@ class TokenVocabularyConfig(BaseModel):
                 total += float(weight)
             if total <= 0.0:
                 raise ValueError(
-                    f"role_to_palette_prior[{role!r}] distribution must sum to a positive value"
+                    f"role_to_usage_prior[{role!r}] distribution must sum to a positive value"
                 )
             normalized[role] = {
                 "distribution": {key: float(weight) / total for key, weight in row.items()}
             }
         new_data = dict(data)
-        new_data["role_to_palette_prior"] = normalized
+        new_data["role_to_usage_prior"] = normalized
         return new_data
 
 

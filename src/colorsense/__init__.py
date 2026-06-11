@@ -15,13 +15,19 @@ Entry point
 Result & contracts
 ------------------
 * :class:`AnalysisResult` — the typed result, with :class:`RunMetadata` provenance.
-* :class:`ThemePalette`, :class:`RoleResults`, :class:`PaletteCandidate`,
-  :class:`DivergenceItem`, :class:`ClassifiedToken`, :class:`TokenRecord` — the models
-  reachable when navigating a result.
+* :class:`ThemePalette` — everything derived per theme. Its **primary view** is
+  ``usage`` (:class:`UsagePalette` / :class:`UsageEntry` — what colors paint surfaces,
+  text, interactive elements, and borders); ``roles`` (:class:`RoleResults` /
+  :class:`PaletteCandidate`) is the **derived** measured-only 60/30/10 interpretation.
+  ``divergence`` (:class:`DivergenceItem`) reports declared-vs-measured discrepancies,
+  and ``tokens`` (:class:`DesignToken`) carries the declared design tokens — opt-in via
+  ``analyze(..., include_tokens=True)`` (``None`` when not requested, ``()`` when
+  requested but none declared).
 * :class:`Color` / :class:`Viewport` — value types (``Viewport`` is also an ``analyze``
   argument).
-* :class:`Theme`, :class:`PaletteRole`, :class:`TokenSemanticRole` — the enums that key the
-  result (e.g. ``roles.mapping[PaletteRole.primary]``).
+* :class:`Theme`, :class:`UsageCategory`, :class:`PaletteRole`, :class:`ComponentType`,
+  :class:`TokenSemanticRole` — the enums that key the result (e.g.
+  ``usage.mapping[UsageCategory.surface]``, ``roles.mapping[PaletteRole.primary]``).
 
 Inputs & policy
 ---------------
@@ -52,8 +58,9 @@ from colorsense.config import Config, load_config, load_default_config
 from colorsense.harvest import RenderError, RequestFilter
 from colorsense.models import (
     AnalysisResult,
-    ClassifiedToken,
     Color,
+    ComponentType,
+    DesignToken,
     DivergenceItem,
     PaletteCandidate,
     PaletteRole,
@@ -61,8 +68,10 @@ from colorsense.models import (
     RunMetadata,
     Theme,
     ThemePalette,
-    TokenRecord,
     TokenSemanticRole,
+    UsageCategory,
+    UsageEntry,
+    UsagePalette,
     Viewport,
 )
 from colorsense.net.guard import block_private_networks
@@ -78,9 +87,10 @@ __all__ = [
     "LIGHT_AND_DARK",
     "AnalysisResult",
     "AnalysisTimeoutError",
-    "ClassifiedToken",
     "Color",
+    "ComponentType",
     "Config",
+    "DesignToken",
     "DivergenceItem",
     "PaletteCandidate",
     "PaletteRole",
@@ -92,9 +102,11 @@ __all__ = [
     "RunMetadata",
     "Theme",
     "ThemePalette",
-    "TokenRecord",
     "TokenSemanticRole",
     "UnsupportedSchemeError",
+    "UsageCategory",
+    "UsageEntry",
+    "UsagePalette",
     "Viewport",
     "analyze",
     "block_private_networks",
