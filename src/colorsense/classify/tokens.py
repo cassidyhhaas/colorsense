@@ -43,10 +43,10 @@ __all__ = ["classify_tokens"]
 _SCALE_BASE_WEIGHT: float = 3.0
 
 # The (role, weight, text_on_base, origin) classification quadruple.
-_SelfClass = tuple[TokenSemanticRole, float, TokenSemanticRole | None, TokenOrigin]
+_Classification = tuple[TokenSemanticRole, float, TokenSemanticRole | None, TokenOrigin]
 
 
-def _classify_self(record: TokenRecord, config: Config) -> _SelfClass:
+def _classify_self(record: TokenRecord, config: Config) -> _Classification:
     """Classify a single record on its own merits (no alias inheritance).
 
     Returns ``(semantic_role, weight, text_on_base, origin)``. ``text_on_base`` is only
@@ -104,8 +104,8 @@ def _usage_prior(role: TokenSemanticRole, config: Config) -> dict[UsageCategory,
 def _resolve_alias_role(
     record: TokenRecord,
     index: dict[str, TokenRecord],
-    self_class: dict[str, _SelfClass],
-) -> _SelfClass | None:
+    self_classifications: dict[str, _Classification],
+) -> _Classification | None:
     """Follow ``alias_target`` links until a non-``ignore`` classification is found.
 
     Returns the inherited classification with origin rewritten to
@@ -122,7 +122,7 @@ def _resolve_alias_role(
         target = index.get(target_name)
         if target is None:
             return None
-        role, weight, text_on_base, _origin = self_class[target.name]
+        role, weight, text_on_base, _origin = self_classifications[target.name]
         if role is not TokenSemanticRole.ignore:
             return role, weight, text_on_base, TokenOrigin.alias
         target_name = target.alias_target
@@ -141,20 +141,20 @@ def classify_tokens(tokens: list[TokenRecord], config: Config) -> list[Classifie
     index: dict[str, TokenRecord] = {record.name: record for record in tokens}
 
     # First pass: classify every record on its own merits.
-    self_class: dict[str, _SelfClass] = {}
+    self_classifications: dict[str, _Classification] = {}
     for record in tokens:
-        self_class[record.name] = _classify_self(record, config)
+        self_classifications[record.name] = _classify_self(record, config)
 
     status_excluded = config.token_vocabulary.status_excluded_from_palette
 
     classified: list[ClassifiedToken] = []
 
     for record in tokens:
-        role, weight, text_on_base, origin = self_class[record.name]
+        role, weight, text_on_base, origin = self_classifications[record.name]
 
         # Alias inheritance: an `ignore` token may adopt its target's role.
         if role is TokenSemanticRole.ignore and record.alias_target is not None:
-            inherited = _resolve_alias_role(record, index, self_class)
+            inherited = _resolve_alias_role(record, index, self_classifications)
             if inherited is not None:
                 role, weight, text_on_base, origin = inherited
 
