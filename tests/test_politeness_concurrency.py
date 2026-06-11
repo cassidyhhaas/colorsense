@@ -13,13 +13,12 @@ Two concerns share the gated-harvester pattern from ``test_politeness_cache.py``
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable
 
 import pytest
 
 from colorsense import AnalysisTimeoutError, analyze
 from colorsense.config import Config, load_default_config
-from colorsense.harvest import SharedBrowser
+from colorsense.harvest import RequestFilter, SharedBrowser
 from colorsense.models import Harvest, Theme, Viewport
 from colorsense.net.politeness import PolitenessPolicy
 
@@ -32,7 +31,7 @@ def config() -> Config:
 
 
 async def _no_robots(
-    _url: str, _user_agent: str, _request_filter: Callable[[str], bool] | None = None
+    _url: str, _user_agent: str, _request_filter: RequestFilter | None = None
 ) -> str | None:
     return None
 
@@ -55,7 +54,7 @@ class _GatedHarvester:
         viewport: Viewport,
         *,
         user_agent: str | None = None,
-        request_filter: Callable[[str], bool] | None = None,
+        request_filter: RequestFilter | None = None,
         browser: SharedBrowser | None = None,
     ) -> Harvest:
         self.calls += 1
@@ -342,7 +341,7 @@ class _HangThenSucceedHarvester:
         viewport: Viewport,
         *,
         user_agent: str | None = None,
-        request_filter: Callable[[str], bool] | None = None,
+        request_filter: RequestFilter | None = None,
         browser: SharedBrowser | None = None,
     ) -> Harvest:
         self.calls += 1

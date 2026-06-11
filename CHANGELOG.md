@@ -7,8 +7,26 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **`request_filter` seams accept async predicates.** `PolitenessPolicy`, `harvest_page`,
+  and `RenderSession` now take a synchronous *or* asynchronous `url -> bool` predicate;
+  the new public **`RequestFilter`** type alias (exported from the package root and
+  `colorsense.harvest`) names the union. Sync predicates keep working unchanged but run
+  inline on the event loop, so they must not block; async predicates are awaited, and
+  raising — sync or async — still fails closed.
+
 ### Changed
 
+- **Breaking:** `block_private_networks()` now returns an **async** predicate
+  (`await guard(url)`; only usable under a running event loop, as the `request_filter`
+  seams are). Its blocking DNS resolution runs off the event loop on a worker thread via
+  `asyncio.to_thread` on a cache miss, with per-host single-flight coalescing (N concurrent
+  requests to one slow novel hostname dispatch one lookup, not N) — so a slow nameserver no
+  longer stalls the whole loop, notably on the robots-fetch redirect path, where
+  attacker-influenced redirect hostnames could previously trigger up to 21 on-loop lookups
+  per fetch. The injectable `Resolver` seam stays synchronous (it now runs inside the
+  worker thread); the TTL+LRU verdict cache and the DNS-rebinding caveat are unchanged.
 - The `examples/webservice/` reference implementation is restructured from a single
   `app.py` into an idiomatic mini FastAPI layout (`main.py`, `settings.py`, `policy.py`,
   `schemas.py`, `routes.py`; `url_guard.py` unchanged). No behavior or security-control

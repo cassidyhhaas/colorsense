@@ -12,12 +12,11 @@ injected fakes, and concurrency is driven deterministically via an ``asyncio.Eve
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable
 
 import pytest
 
 from colorsense.config import Config, load_default_config
-from colorsense.harvest import SharedBrowser
+from colorsense.harvest import RequestFilter, SharedBrowser
 from colorsense.models import Harvest, Theme, Viewport
 from colorsense.net.politeness import PolitenessPolicy, RobotsDisallowedError
 
@@ -31,14 +30,14 @@ def config() -> Config:
 
 
 async def _no_robots(
-    _url: str, _user_agent: str, _request_filter: Callable[[str], bool] | None = None
+    _url: str, _user_agent: str, _request_filter: RequestFilter | None = None
 ) -> str | None:
     """Robots loader that returns no rules, so every URL is permitted."""
     return None
 
 
 async def _disallow_all(
-    _url: str, _user_agent: str, _request_filter: Callable[[str], bool] | None = None
+    _url: str, _user_agent: str, _request_filter: RequestFilter | None = None
 ) -> str | None:
     return "User-agent: *\nDisallow: /"
 
@@ -66,7 +65,7 @@ class _GatedHarvester:
         viewport: Viewport,
         *,
         user_agent: str | None = None,
-        request_filter: Callable[[str], bool] | None = None,
+        request_filter: RequestFilter | None = None,
         browser: SharedBrowser | None = None,
     ) -> Harvest:
         self.calls += 1
@@ -96,7 +95,7 @@ class _FailingHarvester:
         viewport: Viewport,
         *,
         user_agent: str | None = None,
-        request_filter: Callable[[str], bool] | None = None,
+        request_filter: RequestFilter | None = None,
         browser: SharedBrowser | None = None,
     ) -> Harvest:
         self.calls += 1
@@ -234,7 +233,7 @@ class _ImmediateHarvester:
         viewport: Viewport,
         *,
         user_agent: str | None = None,
-        request_filter: Callable[[str], bool] | None = None,
+        request_filter: RequestFilter | None = None,
         browser: SharedBrowser | None = None,
     ) -> Harvest:
         self.urls.append(url)
@@ -248,7 +247,7 @@ async def test_robots_fetch_is_throttled_without_double_waiting(config: Config) 
     robots_urls: list[str] = []
 
     async def recording_robots(
-        url: str, _user_agent: str, _request_filter: Callable[[str], bool] | None = None
+        url: str, _user_agent: str, _request_filter: RequestFilter | None = None
     ) -> str | None:
         robots_urls.append(url)
         return None  # fail-open: no rules => permitted
@@ -382,7 +381,7 @@ def _delay_policy(
     """A policy whose robots loader returns ``robots_text``, with a recording fake sleeper."""
 
     async def loader(
-        _url: str, _user_agent: str, _request_filter: Callable[[str], bool] | None = None
+        _url: str, _user_agent: str, _request_filter: RequestFilter | None = None
     ) -> str | None:
         return robots_text
 

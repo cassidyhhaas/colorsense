@@ -179,17 +179,21 @@ policy** — whether a fetch is authorized is the consumer's decision, made *bef
   an explicit opt-in (the test suite opts in to render its local fixtures).
 - **`request_filter`** — an optional predicate over **every URL the browser requests**
   while rendering (the navigation *and* the page's own sub-resources), aborting any request
-  it rejects. The same filter also gates the policy's own server-side `robots.txt` GET:
+  it rejects. It may be **synchronous or asynchronous** (the `RequestFilter` type alias):
+  a sync predicate is invoked inline on the event loop's request path and must not block
+  (cheap string checks only); an async predicate is awaited, free to do slow work off the
+  loop. The same filter also gates the policy's own server-side `robots.txt` GET:
   the robots URL and every redirect hop it follows are vetted before being requested, and
   a rejected hop aborts the robots fetch (which then fails open as "no rules") while the
-  navigation itself stays filtered browser-side. This is the in-library SSRF mechanism;
-  see [SECURITY.md](../SECURITY.md).
-  `block_private_networks()` builds one for the common case: it resolves each hostname and
-  rejects URLs resolving to private/loopback/link-local (metadata)/CGNAT/other non-public
-  addresses, failing closed, with an optional narrowing `allowed_hosts` allowlist. It does
-  not fully defeat DNS rebinding (Chromium resolves hostnames independently), and its DNS
-  lookups block the event loop (cached per hostname with a TTL) — network isolation remains
-  the primary control.
+  navigation itself stays filtered browser-side. Raising — sync or async — fails closed.
+  This is the in-library SSRF mechanism; see [SECURITY.md](../SECURITY.md).
+  `block_private_networks()` builds one (async) for the common case: it resolves each
+  hostname and rejects URLs resolving to private/loopback/link-local (metadata)/CGNAT/other
+  non-public addresses, failing closed, with an optional narrowing `allowed_hosts`
+  allowlist. It does not fully defeat DNS rebinding (Chromium resolves hostnames
+  independently); its DNS lookups run off the event loop on a worker thread (cached per
+  hostname with a TTL; concurrent misses for one host share a single lookup) — network
+  isolation remains the primary control.
 - **`max_concurrent_renders`** — optional cap on simultaneous renders through the policy
   (unbounded by default — set it on servers; see [SECURITY.md](../SECURITY.md) §2). Cache
   hits and coalesced duplicate fetches never count against the cap, and a fetch waiting out

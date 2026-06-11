@@ -31,7 +31,8 @@ from urllib.robotparser import RobotFileParser
 import httpx
 
 from colorsense.config import Config
-from colorsense.harvest import SharedBrowser, harvest_page
+from colorsense.harvest import RequestFilter, SharedBrowser, harvest_page
+from colorsense.harvest.render import evaluate_request_filter
 from colorsense.models import Harvest, Theme, Viewport
 
 try:
@@ -81,11 +82,12 @@ pipeline arbitrarily, so the learned delay is clamped to this before being combi
 # so they bypass both gates.
 _NETWORK_SCHEMES = frozenset({"http", "https"})
 
-# All I/O seams are async: the harvester renders via async Playwright and the robots
-# loader fetches over async httpx. The clock stays synchronous (a plain time source);
-# only the sleeper is awaited so rate-limit waits yield the event loop. Both network
-# seams carry the policy's configured ``user_agent`` so the identity sent on the wire
-# (robots GET *and* page render) is the one the consumer configured.
+# All I/O seams are async: the harvester renders via async Playwright, the robots loader
+# fetches over async httpx, and the egress ``request_filter`` may itself be async (a sync
+# one is invoked inline and must not block). The clock stays synchronous (a plain time
+# source); only the sleeper is awaited so rate-limit waits yield the event loop. Both
+# network seams carry the policy's configured ``user_agent`` so the identity sent on the
+# wire (robots GET *and* page render) is the one the consumer configured.
 
 
 class Harvester(Protocol):
@@ -108,19 +110,20 @@ class Harvester(Protocol):
         viewport: Viewport,
         *,
         user_agent: str | None = None,
-        request_filter: Callable[[str], bool] | None = None,
+        request_filter: RequestFilter | None = None,
         browser: SharedBrowser | None = None,
     ) -> Awaitable[Harvest]: ...
 
 
-RobotsLoader = Callable[[str, str, Callable[[str], bool] | None], Awaitable[str | None]]
+RobotsLoader = Callable[[str, str, RequestFilter | None], Awaitable[str | None]]
 """Robots seam: ``(robots_url, user_agent, request_filter) -> text | None``.
 
-The UA is sent on the wire. ``request_filter`` is the policy's egress predicate (or
-``None``): a loader must apply it to the robots URL itself *and* to every redirect hop it
-follows, returning ``None`` (no rules) instead of fetching a rejected destination — the
-robots GET is server-side ``httpx``, not the browser, so it would otherwise bypass the
-browser-route filter entirely (SSRF via a robots redirect).
+The UA is sent on the wire. ``request_filter`` is the policy's egress predicate — sync or
+async (see :data:`colorsense.harvest.RequestFilter`) — or ``None``: a loader must apply it
+to the robots URL itself *and* to every redirect hop it follows, returning ``None`` (no
+rules) instead of fetching a rejected destination — the robots GET is server-side
+``httpx``, not the browser, so it would otherwise bypass the browser-route filter entirely
+(SSRF via a robots redirect).
 """
 Clock = Callable[[], float]
 Sleeper = Callable[[float], Awaitable[None]]
@@ -176,7 +179,7 @@ failure: ``None``, failing open as "no rules".
 async def _default_robots_loader(
     robots_url: str,
     user_agent: str,
-    request_filter: Callable[[str], bool] | None = None,
+    request_filter: RequestFilter | None = None,
     *,
     _transport: httpx.AsyncBaseTransport | None = None,
 ) -> str | None:
@@ -195,27 +198,20 @@ async def _default_robots_loader(
     ``None``, no rules — so a hostile server cannot exhaust memory by streaming an
     arbitrarily large body within the per-read timeout.
 
-    ``request_filter`` is the policy's egress predicate. Redirects are followed *manually*
-    (``follow_redirects=False`` plus a loop capped at :data:`_MAX_ROBOTS_REDIRECTS` hops)
-    so the filter can vet **each** URL before it is requested — the initial robots URL and
-    every redirect ``Location`` (resolved against the current URL). A rejected — or
-    raising, which fails closed — verdict aborts the fetch and returns ``None``: the robots
-    rules fail open as usual, while the navigation itself stays gated by the browser-side
-    filter. Without a filter (``None``), redirects are simply followed up to the cap.
+    ``request_filter`` is the policy's egress predicate, sync or async — each hop is vetted
+    through :func:`colorsense.harvest.render.evaluate_request_filter`, the shared
+    filter-invocation helper (awaits async predicates; any exception fails closed).
+    Redirects are followed *manually* (``follow_redirects=False`` plus a loop capped at
+    :data:`_MAX_ROBOTS_REDIRECTS` hops) so the filter can vet **each** URL before it is
+    requested — the initial robots URL and every redirect ``Location`` (resolved against
+    the current URL). A rejected — or raising, which fails closed — verdict aborts the
+    fetch and returns ``None``: the robots rules fail open as usual, while the navigation
+    itself stays gated by the browser-side filter. Without a filter (``None``), redirects
+    are simply followed up to the cap.
 
     ``_transport`` is a private test seam: an injected ``httpx`` transport (e.g.
     ``httpx.MockTransport``) standing in for the network.
     """
-
-    def _permitted(candidate: str) -> bool:
-        if request_filter is None:
-            return True
-        try:
-            return bool(request_filter(candidate))
-        except Exception:
-            # A buggy/raising predicate must block, not permit (fail closed).
-            return False
-
     try:
         async with httpx.AsyncClient(
             timeout=10.0,
@@ -225,7 +221,9 @@ async def _default_robots_loader(
         ) as client:
             url = robots_url
             for _ in range(_MAX_ROBOTS_REDIRECTS + 1):
-                if not _permitted(url):
+                if request_filter is not None and not await evaluate_request_filter(
+                    request_filter, url
+                ):
                     return None
                 async with client.stream("GET", url) as response:
                     if response.is_redirect:
@@ -285,17 +283,21 @@ class PolitenessPolicy:
         concept. Schemes other than ``http``/``https``/``file`` are always rejected;
         rejections raise :class:`UnsupportedSchemeError`.
     request_filter:
-        Optional synchronous predicate over **every request URL the browser makes** while
-        rendering — the navigation itself *and* all sub-resources (scripts, images, XHR/
-        ``fetch`` issued by the page's own JS) — **and** over the policy's own
+        Optional synchronous or asynchronous predicate
+        (:data:`~colorsense.harvest.RequestFilter`) over **every request URL the browser
+        makes** while rendering — the navigation itself *and* all sub-resources (scripts,
+        images, XHR/``fetch`` issued by the page's own JS) — **and** over the policy's own
         ``robots.txt`` GET (the initial robots URL and each redirect hop it follows; a
         rejected hop aborts the fetch, which fails open as "no rules" while the navigation
         stays gated by this same filter browser-side). Returning ``False`` aborts that
-        request. This is the in-library mechanism against sub-resource SSRF: validating the
-        navigation URL alone cannot stop the rendered page from requesting internal
-        endpoints (e.g. ``169.254.169.254``). A predicate that *raises* fails closed (the
-        request is aborted). ``None`` (default) installs no interception at all — zero
-        overhead.
+        request. A *sync* predicate is invoked inline on the event loop's request path and
+        must not block (cheap string checks only); an *async* predicate is awaited — the
+        shipped :func:`colorsense.block_private_networks` guard is async and resolves
+        hostnames off-loop. This is the in-library mechanism against sub-resource SSRF:
+        validating the navigation URL alone cannot stop the rendered page from requesting
+        internal endpoints (e.g. ``169.254.169.254``). A predicate that *raises* fails
+        closed (the request is aborted). ``None`` (default) installs no interception at
+        all — zero overhead.
     max_concurrent_renders:
         Optional cap on simultaneous *renders* through this policy — the SECURITY.md §2
         concurrency bound, shipped as a knob. ``None`` (default) is unbounded, the previous
@@ -342,7 +344,7 @@ class PolitenessPolicy:
         robots_agent: str = DEFAULT_ROBOTS_AGENT,
         respect_robots: bool = True,
         allow_file_urls: bool = False,
-        request_filter: Callable[[str], bool] | None = None,
+        request_filter: RequestFilter | None = None,
         max_concurrent_renders: int | None = None,
         min_interval: float = DEFAULT_MIN_INTERVAL,
         max_crawl_delay: float = DEFAULT_MAX_CRAWL_DELAY,
