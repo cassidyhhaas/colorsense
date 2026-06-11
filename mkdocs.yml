@@ -30,6 +30,7 @@ theme:
 nav:
   - Home: index.md
   - Usage guide: usage.md
+  - How it works: how-it-works.md
   - Advanced guide: advanced.md
   - API reference: api.md
   - Security: security.md

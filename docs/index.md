@@ -48,6 +48,8 @@ colorsense https://example.com
 ## Where next
 
 - [Usage guide](usage.md) — options, the full result schema, errors, and fetch policy.
+- [How it works](how-it-works.md) — every pipeline stage explained, with the actual
+  logic and calculations, plus performance notes.
 - [Advanced guide](advanced.md) — design-token auditing and custom tuning.
 - [API reference](api.md) — the public API, generated from the docstrings.
 - [Security](security.md) — threat model and consumer responsibilities; **read it before
