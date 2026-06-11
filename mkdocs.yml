@@ -1,0 +1,72 @@
+site_name: colorsense
+site_description: Extract the rendered color palette of any website as a structured, typed Python object.
+site_url: https://cassidyhhaas.github.io/colorsense/
+repo_url: https://github.com/cassidyhhaas/colorsense
+repo_name: cassidyhhaas/colorsense
+
+theme:
+  name: material
+  palette:
+    # Light/dark toggle — fitting for a library that analyzes both themes.
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: deep purple
+      accent: deep orange
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: deep purple
+      accent: deep orange
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+  features:
+    - navigation.top
+    - toc.follow
+    - content.code.copy
+
+nav:
+  - Home: index.md
+  - Usage guide: usage.md
+  - Advanced guide: advanced.md
+  - API reference: api.md
+  - Security: security.md
+  - Changelog: changelog.md
+
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          options:
+            # The codebase uses NumPy-style docstring sections
+            # ("Parameters\n----------", "Raises", ...).
+            docstring_style: numpy
+            heading_level: 3
+            show_root_heading: true
+            show_source: false
+            members_order: source
+            separate_signature: true
+            show_signature_annotations: true
+            signature_crossrefs: true
+            filters: ["!^_"]
+
+markdown_extensions:
+  - admonition
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.highlight
+  - pymdownx.superfences
+  - pymdownx.snippets:
+      # Lets docs pages include repo-root files (SECURITY.md, CHANGELOG.md)
+      # verbatim, keeping a single source of truth.
+      base_path: [.]
+      check_paths: true
+
+watch:
+  - src/colorsense
+  - SECURITY.md
+  - CHANGELOG.md

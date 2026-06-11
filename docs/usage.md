@@ -2,7 +2,7 @@
 
 This guide covers `analyze`'s options, the structure of the result it returns, the errors
 it raises, and the fetch policy. For installation and a minimal example, see the
-[README](../README.md); for design-token auditing and tuning the classifier, see the
+[overview](index.md); for design-token auditing and tuning the classifier, see the
 [advanced guide](advanced.md).
 
 ## Calling `analyze`
@@ -48,7 +48,7 @@ is the one kept. Everything derived per theme (`usage`, `roles`, `fit_score`,
 classification — via `asyncio.timeout`. On expiry, in-flight renders are cancelled, the
 shared browser is closed, and `AnalysisTimeoutError` is raised (a `TimeoutError` subclass
 carrying the URL and budget). There is no deadline by default; set one wherever a stalling
-page must not stall you (see [SECURITY.md](../SECURITY.md) §2). Must be positive when set.
+page must not stall you (see [SECURITY.md](https://github.com/cassidyhhaas/colorsense/blob/main/SECURITY.md) §2). Must be positive when set.
 
 ### Browser launch arguments
 
@@ -62,7 +62,7 @@ result = await analyze(url, browser_args=("--js-flags=--max-old-space-size=512",
 ```
 
 This bounds the **JS heap only**, not total renderer memory — hard per-render memory/CPU
-caps are the container/cgroup layer's job (see [SECURITY.md](../SECURITY.md) §2). The
+caps are the container/cgroup layer's job (see [SECURITY.md](https://github.com/cassidyhhaas/colorsense/blob/main/SECURITY.md) §2). The
 library does not validate the flags themselves; non-string entries (or a bare string
 instead of a tuple) raise `TypeError` before any render.
 
@@ -95,19 +95,19 @@ stdout carries data only; warnings and errors go to stderr.
 | `--scale FLOAT` | Device scale factor (default `1.0`). |
 | `--config PATH` | Palette config YAML overriding the bundled default (`config_path`). |
 | `--max-total-seconds FLOAT` | Overall deadline per URL; unset by default. |
-| `--browser-arg TEXT` | Extra Chromium launch argument, passed verbatim (`browser_args`); repeatable. E.g. `--browser-arg='--js-flags=--max-old-space-size=512'` caps each renderer's V8 heap (JS heap only; see [SECURITY.md](../SECURITY.md) §2). |
+| `--browser-arg TEXT` | Extra Chromium launch argument, passed verbatim (`browser_args`); repeatable. E.g. `--browser-arg='--js-flags=--max-old-space-size=512'` caps each renderer's V8 heap (JS heap only; see [SECURITY.md](https://github.com/cassidyhhaas/colorsense/blob/main/SECURITY.md) §2). |
 | `--min-interval FLOAT` | Seconds between same-host fetches (default `1.0`). |
 | `--user-agent TEXT` | Wire User-Agent. Default: a CLI-identifying UA (`colorsense-cli/<version> (+repo URL)`); pass your own to identify *your* application. |
 | `--tokens` | Include the declared design tokens per theme (`include_tokens=True`); the human output prints name, hex, and semantic role. |
 | `--block-private-networks` | Install `block_private_networks()` as the policy's egress `request_filter`. |
-| `--no-robots` | Disable the `robots.txt` check (and its `Crawl-delay` honoring). An explicit, accountable choice — only for sites you own or are authorized to crawl (see [SECURITY.md](../SECURITY.md) §3); the CLI warns on stderr when used. |
+| `--no-robots` | Disable the `robots.txt` check (and its `Crawl-delay` honoring). An explicit, accountable choice — only for sites you own or are authorized to crawl (see [SECURITY.md](https://github.com/cassidyhhaas/colorsense/blob/main/SECURITY.md) §3); the CLI warns on stderr when used. |
 | `--json` | Emit the full `AnalysisResult` as JSON. stdout is always exactly one valid JSON document: one object for a single URL (`null` if it failed), an array of the successful results for multiple URLs (`[]` if all failed). |
 | `--version` | Print the installed version and exit. |
 
 The default (no `--json`) output prints, per theme, the usage view first — each
 category's entries with hex, probability, and area — then the roles summary with the fit
 score, any divergence, and (under `--tokens`) the declared tokens, in the spirit of
-[`examples/quickstart.py`](../examples/quickstart.py).
+[`examples/quickstart.py`](https://github.com/cassidyhhaas/colorsense/blob/main/examples/quickstart.py).
 
 ## The result
 
@@ -221,7 +221,7 @@ policy** — whether a fetch is authorized is the consumer's decision, made *bef
   the robots URL and every redirect hop it follows are vetted before being requested, and
   a rejected hop aborts the robots fetch (which then fails open as "no rules") while the
   navigation itself stays filtered browser-side. Raising — sync or async — fails closed.
-  This is the in-library SSRF mechanism; see [SECURITY.md](../SECURITY.md).
+  This is the in-library SSRF mechanism; see [SECURITY.md](https://github.com/cassidyhhaas/colorsense/blob/main/SECURITY.md).
   `block_private_networks()` builds one (async) for the common case: it resolves each
   hostname and rejects URLs resolving to private/loopback/link-local (metadata)/CGNAT/other
   non-public addresses, failing closed, with an optional narrowing `allowed_hosts`
@@ -234,7 +234,7 @@ policy** — whether a fetch is authorized is the consumer's decision, made *bef
   from multiple event loops raises `RuntimeError` (detected best-effort; it fails closed
   through `request_filter`). Create a separate predicate per event loop for that.
 - **`max_concurrent_renders`** — optional cap on simultaneous renders through the policy
-  (unbounded by default — set it on servers; see [SECURITY.md](../SECURITY.md) §2). Cache
+  (unbounded by default — set it on servers; see [SECURITY.md](https://github.com/cassidyhhaas/colorsense/blob/main/SECURITY.md) §2). Cache
   hits and coalesced duplicate fetches never count against the cap, and a fetch waiting out
   the rate limiter holds no slot. Share one policy instance to make the cap process-wide.
 - **`max_cache_entries`** — bound on the URL→render LRU cache (256 by default).
@@ -260,5 +260,5 @@ Choose your posture by where colorsense runs:
 
 If untrusted or user-supplied URLs can reach `analyze` from a server, you are exposed to
 SSRF and resource-exhaustion risks beyond what the policy controls. The threat model and
-the controls you must enforce are documented in [SECURITY.md](../SECURITY.md) — read it
+the controls you must enforce are documented in [SECURITY.md](https://github.com/cassidyhhaas/colorsense/blob/main/SECURITY.md) — read it
 before exposing `analyze` to untrusted input.

@@ -73,7 +73,7 @@ must enforce your own guard rails before and around the call**:
 
 If you accept untrusted URLs and skip these steps, you have an SSRF vulnerability. A
 reference implementation wiring these controls together (plus the §2 concurrency cap and
-deadline) lives in [`examples/webservice/`](examples/webservice/) — a starting point, not
+deadline) lives in [`examples/webservice/`](https://github.com/cassidyhhaas/colorsense/tree/main/examples/webservice) — a starting point, not
 a substitute for network isolation.
 
 ## 2. Resource exhaustion & denial of service
