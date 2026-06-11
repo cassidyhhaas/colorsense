@@ -17,16 +17,33 @@
         "text"
       ],
       "top_role_colors": {
-        "accent": "#ea580c",
-        "neutral_dark": "#1a1a1a",
-        "neutral_light": "#f1f4f9",
-        "primary": "#f1f4f9",
-        "secondary": "#0c9488"
+        "accent": [
+          "#ea580c"
+        ],
+        "neutral_dark": [
+          "#1a1a1a"
+        ],
+        "neutral_light": [
+          "#f1f4f9"
+        ],
+        "primary": [
+          "#f1f4f9"
+        ],
+        "secondary": [
+          "#0c9488",
+          "#f1f4f9"
+        ]
       },
       "top_usage_colors": {
-        "interactive": "#ea580c",
-        "surface": "#f1f4f9",
-        "text": "#1a1a1a"
+        "interactive": [
+          "#ea580c"
+        ],
+        "surface": [
+          "#f1f4f9"
+        ],
+        "text": [
+          "#1a1a1a"
+        ]
       }
     }
   },

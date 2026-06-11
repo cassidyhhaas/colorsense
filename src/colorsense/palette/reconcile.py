@@ -180,7 +180,10 @@ def _pool_category(
     # collapses to ``intent**alpha`` — a near-uniform spread where everything survives
     # pruning (the live-probe failure: 16 token-only "borders" with no rendered border
     # anywhere). Honest emptiness beats intent-only noise; declared intent for the
-    # category still surfaces through the divergence report. When measurement EXISTS,
+    # category can still surface through the divergence report — though only when the
+    # declared color has no perceptual match (DELTA_E_MATCH) among measured usage in ANY
+    # category (e.g. a near-white border token on a white-surfaced page reads as "used"
+    # and stays silent). When measurement EXISTS,
     # token-only colors stay in the universe: pooling against real usage mass crushes
     # them naturally unless intent is strong enough to clear MIN_POSTERIOR_PROB.
     if not usage_entries:

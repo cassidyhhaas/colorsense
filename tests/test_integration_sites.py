@@ -18,8 +18,9 @@ from __future__ import annotations
 
 import json
 import os
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 
 import pytest
 from conftest import file_policy
@@ -43,6 +44,12 @@ FIT_SCORE_TOL = 0.05
 # differ across OSes (≈0.06 observed between macOS and Linux Chromium), so these colors
 # are matched perceptually, never by exact hex. Well below cross-hue distances (~0.37).
 COLOR_MATCH_TOL = 0.10
+# Probability margin under which the top candidates of a role/category count as
+# co-dominant. Screenshot-derived area weights drift across OSes, so a near-tie's winner
+# is effectively a coin flip there (cards_site roles.secondary sits at 0.511/0.489);
+# the digest records ALL co-dominant hexes and the check accepts the actual winner
+# matching any of them, instead of over-pinning one side of the tie.
+NEAR_TIE_MARGIN = 0.05
 
 # The site tests drive a real Chromium render and are marked ``browser`` individually
 # (not via module-level ``pytestmark``) so the browserless unit tests of the golden
@@ -75,6 +82,25 @@ def _color_near(colors: list[Color], target_hex: str) -> bool:
     return any(delta_e(color, target) <= COLOR_MATCH_TOL for color in colors)
 
 
+class _RankedColor(Protocol):
+    """Common shape of ``PaletteCandidate`` and ``UsageEntry`` for digest purposes."""
+
+    @property
+    def color(self) -> Color: ...
+    @property
+    def probability(self) -> float: ...
+
+
+def _co_dominant_hexes(candidates: Sequence[_RankedColor]) -> list[str]:
+    """Hexes of the argmax candidate plus runners-up within :data:`NEAR_TIE_MARGIN`.
+
+    Candidates arrive probability-descending (ties by hex), so the result is
+    deterministic and its first element is always the actual winner.
+    """
+    top = candidates[0].probability
+    return [c.color.hex for c in candidates if c.probability >= top - NEAR_TIE_MARGIN]
+
+
 def _theme_structure(palette: ThemePalette) -> dict[str, Any]:
     """A compact, deterministic structural summary of one theme's reconciled palette.
 
@@ -82,29 +108,32 @@ def _theme_structure(palette: ThemePalette) -> dict[str, Any]:
 
     * ``populated_roles`` — the sorted set of :class:`PaletteRole`s that have >=1 candidate
       (purely structural: which slots the pipeline managed to fill). Compared exactly.
-    * ``top_role_colors`` — the dominant (argmax) candidate hex per populated role.
+    * ``top_role_colors`` — per populated role, the **co-dominant** candidate hexes: the
+      argmax winner plus any runner-up within :data:`NEAR_TIE_MARGIN` probability of it
+      (usually a single hex; two on a genuine near-tie).
 
     * ``populated_usage`` / ``top_usage_colors`` — the same two signals for the primary,
-      usage-keyed view (which usage categories were filled, and the dominant hex each).
+      usage-keyed view (which usage categories were filled, and the co-dominant hexes each).
 
     The top-entry hexes are screenshot-derived and carry cross-OS anti-aliasing/gamma
-    drift (≈0.01 ΔE observed between macOS and Linux Chromium), so the golden stores a
-    reference hex but :func:`_check_golden` compares them *perceptually* within
-    :data:`COLOR_MATCH_TOL`, never by exact string — this catches dominance/color
-    regressions without flaking across the OS the goldens were generated on. Roles and
-    categories are emitted in a stable, sorted order so the digest is deterministic.
+    drift (≈0.01 ΔE observed between macOS and Linux Chromium), so the golden stores
+    reference hexes but :func:`_check_golden` compares the actual winner *perceptually*
+    against any of them within :data:`COLOR_MATCH_TOL`, never by exact string — this
+    catches dominance/color regressions without flaking across the OS the goldens were
+    generated on or across which side of a near-tie wins. Roles and categories are
+    emitted in a stable, sorted order so the digest is deterministic.
     """
     mapping = palette.roles.mapping
     populated = sorted(str(role) for role, cands in mapping.items() if cands)
     top_colors = {
-        str(role): cands[0].color.hex
+        str(role): _co_dominant_hexes(cands)
         for role, cands in sorted(mapping.items(), key=lambda kv: str(kv[0]))
         if cands
     }
     usage_mapping = palette.usage.mapping
     populated_usage = sorted(str(cat) for cat, entries in usage_mapping.items() if entries)
     top_usage_colors = {
-        str(cat): entries[0].color.hex
+        str(cat): _co_dominant_hexes(entries)
         for cat, entries in sorted(usage_mapping.items(), key=lambda kv: str(kv[0]))
         if entries
     }
@@ -156,8 +185,10 @@ def _check_golden(name: str, digest: dict[str, Any], golden_dir: Path = GOLDEN_D
 
     * ``fit_score`` — within :data:`FIT_SCORE_TOL`.
     * ``theme_structure`` — ``populated_roles`` / ``populated_usage`` exact;
-      ``top_role_colors`` / ``top_usage_colors`` perceptually, within
-      :data:`COLOR_MATCH_TOL` ΔE (screenshot-derived hexes drift across OSes).
+      ``top_role_colors`` / ``top_usage_colors``: the actual *winner* (first co-dominant)
+      must perceptually match ANY of the golden's co-dominant hexes within
+      :data:`COLOR_MATCH_TOL` ΔE (screenshot-derived hexes drift across OSes, and a
+      near-tie's winner may legitimately flip — see :data:`NEAR_TIE_MARGIN`).
     * everything else (themes, token classifications, ``single_theme``,
       ``has_divergence``) — computed-style/structural, compared exactly.
     """
@@ -197,14 +228,21 @@ def _check_golden(name: str, digest: dict[str, Any], golden_dir: Path = GOLDEN_D
                 f"{name}/{theme}: {color_key} keys {sorted(act_colors)} "
                 f"!= golden {sorted(exp_colors)}"
             )
-            for key, exp_hex in exp_colors.items():
-                act_hex = act_colors[key]
-                act_color, exp_color = parse_css_color(act_hex), parse_css_color(exp_hex)
-                assert act_color is not None and exp_color is not None
-                drift = delta_e(act_color, exp_color)
-                assert drift <= COLOR_MATCH_TOL, (
-                    f"{name}/{theme}/{color_key}/{key}: color {act_hex} drifted "
-                    f"{drift:.4f} ΔE from golden {exp_hex} (tol {COLOR_MATCH_TOL})"
+            for key, exp_hexes in exp_colors.items():
+                # The actual winner must match ANY recorded co-dominant hex; which side
+                # of a near-tie wins is OS-dependent and deliberately not pinned.
+                act_hex = act_colors[key][0]
+                act_color = parse_css_color(act_hex)
+                assert act_color is not None
+                drifts: list[float] = []
+                for exp_hex in exp_hexes:
+                    exp_color = parse_css_color(exp_hex)
+                    assert exp_color is not None
+                    drifts.append(delta_e(act_color, exp_color))
+                assert min(drifts) <= COLOR_MATCH_TOL, (
+                    f"{name}/{theme}/{color_key}/{key}: winner {act_hex} drifted "
+                    f"{min(drifts):.4f} ΔE from every golden co-dominant {exp_hexes} "
+                    f"(tol {COLOR_MATCH_TOL})"
                 )
 
     assert digest == expected, f"{name}: digest diverged from golden (run UPDATE_GOLDEN=1)"
@@ -434,9 +472,9 @@ def _unit_digest() -> dict[str, Any]:
         "theme_structure": {
             "light": {
                 "populated_roles": ["accent", "primary"],
-                "top_role_colors": {"accent": "#2563eb", "primary": "#ffffff"},
+                "top_role_colors": {"accent": ["#2563eb"], "primary": ["#ffffff"]},
                 "populated_usage": ["interactive", "surface"],
-                "top_usage_colors": {"interactive": "#2563eb", "surface": "#ffffff"},
+                "top_usage_colors": {"interactive": ["#2563eb"], "surface": ["#ffffff"]},
             }
         },
         "fit_score": 0.8123,
@@ -491,3 +529,30 @@ def test_check_golden_matches_and_mismatches(
     changed["has_divergence"] = True
     with pytest.raises(AssertionError):
         _check_golden("unit_site", changed, golden_dir=tmp_path)
+
+
+def test_check_golden_near_tie_accepts_either_winner(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A golden recording two co-dominant hexes accepts either as the actual winner.
+
+    Regression guard for the cards_site secondary near-tie (0.511/0.489): cross-OS
+    screenshot drift may flip which side wins, and the digest must not pin one side.
+    A winner matching NEITHER co-dominant must still fail.
+    """
+    monkeypatch.setenv("UPDATE_GOLDEN", "1")
+    tied = _unit_digest()
+    # Teal vs near-white: far beyond COLOR_MATCH_TOL of each other.
+    tied["theme_structure"]["light"]["top_role_colors"]["accent"] = ["#0c9488", "#f1f4f9"]
+    _check_golden("tied_site", dict(tied), golden_dir=tmp_path)
+    monkeypatch.delenv("UPDATE_GOLDEN")
+
+    for winner in ("#0c9488", "#f1f4f9"):
+        flipped = _unit_digest()
+        flipped["theme_structure"]["light"]["top_role_colors"]["accent"] = [winner]
+        _check_golden("tied_site", flipped, golden_dir=tmp_path)
+
+    neither = _unit_digest()
+    neither["theme_structure"]["light"]["top_role_colors"]["accent"] = ["#ff0000"]
+    with pytest.raises(AssertionError, match="co-dominant"):
+        _check_golden("tied_site", neither, golden_dir=tmp_path)

@@ -16,10 +16,15 @@
         border_presence feature family can measure them;
      4. a green CTA styled like GitHub Primer's react button (class
         `prc-Button-ButtonBase-*`, matched via the `button` class-token rule)
-        that must survive in usage.interactive against many links (log1p
-        vote-mass damping);
+        that must appear in usage.interactive. NOTE: 5 links are too few to
+        reproduce the live drowning that motivated log1p vote-mass damping —
+        that profile (~200 link votes vs one CTA) is pinned by the unit test
+        test_single_cta_survives_against_many_links in test_palette_usage.py;
      5. declared-but-never-rendered exotic border tokens (the token-flood
         regression): they must NOT surface as empty-components usage entries.
+        NOTE: all four categories measure non-zero here, so this asserts the
+        no-empty-components invariant; the empty-category reconcile gate
+        itself is pinned by unit tests in test_palette_reconcile.py.
 
      Exactly TWO .card siblings — deliberately below the repetition detector's
      min_siblings (3), so the cards' border vote is not crushed by repetition

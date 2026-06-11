@@ -66,8 +66,9 @@ measurement gaps the fixtures had masked; all are now encoded as offline fixture
   candidates now yields an empty posterior instead of a near-uniform flood of token-only
   colors (github.com's `usage.border` was 16 never-rendered theme tokens, every entry
   with empty `components`). Honest emptiness beats intent-only noise; declared intent for
-  an unmeasured category still surfaces through `divergence`, and token-only colors still
-  pool normally whenever the category has real measurement.
+  an unmeasured category can still surface through `divergence` (when its color has no
+  perceptual match among measured usage), and token-only colors still pool normally
+  whenever the category has real measurement.
 - **`border_presence` feature family** (config YAML): any element whose harvested border
   is genuinely painted (width-gated) now votes `border`. Previously only the `<input>`
   semantic rule voted `border`, so pages without classified inputs measured zero border
