@@ -27,11 +27,14 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   attacker-influenced redirect hostnames could previously trigger up to 21 on-loop lookups
   per fetch. The injectable `Resolver` seam stays synchronous (it now runs inside the
   worker thread); the TTL+LRU verdict cache and the DNS-rebinding caveat are unchanged.
-- `block_private_networks()` predicates now enforce their single-event-loop contract
-  explicitly: the first call pins the predicate to the running loop, and invoking it from
-  a different loop (e.g. reusing one predicate across separate `asyncio.run` calls) raises
-  `RuntimeError` instead of risking loop-bound-Future misuse. Through the `request_filter`
-  seam that raise fails closed; create a separate predicate per event loop.
+- **Breaking:** `block_private_networks()` predicates are now pinned to one event loop:
+  the first call binds the predicate to the running loop, and invoking it from any other
+  loop raises `RuntimeError`. This *tightens* the previous contract — reusing one predicate
+  across sequential `asyncio.run` calls used to be safe (in-flight futures were always
+  cleaned up between runs) and is now rejected, trading that pattern (and its cross-run
+  verdict cache) for a contract simple enough to hold under concurrent multi-loop use.
+  Through the `request_filter` seam the raise fails closed — requests are silently aborted,
+  so only direct callers see the error. Create a separate predicate per event loop.
 - The `examples/webservice/` reference implementation is restructured from a single
   `app.py` into an idiomatic mini FastAPI layout (`main.py`, `settings.py`, `policy.py`,
   `schemas.py`, `routes.py`; `url_guard.py` unchanged). No behavior or security-control

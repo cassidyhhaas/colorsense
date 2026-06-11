@@ -54,7 +54,7 @@ async def wait_until(condition: Callable[[], bool], description: str, timeout: f
 
     try:
         await asyncio.wait_for(poll(), timeout=timeout)
-    except TimeoutError:  # pragma: no cover - only reached on regression
+    except TimeoutError:  # only reached on regression
         pytest.fail(f"timed out after {timeout}s waiting until {description}")
 
 

@@ -168,8 +168,9 @@ class _PrivateNetworkBlocker:
         The single-flight Futures in ``self._inflight`` (and the loop-thread-only cache)
         are bound to one event loop, so cross-loop use would corrupt shared state or hang
         waiters. Raising here is fail-closed at the ``request_filter`` seam
-        (``evaluate_request_filter`` turns it into ``False``) while making the misuse
-        diagnosable.
+        (``evaluate_request_filter`` turns it into ``False``, so misuse there shows up as
+        every request from the wrong loop being aborted); the error itself is only
+        visible to direct callers.
         """
         loop = asyncio.get_running_loop()
         if self._loop is None:
@@ -292,8 +293,10 @@ def block_private_networks(
     ``asyncio.Future``\\ s, so each returned predicate must only be used from one event
     loop — the loop of its first call, which it pins itself to. Awaiting it from a
     different loop (e.g. reusing one predicate across separate ``asyncio.run`` calls)
-    raises :class:`RuntimeError`; through ``request_filter`` that raise fails closed, and
-    the explicit error makes the misuse diagnosable. Create a separate predicate per loop.
+    raises :class:`RuntimeError`. Direct callers see that error; through ``request_filter``
+    it fails closed instead, so misuse there manifests as every request from the wrong
+    loop being aborted. Create a separate predicate per loop. (Stricter than 0.3.0, where
+    *sequential* cross-loop reuse happened to be safe.)
 
     Parameters
     ----------
