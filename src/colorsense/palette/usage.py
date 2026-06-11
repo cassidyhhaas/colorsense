@@ -15,21 +15,18 @@ Design notes
   code-level convention, exactly like the inventory's component → color-channel routing
   (``palette/inventory.py``'s ``_channel_for``): it describes what the taxonomy *means*,
   not a tunable weight, so it lives in code rather than the YAML config.
-* Prominence is scored differently per category, deliberately:
+* Prominence is scored differently per category, deliberately (worked examples in
+  docs/how-it-works.md):
     - **surface**: prominence ∝ the cluster's screenshot ``area_weight``. Area is the
-      authoritative signal for surfaces — ranking by vote count would let 30 repeated
-      cards outrank an 86%-area page background. Only clusters with nonzero surface
-      vote mass participate (area alone does not prove a color is a surface).
+      authoritative signal for surfaces — vote counts would let repeated small elements
+      outrank the page background. Only clusters with nonzero surface vote mass
+      participate (area alone does not prove a color is a surface).
     - **text / interactive / border**: prominence ∝ ``log1p`` of the cluster's raw vote
-      mass in that category. These paint negligible screenshot area, so area is *not* a
-      useful ranking signal there; how many elements use the color is — but only
-      **sub-linearly**. Raw (linear) mass let element *count* drown high-confidence
-      single-element evidence: on github.com ~200 link votes (clusters with mass 93/55/48)
-      pushed the lone green CTA (``cta_bg`` mass 1.0) to a 0.005 share, below
-      :data:`MIN_SHARE` — the brand accent vanished from ``interactive``. ``log1p`` is
-      monotonic, so within-category *ordering* is unchanged; only the shares compress
-      (the CTA's share becomes ~0.04 and survives), while genuinely tiny masses
-      (``log1p(0.05) ≈ 0.05``) still prune.
+      mass in that category. These paint negligible screenshot area; vote mass ranks
+      them, but only **sub-linearly** — raw (linear) mass let element *count* drown
+      high-confidence single-element evidence. ``log1p`` is monotonic, so within-category
+      *ordering* is unchanged; only the shares compress, while genuinely tiny masses
+      still prune.
 * Everything is deterministic: iteration is over stable sort orders, ties are broken by
   color ``hex``, and there is no randomness.
 """
