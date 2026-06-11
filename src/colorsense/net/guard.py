@@ -11,26 +11,10 @@ RFC 1918, link-local (including the cloud metadata endpoint 169.254.169.254), CG
 failures fail **closed**. This is the shipped mechanism for the SECURITY.md §1
 "filter egress in-library" item.
 
-Honest limits — read before relying on this filter alone:
-
-* **DNS rebinding is not fully defeated.** The predicate sees URL *strings*; Chromium
-  resolves hostnames independently when it actually connects. A hostname can resolve to a
-  public address when this filter checks it and to an internal one moments later when the
-  browser connects. Per SECURITY.md, network isolation of the browser environment (egress
-  firewalling, no route to internal ranges) remains the primary control; this filter is
-  defense in depth, not a substitute.
-* **Resolution runs off the event loop, but it still costs.** The predicate is **async**
-  (only usable under a running loop, designed for the ``request_filter`` seam): on a cache
-  miss the blocking ``getaddrinfo`` runs on a worker thread via ``asyncio.to_thread``, so a
-  slow nameserver costs a worker thread plus latency for that host's requests only — never
-  a loop stall. Per-host verdicts are TTL+LRU cached, and concurrent misses for one host
-  coalesce into a single lookup, so a page fanning out requests to a novel hostname cannot
-  exhaust the thread pool with duplicate resolutions. The coalescing futures are
-  loop-bound, so each predicate serves one event loop *at a time*: sequential reuse
-  across loops (e.g. back-to-back ``asyncio.run`` calls) is supported — the predicate
-  re-binds to the new loop when idle and keeps its verdict cache — but *concurrent* use
-  from multiple event loops raises ``RuntimeError`` (detected best-effort); create a
-  separate predicate per loop for that.
+The honest limits — DNS rebinding is not fully defeated (network isolation stays the
+primary control), resolution runs off-loop behind a TTL+LRU verdict cache with single-flight
+coalescing, and each predicate serves one event loop at a time — are documented in full on
+:func:`block_private_networks`, the public docstring users see.
 """
 
 from __future__ import annotations
@@ -103,16 +87,9 @@ def _is_public_address(ip: IPAddress) -> bool:
 
 
 class _PrivateNetworkBlocker:
-    """The predicate :func:`block_private_networks` returns; see the factory docstring.
-
-    **Single-event-loop-at-a-time contract:** the single-flight machinery hands out
-    ``asyncio.Future``\\ s created on the loop the predicate runs under, and futures are
-    loop-bound, so one instance must only be awaited from one loop at a time. Sequential
-    reuse across loops (e.g. back-to-back ``asyncio.run`` calls) is supported: when no
-    resolution is in flight the predicate re-binds to the new loop, keeping its plain-data
-    verdict cache. *Concurrent* use from multiple loops raises :class:`RuntimeError`
-    (best-effort detection; the ``request_filter`` seam treats the raise as fail-closed).
-    Create a separate predicate per loop for concurrent use.
+    """The predicate :func:`block_private_networks` returns; see the factory docstring —
+    including the single-event-loop-at-a-time contract its single-flight futures impose
+    (enforcement mechanics in :meth:`_check_loop_affinity`).
     """
 
     def __init__(
@@ -138,17 +115,10 @@ class _PrivateNetworkBlocker:
         # In-flight resolution coalescing (single-flight): concurrent misses for the same
         # host await one shared Future instead of each dispatching a worker-thread lookup —
         # otherwise a page fanning N requests at one slow novel hostname pins N executor
-        # threads on the same getaddrinfo. Futures are loop-bound, so the predicate serves
-        # one loop at a time (_check_loop_affinity): it re-binds to a new loop only when
-        # this dict is empty, and a non-empty dict on a different loop means concurrent
-        # cross-loop use — refused.
+        # threads on the same getaddrinfo. The Futures are loop-bound; emptiness of this
+        # dict is what lets _check_loop_affinity re-bind to a new loop.
         self._inflight: dict[str, asyncio.Future[bool]] = {}
-        # The event loop currently served, pinned on first use and re-pinned when the
-        # predicate is reused from another loop while idle (sequential asyncio.run
-        # handoff). Concurrent cross-loop misuse is enforced (not just documented) so it
-        # surfaces as a diagnosable RuntimeError — which the request_filter seam fails
-        # closed on — instead of a confusing "Future attached to a different loop" deep in
-        # the single-flight path.
+        # The event loop currently served (see _check_loop_affinity).
         self._loop: asyncio.AbstractEventLoop | None = None
 
     async def __call__(self, url: str) -> bool:

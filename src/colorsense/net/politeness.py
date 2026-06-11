@@ -267,9 +267,9 @@ class PolitenessPolicy:
         context). Defaults to :data:`DEFAULT_USER_AGENT`.
     robots_agent:
         The product token matched against ``robots.txt`` ``User-agent:`` groups by
-        :meth:`can_fetch`. Kept separate from ``user_agent`` because the descriptive wire UA
-        begins with a browser token, so matching on it would ignore agent-specific rules.
-        Defaults to :data:`DEFAULT_ROBOTS_AGENT` (``"colorsense"``).
+        :meth:`can_fetch`. Kept separate from ``user_agent`` so site-specific robots groups
+        still match — see :data:`DEFAULT_ROBOTS_AGENT` (the default, ``"colorsense"``) for
+        the prefix-matching rationale.
     respect_robots:
         When ``True`` (default), :meth:`can_fetch` consults ``robots.txt`` and
         :meth:`fetch` raises :class:`RobotsDisallowedError` on a disallow. Set ``False`` to
@@ -362,10 +362,7 @@ class PolitenessPolicy:
         if max_concurrent_renders is not None and max_concurrent_renders < 1:
             raise ValueError("max_concurrent_renders must be >= 1 (or None for unbounded)")
         self.max_concurrent_renders = max_concurrent_renders
-        # Lazily created inside the running loop (see _render_slots): asyncio primitives
-        # bind to the loop they are first awaited on, so creating it here (often outside
-        # any loop) or pinning it to one loop would break a policy reused across
-        # sequential ``asyncio.run`` calls.
+        # Created lazily inside the running loop — see _render_slots for why.
         self._render_semaphore: asyncio.Semaphore | None = None
         self._render_semaphore_loop: asyncio.AbstractEventLoop | None = None
         self.min_interval = min_interval
@@ -431,10 +428,8 @@ class PolitenessPolicy:
         """Load and memoize a parser for ``robots_url``; ``None`` when no rules apply."""
         if robots_url in self._robots_cache:
             return self._robots_cache[robots_url]
-        # The configured wire UA identifies the robots GET, same as the page render; the
-        # egress filter rides along so the loader gates the robots URL and every redirect
-        # hop — without it, a robots redirect would be a server-side SSRF bypassing the
-        # browser-route filter.
+        # The wire UA and egress filter ride along — see the RobotsLoader seam doc for the
+        # robots-redirect SSRF rationale.
         text = await self._robots_loader(robots_url, self.user_agent, self.request_filter)
         parser: RobotFileParser | None
         if text is None:
@@ -443,10 +438,9 @@ class PolitenessPolicy:
             parser = RobotFileParser()
             parser.parse(text.splitlines())
             # Record the host's ``Crawl-delay`` (for our robots agent) so the rate limiter
-            # can honor it. The netloc key matches ``_last_fetch``. Because the robots GET
-            # is itself the host's first throttled request, the delay learned here only
-            # paces the *second* fetch to the host onward — the first fetch has already
-            # passed the limiter by the time this parser exists.
+            # can honor it; the netloc key matches ``_last_fetch``. As the ``min_interval``
+            # parameter doc explains, the delay learned here only paces the second fetch
+            # to the host onward.
             delay = parser.crawl_delay(self.robots_agent)
             if delay is not None:
                 self._crawl_delay[urlsplit(robots_url).netloc] = float(delay)
@@ -467,9 +461,7 @@ class PolitenessPolicy:
         parser = await self._robots_parser(robots_url)
         if parser is None:
             return True
-        # Match on the bare product token, not the descriptive wire UA: RobotFileParser
-        # matches a ``User-agent`` group by prefix, and the wire UA starts with "Mozilla/5.0",
-        # which would mask any site-specific ``User-agent: colorsense`` rule.
+        # Bare product token, not the wire UA — see DEFAULT_ROBOTS_AGENT for why.
         return parser.can_fetch(self.robots_agent, url)
 
     # -- rate limiting -------------------------------------------------------
@@ -477,10 +469,9 @@ class PolitenessPolicy:
     def _host_interval(self, host: str) -> float:
         """Effective pacing interval for ``host``: ``max(min_interval, capped Crawl-delay)``.
 
-        The crawl delay (when the host's ``robots.txt`` declared one) is clamped to
-        ``max_crawl_delay`` first, so a hostile/typo'd directive cannot stall the pipeline.
-        With ``respect_robots=False`` no robots is ever fetched, ``_crawl_delay`` stays
-        empty, and this reduces to ``min_interval``.
+        The crawl delay is clamped to ``max_crawl_delay`` first (see
+        :data:`DEFAULT_MAX_CRAWL_DELAY` for why). With ``respect_robots=False`` no robots
+        is ever fetched, ``_crawl_delay`` stays empty, and this reduces to ``min_interval``.
         """
         crawl_delay = self._crawl_delay.get(host)
         if crawl_delay is None:
@@ -584,82 +575,61 @@ class PolitenessPolicy:
         A follower whose *own* task is cancelled still raises ``CancelledError`` normally,
         and the cancelled leader still propagates its own ``CancelledError`` to its caller.
         """
-        # Gate the scheme BEFORE the cache lookup: order matters for clarity (each policy
-        # owns its cache, but the gate must visibly come first) and ensures a cached
-        # ``file://`` harvest is never served once file URLs are forbidden.
+        # Scheme gate BEFORE the cache lookup — see the docstring for why order matters.
         self._validate_scheme(url)
         key = _cache_key(url, theme, viewport)
         loop = asyncio.get_running_loop()
-        # Coalesce concurrent misses (single-flight). Each iteration's check sequence
-        # (cache, then ``_inflight``) contains no ``await``, so it is race-free under the
-        # single-threaded event loop: either we find a leader's Future (follower path) or
-        # we fall through and install our own atomically (leader path). The loop exists for
-        # cancellation recovery: a follower whose leader was cancelled comes back around to
-        # re-check the cache and either follow a fresh leader or become one itself.
+        # Single-flight loop (see the docstring). Each iteration's check sequence (cache,
+        # then ``_inflight``) contains no ``await``, so it is race-free under the
+        # single-threaded event loop; the loop itself exists for re-election after a
+        # leader's cancellation.
         while True:
             cached = self._cache.get(key)
             if cached is not None:
-                # A hit is fresh usage: move it to the most-recently-used end so it survives
-                # eviction. Safe under the single-threaded event loop (no await in between).
-                # On a re-election iteration this also catches a render that completed in
-                # the meantime, so it is never redone.
+                # Cache hit (also catches a render that completed during re-election);
+                # mark most-recently-used.
                 self._cache.move_to_end(key)
                 return cached
             existing = self._inflight.get(key)
             if existing is None:
                 break  # no leader in flight — fall through and become the leader
-            # Follower: share the leader's single render; do not re-run robots/throttle/
-            # render. ``asyncio.shield`` keeps the follower's OWN cancellation from
+            # Follower path. ``asyncio.shield`` keeps the follower's OWN cancellation from
             # cancelling the shared future (which the leader and other followers still
             # use) and lets the two cancellation sources be told apart below.
             try:
                 return await asyncio.shield(existing)
             except asyncio.CancelledError:
                 if not existing.cancelled():
-                    # The shared future is intact, so this CancelledError is the
-                    # follower's own task being cancelled — propagate it normally.
+                    # Shared future intact — the follower's own task was cancelled.
                     raise
-                # The LEADER was cancelled (its fan-out cancels the shared future). That
-                # cancellation belongs to the leader's caller (deadline expiry, client
-                # disconnect), not to this follower — except in the race where the
-                # follower's own cancellation lands in the same tick the future is
-                # cancelled: then the follower's task has a pending ``Task.cancel()``
-                # (``cancelling() > 0``) that must be honored, not swallowed by
-                # re-electing.
+                # The LEADER was cancelled — except in the race where the follower's own
+                # cancellation lands in the same tick the future is cancelled: then the
+                # follower's task has a pending ``Task.cancel()`` (``cancelling() > 0``)
+                # that must be honored, not swallowed by re-electing.
                 current = asyncio.current_task()
                 if current is not None and current.cancelling() > 0:
                     raise
-                # Leader cancelled, follower not: re-elect. Loop back, re-check the cache,
-                # then either follow a fresh leader that registered first or become the
-                # new leader (re-running throttle → robots → render).
-                continue
+                continue  # leader cancelled, follower not: loop back and re-elect
         future: asyncio.Future[Harvest] = loop.create_future()
         self._inflight[key] = future
         try:
-            # Throttle BEFORE the robots gate: the robots.txt GET inside ``can_fetch`` is
-            # itself the first network request to this host, so it must respect the per-host
-            # limiter too (otherwise the very first request to a host is un-throttled). One
-            # reservation covers both the robots GET and the page nav that follow — they are
-            # a single logical visit, so we deliberately do not pace them a full interval
-            # apart. ``can_fetch`` fails OPEN (timeout/404/error => allow), so a throttled
-            # robots fetch never turns a transient error into a block.
+            # Throttle BEFORE the robots gate so the robots.txt GET inside ``can_fetch`` —
+            # the first network request to this host — is itself paced. One reservation
+            # covers both the robots GET and the page nav: a single logical visit,
+            # deliberately not paced a full interval apart. ``can_fetch`` fails OPEN
+            # (timeout/404/error => allow), so a throttled robots fetch never turns a
+            # transient error into a block.
             await self._throttle(url)
             if not await self.can_fetch(url):
                 raise RobotsDisallowedError(url)
-            # The render slot (when ``max_concurrent_renders`` is set) wraps STRICTLY the
-            # harvester await — deliberately not the throttle/robots sequence above. The
-            # alternative (acquire around throttle+robots+render) is simpler but means a
-            # leader sleeping out a long per-host ``Crawl-delay`` holds a slot the whole
-            # time, starving renders to unrelated hosts; with this placement a slot is only
-            # ever held while a browser is genuinely rendering. Cache hits and single-flight
-            # followers returned earlier and never reach this point, so neither takes a slot.
+            # The render slot wraps STRICTLY the harvester await — see the
+            # ``max_concurrent_renders`` parameter doc for how this composes with the
+            # cache, single-flight, and the throttle/robots wait.
             slots = self._render_slots()
             if slots is not None:
                 await slots.acquire()
             try:
-                # The configured wire UA rides along so the page render is attributable
-                # too, and the egress request filter (if any) gates every request the
-                # browser makes.
+                # The configured wire UA and egress filter ride along (see the param docs).
                 harvest = await self._harvester(
                     url,
                     theme,
@@ -673,13 +643,10 @@ class PolitenessPolicy:
                 if slots is not None:
                     slots.release()
         except BaseException as err:  # re-raised after fanning out to followers
-            # Fan the failure out to every waiting follower, then re-raise to the leader.
-            # The failure is never cached. Cancellation is special: the leader's
-            # ``CancelledError`` belongs to the leader's caller, so it is NOT set as the
-            # followers' exception — the future is *cancelled* instead, which the shielded
-            # followers detect (``existing.cancelled()``) and recover from by re-electing a
-            # new leader. Both calls are skipped if the future is already resolved, to
-            # avoid InvalidStateError.
+            # Fan the failure out to followers (never cached). Cancellation is NOT set as
+            # the followers' exception — the future is *cancelled* instead, the signal the
+            # shielded followers re-elect on (see the docstring). The ``done()`` guard
+            # avoids InvalidStateError on an already-resolved future.
             if not future.done():
                 if isinstance(err, asyncio.CancelledError):
                     future.cancel()

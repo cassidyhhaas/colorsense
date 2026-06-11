@@ -11,17 +11,14 @@ This module fuses two independent signals about a site's palette, in **usage spa
 
 The two are combined by **log-linear pooling** (a weighted geometric mean) with weight
 ``alpha`` on intent: ``alpha=0`` -> pure usage, ``alpha=1`` -> pure intent. Colors are
-matched across the two sources by nearest-color, with two perceptual ΔE radii: declared
-colors group with each other at the tight :data:`DELTA_E_MATCH` (exact computed values
-on both sides), while measured usage entries match declared colors at the looser
-:data:`DELTA_E_MATCH_MEASURED` (a measured representative can be a screenshot-quantizer
-bin up to the inventory's bg join radius away from the color the author painted).
+matched across the two sources by nearest-color under two perceptual ΔE radii — the
+tight :data:`DELTA_E_MATCH` for declared-vs-declared and the looser
+:data:`DELTA_E_MATCH_MEASURED` for measured-vs-declared (rationale at each constant).
 
 The output is a posterior :class:`UsagePalette` plus a divergence report listing
 declared-but-unused and used-but-undeclared discrepancies. Declared-but-unused items are
-gated to **high-intent** tokens (origin ``relational`` or ``name_rule``);
-``scale``/``alias``/``fallback`` origins are excluded (see docs/how-it-works.md for the
-token-heavy-site failure that motivated the gate).
+gated to **high-intent** tokens (:data:`HIGH_INTENT_ORIGINS`, where the gate's rationale
+lives).
 
 All thresholds are module-level constants, documented and tunable.
 """
@@ -79,7 +76,8 @@ UNDECLARED_MIN_PROB: float = 0.15
 #: Token classification origins eligible to raise a declared-but-unused divergence.
 #: Only direct evidence of author intent qualifies: ``relational`` and ``name_rule``.
 #: ``scale`` members (every shade of a palette scale is "declared" but most are never
-#: meant to render), ``alias`` followers, and ``fallback`` classifications are excluded.
+#: meant to render), ``alias`` followers, and ``fallback`` classifications are excluded
+#: (see docs/how-it-works.md for the token-heavy-site failure that motivated the gate).
 HIGH_INTENT_ORIGINS: frozenset[TokenOrigin] = frozenset(
     {TokenOrigin.relational, TokenOrigin.name_rule}
 )
@@ -293,9 +291,8 @@ def _build_divergence(
 
     items: list[DivergenceItem] = []
 
-    # DECLARED-BUT-UNUSED: token color with high-intent classification (relational or
-    # name_rule origin), intent mass, and no rendered usage match. Low-intent origins
-    # (scale/alias/fallback) are excluded — see the module docstring.
+    # DECLARED-BUT-UNUSED: token color with high-intent classification (see
+    # HIGH_INTENT_ORIGINS), intent mass, and no rendered usage match.
     for gi, group in enumerate(groups):
         intent = intents[gi]
         if not intent:

@@ -20,7 +20,9 @@ Design notes
     - **surface**: prominence ∝ the cluster's screenshot ``area_weight``. Area is the
       authoritative signal for surfaces — vote counts would let repeated small elements
       outrank the page background. Only clusters with nonzero surface vote mass
-      participate (area alone does not prove a color is a surface).
+      participate (area alone does not prove a color is a surface); a zero-area surface
+      cluster (element-only, no screenshot-bin match) scores 0 and prunes naturally
+      unless it ends up the argmax fallback.
     - **text / interactive / border**: prominence ∝ ``log1p`` of the cluster's raw vote
       mass in that category. These paint negligible screenshot area; vote mass ranks
       them, but only **sub-linearly** — raw (linear) mass let element *count* drown
@@ -172,14 +174,10 @@ def build_usage(clusters: list[ColorCluster]) -> UsagePalette:
     for cluster in sorted(clusters, key=lambda c: (-c.area_weight, c.color.hex)):
         for category, masses in _category_masses(cluster).items():
             if category is UsageCategory.surface:
-                # Area is authoritative for surfaces; a zero-area surface cluster
-                # (element-only, no screenshot bin match) scores 0 and prunes naturally
-                # unless it ends up the argmax fallback.
+                # Area-proportional (see the module docstring's Design notes).
                 prominence = cluster.area_weight
             else:
-                # Sub-linear (log1p) in vote mass: monotonic, so ordering matches raw
-                # mass, but repeated same-component votes saturate instead of letting
-                # element count drown one-element evidence (see the module docstring).
+                # Sub-linear in vote mass (see the module docstring's Design notes).
                 prominence = math.log1p(sum(masses.values()))
             per_category[category].append((cluster, prominence, masses))
 
