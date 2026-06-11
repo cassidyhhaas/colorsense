@@ -48,11 +48,7 @@ Run from the repository root (needs the ``examples`` dependency group):
     curl -s -X POST localhost:8000/analyze \
         -H 'content-type: application/json' -d '{"url": "https://example.com"}'
 
-Environment knobs: ``COLORSENSE_ALLOWED_HOSTS`` (comma-separated exact hostnames; unset =
-any public host), ``COLORSENSE_MAX_CONCURRENCY`` (default 2),
-``COLORSENSE_DEADLINE_SECONDS`` (default 60), and ``COLORSENSE_BROWSER_ARGS``
-(whitespace-separated, shell-quoted (shlex) extra Chromium launch args; default caps each
-renderer's V8 heap at 512 MB).
+The environment knobs are documented (and parsed) in ``settings.py``.
 """
 
 from __future__ import annotations
