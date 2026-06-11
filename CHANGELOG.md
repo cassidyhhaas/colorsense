@@ -52,7 +52,45 @@ Other changes riding the redesign:
   they piled votes onto a phantom `#000000` zero-area cluster).
 - Component classifier calibration: the `input` semantic rule's `border` vote is raised
   2.0 → 2.5 so input borders survive softmax pruning (at 2.0 the usage view's border
-  category was structurally empty on input-bearing pages).
+  category was structurally empty on input-bearing pages). (Superseded in the same
+  release by the `border_presence` family below, which generalizes the vote to every
+  element that actually paints a border.)
+
+### Fixed — measurement-layer gaps (live-probe follow-up)
+
+A live acceptance probe of the usage-keyed redesign against github.com exposed
+measurement gaps the fixtures had masked; all are now encoded as offline fixture tests
+(`tests/fixtures/repo_probe_site.html`):
+
+- **Empty-category gate in reconciliation**: a usage category with zero *measured*
+  candidates now yields an empty posterior instead of a near-uniform flood of token-only
+  colors (github.com's `usage.border` was 16 never-rendered theme tokens, every entry
+  with empty `components`). Honest emptiness beats intent-only noise; declared intent for
+  an unmeasured category still surfaces through `divergence`, and token-only colors still
+  pool normally whenever the category has real measurement.
+- **`border_presence` feature family** (config YAML): any element whose harvested border
+  is genuinely painted (width-gated) now votes `border`. Previously only the `<input>`
+  semantic rule voted `border`, so pages without classified inputs measured zero border
+  mass. The `input` rule's own border vote moved into this family, and `border` joined
+  the third-party-damped `brand_components` so vendor widgets don't feed the border
+  palette.
+- **`text_presence` feature family** (config YAML) + `HarvestedElement.has_text`:
+  non-clickable elements with direct (non-descendant) text content now vote `page_text`,
+  so plain `<p>`/`<span>` typography is measured (github.com's muted `#59636e` was absent
+  from `usage.text`). Clickable elements are excluded — their typography is interactive
+  and already routed via the link rules. Relatedly, the repetition detector's
+  `distinct_bg_from_parent` proxy no longer counts fully-transparent (`alpha == 0`)
+  backgrounds, which had turned repeated text spans into false-positive "cards" whose
+  votes crushed the new text votes.
+- **Per-channel inventory join radii**: element text/border colors now match existing
+  entries at the tight cluster radius (0.05 deltaEOK) instead of the loose background
+  radius (0.10), so a near-black body text (`#1f2328`) forms its own usage entry instead
+  of being absorbed into an adjacent dark surface bin.
+- **Log-damped vote-mass prominence** in the usage view: text/interactive/border entries
+  are ranked by `log1p(vote mass)` rather than raw mass. Ordering is unchanged
+  (monotonic), but element *count* no longer drowns high-confidence single-element
+  evidence — github.com's lone green CTA (`#1f883d`) survives against ~200 link votes
+  instead of pruning below the share floor.
 
 ### Added
 

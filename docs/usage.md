@@ -124,7 +124,10 @@ for that theme.
 What colors paint each usage category, reconciled against the site's declared design
 tokens. Walk `palette.usage.mapping[category]` — the mapping always contains every
 `UsageCategory` (`surface`, `text`, `interactive`, `border`), with an empty tuple when
-nothing was detected. Each `UsageEntry` carries:
+nothing was detected. Every entry is backed by **measured** rendering evidence: a category
+with no measured usage stays empty even when declared tokens claim intent for it (the
+intent still surfaces through `divergence`), so `components` is never empty. Each
+`UsageEntry` carries:
 
 - **`color`** — a `Color`: an sRGB `hex` string plus cached **OKLCH** coordinates
   (`lightness`, `chroma`, `hue`) of the composited color, and the source `alpha`. `hex` is

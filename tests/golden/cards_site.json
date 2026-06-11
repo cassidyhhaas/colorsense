@@ -1,5 +1,5 @@
 {
-  "fit_score": 0.8,
+  "fit_score": 0.6783,
   "has_divergence": true,
   "single_theme": true,
   "theme_structure": {
@@ -21,7 +21,7 @@
         "neutral_dark": "#1a1a1a",
         "neutral_light": "#f1f4f9",
         "primary": "#f1f4f9",
-        "secondary": "#f1f4f9"
+        "secondary": "#0c9488"
       },
       "top_usage_colors": {
         "interactive": "#ea580c",

@@ -1,5 +1,5 @@
 {
-  "fit_score": 0.8029,
+  "fit_score": 0.8901,
   "has_divergence": true,
   "single_theme": true,
   "theme_structure": {
@@ -18,22 +18,29 @@
         "text"
       ],
       "top_role_colors": {
-        "accent": "#6a5e45",
-        "neutral_dark": "#2b2b2b",
+        "accent": "#0969da",
+        "neutral_dark": "#0d1017",
         "neutral_light": "#ffffff",
         "primary": "#ffffff",
-        "secondary": "#c14930"
+        "secondary": "#0d1017"
       },
       "top_usage_colors": {
-        "border": "#e2d3c8",
-        "interactive": "#6a5e45",
-        "surface": "#c14930",
-        "text": "#2b2b2b"
+        "border": "#dcdfe2",
+        "interactive": "#0969da",
+        "surface": "#ffffff",
+        "text": "#1f2328"
       }
     }
   },
   "themes": [
     "light"
   ],
-  "tokens": {}
+  "tokens": {
+    "--borderColor-accent-muted": "brand_accent",
+    "--borderColor-danger-muted": "border",
+    "--borderColor-default": "border",
+    "--borderColor-done-muted": "border",
+    "--fgColor-default": "text_body",
+    "--fgColor-muted": "neutral"
+  }
 }

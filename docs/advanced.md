@@ -41,7 +41,13 @@ package and is loaded automatically. It is the single source of truth for:
   priors (how a token's color is expected to be used: surface / text / interactive /
   border);
 - the **component-classifier weights** — how rendered elements are scored into headers,
-  cards, CTAs, and so on.
+  cards, CTAs, and so on. Besides the tag/class/geometry/interactivity rule lists, this
+  includes two *presence* feature families keyed on structural facts about an element:
+  `border_presence` (votes applied to any element that genuinely paints a border — the
+  harvester width-gates the border color) and `text_presence` (votes applied to any
+  non-clickable element with direct text content, so plain `<p>`/`<span>` typography is
+  measured even when no semantic rule matches). Each is a single `{votes: {component:
+  weight}}` mapping; the bundled YAML documents the calibration math next to each weight.
 
 The weights are calibrated starting points, not ground truth. To tune them, copy the
 bundled file, edit your copy, and pass its path as `config_path=` to `analyze` (or load it
@@ -55,8 +61,11 @@ config = load_default_config()
 
 `config_path=` tunes the token vocabulary and the component classifier. The measurement-side
 scoring constants are documented in-code, not part of the YAML: the usage view's pruning
-threshold and component→category routing in
+threshold, component→category routing, and log-damped vote-mass prominence in
 [`palette/usage.py`](../src/colorsense/palette/usage.py) (`MIN_SHARE`, `COMPONENT_USAGE`),
+the per-channel perceptual join radii in
+[`palette/inventory.py`](../src/colorsense/palette/inventory.py) (`DELTA_E_MATCH_BG`,
+`DELTA_E_MATCH_TEXT_BORDER`, `DELTA_E_CLUSTER`),
 and the 60/30/10 role-scoring weights in
 [`palette/roles.py`](../src/colorsense/palette/roles.py) (e.g. `W_AREA`, `SOFTMAX_T`,
 `TARGET_SPLIT`).

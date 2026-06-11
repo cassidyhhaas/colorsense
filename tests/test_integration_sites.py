@@ -351,6 +351,75 @@ async def test_usage_redesign_captures_neutral_layered_design(fixtures_dir: Path
 
 
 # ---------------------------------------------------------------------------
+# Fixture 5 — live-probe regressions, encoded offline. A 2026-06 acceptance probe
+# of github.com/anthropics/claude-code exposed measurement-layer gaps fixture 4
+# missed (its <input> masked the border gap; its <article class="muted"> masked
+# the text gap). See the fixture's own CSS comment for the full inventory.
+# ---------------------------------------------------------------------------
+
+# Tolerance for the no-merge assertions below. An entry's representative color can be
+# a small anti-aliasing screenshot bin within the cluster radius (0.05) of the exact
+# computed color, so the tolerance cannot be tighter than 0.05 — but it MUST stay below
+# the 0.078 gap between the fixture's body text (#1f2328) and its dark code-block
+# surface (#0d1117): a match within 0.05 therefore proves the text did NOT merge into
+# the surface bin (whose representative would sit 0.078 away).
+COMPUTED_COLOR_TOL = 0.05
+
+
+@pytest.mark.browser
+async def test_live_probe_regressions_encoded_offline(fixtures_dir: Path) -> None:
+    result = await _analyze(fixtures_dir / "repo_probe_site.html")
+
+    assert len(result.themes) == 1
+    (palette,) = result.themes.values()
+    usage = palette.usage.mapping
+
+    # THE TOKEN-FLOOD REGRESSION: no usage entry in ANY category may have empty
+    # components — every posterior entry must be backed by measured element votes
+    # (token-only colors either pool into measured entries or stay out entirely).
+    for category, entries in usage.items():
+        for entry in entries:
+            assert entry.components, (category, entry.color.hex)
+
+    # SURFACE: white page dominates; the dark code-block surface is present.
+    surface = usage[UsageCategory.surface]
+    assert _color_near([surface[0].color], "#ffffff")
+    assert _color_near([e.color for e in surface], "#0d1117")
+
+    # TEXT (text_presence + tight text-channel join radius): the near-black body
+    # text forms its OWN entry — it must not have merged into the adjacent dark
+    # code-block bin (0.078 deltaEOK away, inside the old 0.10 bg radius) — and the
+    # plain-span muted gray is measured as a second distinct gray.
+    text_colors = [e.color for e in usage[UsageCategory.text]]
+    body_text = parse_css_color("#1f2328")
+    assert body_text is not None
+    # (The tight tolerance IS the no-merge assertion: had the text merged, the
+    # entry's representative would be the bin color #0d1117 — 0.078 away, far
+    # outside COMPUTED_COLOR_TOL.)
+    assert any(delta_e(c, body_text) <= COMPUTED_COLOR_TOL for c in text_colors)
+    muted = parse_css_color("#59636e")
+    assert muted is not None
+    assert any(delta_e(c, muted) <= COMPUTED_COLOR_TOL for c in text_colors)
+
+    # BORDER (border_presence, NO inputs anywhere): measured, component-backed, and
+    # led by the real card/divider border — not by declared exotic border tokens.
+    border = usage[UsageCategory.border]
+    assert border, "expected border entries"
+    assert border[0].components, "top border entry must carry component evidence"
+    assert _color_near([border[0].color], "#d1d9e0")
+    for unrendered in ("#ff8182", "#a830e8", "#7ae9ff"):
+        assert not _color_near([e.color for e in border], unrendered)
+
+    # INTERACTIVE (log1p damping): the single green Primer-classed CTA survives
+    # against five blue links.
+    interactive_colors = [e.color for e in usage[UsageCategory.interactive]]
+    assert _color_near(interactive_colors, "#0969da")
+    assert _color_near(interactive_colors, "#1f883d")
+
+    _check_golden("repo_probe_site", _digest(result))
+
+
+# ---------------------------------------------------------------------------
 # Browserless unit tests of the golden helper itself
 # ---------------------------------------------------------------------------
 

@@ -12,7 +12,6 @@
         "secondary"
       ],
       "populated_usage": [
-        "border",
         "interactive",
         "surface",
         "text"
@@ -20,15 +19,14 @@
       "top_role_colors": {
         "accent": "#7c3aed",
         "neutral_dark": "#111828",
-        "neutral_light": "#e5e7eb",
+        "neutral_light": "#ffffff",
         "primary": "#111828",
         "secondary": "#2563ea"
       },
       "top_usage_colors": {
-        "border": "#1f2937",
         "interactive": "#f59e0b",
         "surface": "#111828",
-        "text": "#e5e7eb"
+        "text": "#ffffff"
       }
     },
     "light": {
@@ -40,7 +38,6 @@
         "secondary"
       ],
       "populated_usage": [
-        "border",
         "interactive",
         "surface",
         "text"
@@ -53,7 +50,6 @@
         "secondary": "#2563ea"
       },
       "top_usage_colors": {
-        "border": "#f8fafc",
         "interactive": "#f59e0b",
         "surface": "#ffffff",
         "text": "#0f172a"
