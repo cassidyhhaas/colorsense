@@ -129,8 +129,9 @@ weight; the full derivation lives here):
 vote. With temperature 0.5, a vote `v` contributes `e^(v/0.5)` before normalization:
 
 - A bordered card (`card_bg: 3.0` from its class token) computes
-  `e^6 ≈ 403` vs `e^5 ≈ 148`, so `border` keeps probability ≈ 0.27 — comfortably above
-  the 0.05 pruning floor. Same numbers for a bordered text input (`input_bg: 3.0`).
+  `e^6 ≈ 403` vs `e^5 ≈ 148`; the softmax divides each by their sum, so `border` keeps
+  probability `148 / (403 + 148) ≈ 0.27` — comfortably above the 0.05 pruning floor.
+  Same numbers for a bordered text input (`input_bg: 3.0`).
 - A bordered *submit* input accumulates `cta_bg: 7.0` (semantic `input[submit]` 3.5 +
   clickable 1.5 + the `input[submit|button]` interactivity vote 2.0): `e^14 ≈ 1.2×10⁶`
   dwarfs `e^5`, so its border share is ~10⁻⁴ and prunes — button-like inputs stay
@@ -146,7 +147,7 @@ absent from the result, while never-rendered border *tokens* flooded the categor
 **Text presence** — any *non-clickable* element with direct text content gets a
 `page_text: 2.0` vote. A bare `<p>` with no other votes gets `page_text` probability 1.0;
 a text-bearing card (`card_bg: 3.0`) computes `e^6 ≈ 403` vs `e^4 ≈ 55`, so `page_text`
-keeps ≈ 0.12 — measured, without displacing `card_bg`. The 2.0 deliberately stays below
+keeps `55 / (403 + 55) ≈ 0.12` — measured, without displacing `card_bg`. The 2.0 deliberately stays below
 every semantic `*_text` vote (e.g. `body`'s `page_text: 4.0`), so semantic rules dominate
 where they apply. Clickable elements are excluded on purpose: their typography is
 interactive by definition and already routed through the link rules — letting them vote
@@ -171,7 +172,8 @@ truth* into `ColorCluster`s:
    zero-area cluster. Each channel's vote mass is added to the nearest existing entry
    within the channel's **join radius** — or, if nothing is close enough, a new entry
    with `area_weight = 0` is created so the semantics aren't lost.
-3. **Cluster.** Entries within ΔE 0.05 of each other are merged (union-find). Each group
+3. **Cluster.** Entries within ΔE 0.05 of each other are merged transitively
+   (union-find: if A is near B and B is near C, all three become one cluster). Each group
    becomes one `ColorCluster`: the representative color is the member with the largest
    area weight, `area_weight` is the group sum, and the component votes are kept both raw
    (`component_mass` — cross-cluster magnitudes matter later) and normalized
@@ -188,10 +190,11 @@ and the two limits guard against opposite failure modes:
   generous radius is what ties element backgrounds back to their area-truth bins at all.
 - **Text and borders match tightly (0.05).** These come from computed style — exact
   values, not quantized pixels — and dark colors sit perceptually close together in
-  OKLab. At a 0.10 radius, a near-black body text (`#1f2328`) gets absorbed into an
-  adjacent dark surface bin (`#002a36`) instead of forming its own zero-area entry, and
-  the page's text hierarchy disappears from the usage view. The tight radius keeps
-  distinct dark colors distinct.
+  OKLab, so a loose radius would fold a page's near-black text into adjacent dark
+  surface bins and erase its text hierarchy from the usage view. The tight radius
+  bounds that absorption; it does not eliminate it. Colors genuinely within 0.05 of
+  each other still merge — `#1f2328` body text and a `#002a36` surface sit at
+  ΔE ≈ 0.041 and become one cluster — a known limitation of clustering in OKLab.
 
 ### The cross-OS quantizer incident
 
@@ -292,7 +295,9 @@ posterior collapses to `intent^α` — a near-uniform spread where everything su
 pruning. On github.com that meant `usage.border` reported **16 never-rendered theme
 tokens**, every entry with empty components — pure noise presented as measurement. Honest
 emptiness beats intent-only noise. Declared intent for an unmeasured category can still
-surface through the divergence report. When measurement *exists*, token-only colors stay
+surface through the divergence report — but only when the declared color has no
+perceptual match (within 0.10) among measured colors in *any* category; a near-white
+border token on a white-surfaced page reads as "used" and stays silent. When measurement *exists*, token-only colors stay
 in the pool: pooling against real usage mass crushes them naturally unless their intent
 is strong enough to clear the floor.
 
