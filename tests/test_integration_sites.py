@@ -395,12 +395,12 @@ async def test_usage_redesign_captures_neutral_layered_design(fixtures_dir: Path
 # the text gap). See the fixture's own CSS comment for the full inventory.
 # ---------------------------------------------------------------------------
 
-# Tolerance for the no-merge assertions below. An entry's representative color can be
-# a small anti-aliasing screenshot bin within the cluster radius (0.05) of the exact
-# computed color, so the tolerance cannot be tighter than 0.05 — but it MUST stay below
-# the 0.078 gap between the fixture's body text (#1f2328) and its dark code-block
-# surface (#0d1117): a match within 0.05 therefore proves the text did NOT merge into
-# the surface bin (whose representative would sit 0.078 away).
+# Tolerance for the no-merge and token-leak assertions below. An entry's representative
+# color can be a small anti-aliasing screenshot bin within the cluster radius (0.05) of
+# the exact computed color, so the tolerance cannot be tighter than 0.05 — but it MUST
+# stay below the 0.078 gap between the fixture's body text (#1f2328) and its dark
+# code-block surface (#0d1117): a match within 0.05 therefore proves the text did NOT
+# merge into the surface bin (whose representative would sit 0.078 away).
 COMPUTED_COLOR_TOL = 0.05
 
 

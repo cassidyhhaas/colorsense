@@ -252,8 +252,9 @@ def test_alpha_out_of_range_is_clamped() -> None:
 
 
 def test_near_colors_join_across_usage_and_tokens() -> None:
-    # The ΔE nearest-color join: #fa0202 is within DELTA_E_MATCH of the used #ff0000, so
-    # the token must pool INTO the usage entry (both signals on one color) instead of
+    # The ΔE nearest-color join: #fa0202 is within DELTA_E_MATCH_MEASURED of the used
+    # #ff0000 (measured entry vs declared token — the loose radius applies), so the
+    # token must pool INTO the usage entry (both signals on one color) instead of
     # surfacing as a separate token-only entry.
     used_red = "#ff0000"
     declared_red = "#fa0202"

@@ -11,7 +11,11 @@ This module fuses two independent signals about a site's palette, in **usage spa
 
 The two are combined by **log-linear pooling** (a weighted geometric mean) with weight
 ``alpha`` on intent: ``alpha=0`` -> pure usage, ``alpha=1`` -> pure intent. Colors are
-matched across the two sources by nearest-color within a perceptual ΔE threshold.
+matched across the two sources by nearest-color, with two perceptual ΔE radii: declared
+colors group with each other at the tight :data:`DELTA_E_MATCH` (exact computed values
+on both sides), while measured usage entries match declared colors at the looser
+:data:`DELTA_E_MATCH_MEASURED` (a measured representative can be a screenshot-quantizer
+bin up to the inventory's bg join radius away from the color the author painted).
 
 The output is a posterior :class:`UsagePalette` plus a divergence report listing
 declared-but-unused and used-but-undeclared discrepancies. Declared-but-unused items are
