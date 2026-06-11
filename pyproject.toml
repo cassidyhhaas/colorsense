@@ -52,9 +52,17 @@ packages = ["src/colorsense"]
 include = ["src", "tests", "docs", "mkdocs.yml", "README.md", "LICENSE", "pyproject.toml", "SECURITY.md", "CONTRIBUTING.md", "CHANGELOG.md"]
 
 [dependency-groups]
-# httpx2 keeps starlette's TestClient (used by the webservice example tests) off its
-# deprecated httpx fallback; the library's own runtime httpx dependency is unchanged.
-dev = ["ruff", "mypy", "pytest", "pytest-asyncio", "pytest-cov", "pytest-randomly", "types-pyyaml", "types-Pillow", "pre-commit", "httpx2>=2.0.0"]
+dev = [
+    "ruff",
+    "mypy",
+    "pytest",
+    "pytest-asyncio",
+    "pytest-cov",
+    "pytest-randomly",
+    "types-pyyaml",
+    "types-Pillow",
+    "pre-commit",
+]
 # Used only by examples/ (and the tests that exercise them); never part of the library's
 # runtime dependencies. Install with: uv sync --group examples --group dev
 examples = ["fastapi>=0.110", "uvicorn>=0.29"]
