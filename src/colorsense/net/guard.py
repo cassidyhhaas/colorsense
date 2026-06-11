@@ -25,7 +25,9 @@ Honest limits — read before relying on this filter alone:
   slow nameserver costs a worker thread plus latency for that host's requests only — never
   a loop stall. Per-host verdicts are TTL+LRU cached, and concurrent misses for one host
   coalesce into a single lookup, so a page fanning out requests to a novel hostname cannot
-  exhaust the thread pool with duplicate resolutions.
+  exhaust the thread pool with duplicate resolutions. The coalescing futures are
+  loop-bound: each predicate pins itself to the event loop of its first call and raises
+  ``RuntimeError`` from any other loop — create one predicate per loop.
 """
 
 from __future__ import annotations
@@ -98,7 +100,14 @@ def _is_public_address(ip: IPAddress) -> bool:
 
 
 class _PrivateNetworkBlocker:
-    """The predicate :func:`block_private_networks` returns; see the factory docstring."""
+    """The predicate :func:`block_private_networks` returns; see the factory docstring.
+
+    **Single-event-loop contract:** the single-flight machinery hands out
+    ``asyncio.Future``\\ s created on the loop the predicate first runs under, and futures
+    are loop-bound, so one instance must only ever be awaited from that one loop. The first
+    call pins the loop; a call from any other loop raises :class:`RuntimeError` (which the
+    ``request_filter`` seam treats as fail-closed). Create a separate predicate per loop.
+    """
 
     def __init__(
         self,
@@ -123,12 +132,17 @@ class _PrivateNetworkBlocker:
         # In-flight resolution coalescing (single-flight): concurrent misses for the same
         # host await one shared Future instead of each dispatching a worker-thread lookup —
         # otherwise a page fanning N requests at one slow novel hostname pins N executor
-        # threads on the same getaddrinfo. Entries are always popped in a ``finally``, so a
-        # guard reused across sequential ``asyncio.run`` calls never sees a stale-loop
-        # Future.
+        # threads on the same getaddrinfo. Futures are loop-bound, so the predicate pins
+        # itself to the loop of its first call (below) and refuses to run anywhere else.
         self._inflight: dict[str, asyncio.Future[bool]] = {}
+        # The event loop this predicate is bound to, pinned on first use. Enforced (not
+        # just documented) so cross-loop misuse surfaces as a diagnosable RuntimeError —
+        # which the request_filter seam fails closed on — instead of a confusing
+        # "Future attached to a different loop" deep in the single-flight path.
+        self._loop: asyncio.AbstractEventLoop | None = None
 
     async def __call__(self, url: str) -> bool:
+        self._check_loop_affinity()
         try:
             parts = urlsplit(url)
             host = parts.hostname
@@ -147,6 +161,25 @@ class _PrivateNetworkBlocker:
         if self._allowed_hosts is not None and host not in self._allowed_hosts:
             return False
         return await self._host_is_public(host)
+
+    def _check_loop_affinity(self) -> None:
+        """Pin the predicate to the loop of its first call; reject any other loop.
+
+        The single-flight Futures in ``self._inflight`` (and the loop-thread-only cache)
+        are bound to one event loop, so cross-loop use would corrupt shared state or hang
+        waiters. Raising here is fail-closed at the ``request_filter`` seam
+        (``evaluate_request_filter`` turns it into ``False``) while making the misuse
+        diagnosable.
+        """
+        loop = asyncio.get_running_loop()
+        if self._loop is None:
+            self._loop = loop
+        elif self._loop is not loop:
+            raise RuntimeError(
+                "block_private_networks(): this predicate is bound to the event loop it "
+                "first ran on and cannot be used from another loop (its single-flight "
+                "futures are loop-bound); create a separate predicate per event loop"
+            )
 
     async def _host_is_public(self, host: str) -> bool:
         now = self._clock()
@@ -254,6 +287,13 @@ def block_private_networks(
     host coalesce into a single lookup, and verdicts land in a per-hostname TTL+LRU cache
     (negative verdicts cached too) — so a slow resolver costs a worker thread plus latency
     for that host only, never a loop stall.
+
+    **Single-event-loop contract:** the coalescing machinery uses loop-bound
+    ``asyncio.Future``\\ s, so each returned predicate must only be used from one event
+    loop — the loop of its first call, which it pins itself to. Awaiting it from a
+    different loop (e.g. reusing one predicate across separate ``asyncio.run`` calls)
+    raises :class:`RuntimeError`; through ``request_filter`` that raise fails closed, and
+    the explicit error makes the misuse diagnosable. Create a separate predicate per loop.
 
     Parameters
     ----------

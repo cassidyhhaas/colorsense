@@ -40,6 +40,24 @@ def guard_for(mapping: dict[str, list[IPAddress]]) -> Callable[[str], Awaitable[
     return block_private_networks(resolver=RecordingResolver(mapping))
 
 
+async def wait_until(condition: Callable[[], bool], description: str, timeout: float = 5.0) -> None:
+    """Yield to the loop until ``condition()`` holds; fail the test after ``timeout``.
+
+    Bounded replacement for a bare ``while not condition(): await asyncio.sleep(0)`` spin:
+    if the code under test regresses and the condition never becomes true, the test fails
+    with a clear message instead of hanging forever.
+    """
+
+    async def poll() -> None:
+        while not condition():
+            await asyncio.sleep(0)
+
+    try:
+        await asyncio.wait_for(poll(), timeout=timeout)
+    except TimeoutError:  # pragma: no cover - only reached on regression
+        pytest.fail(f"timed out after {timeout}s waiting until {description}")
+
+
 # -- address classification ---------------------------------------------------
 
 
@@ -268,8 +286,8 @@ async def test_concurrent_misses_for_one_host_coalesce_into_one_lookup() -> None
 
     guard = block_private_networks(resolver=resolver)
     tasks = [asyncio.create_task(guard(f"https://example.com/{i}")) for i in range(5)]
-    while not calls:  # let the leader reach the worker-thread dispatch
-        await asyncio.sleep(0)
+    # Let the leader reach the worker-thread dispatch.
+    await wait_until(lambda: bool(calls), "the leader reaches the worker-thread dispatch")
     for _ in range(20):  # let every follower attach to the in-flight future
         await asyncio.sleep(0)
     assert all(not task.done() for task in tasks)
@@ -292,8 +310,8 @@ async def test_leader_cancellation_fails_followers_closed() -> None:
 
     guard = block_private_networks(resolver=resolver)
     leader = asyncio.create_task(guard("https://slow.example/"))
-    while not calls:  # leader is parked in the worker thread, inflight entry registered
-        await asyncio.sleep(0)
+    # Leader is parked in the worker thread, inflight entry registered.
+    await wait_until(lambda: bool(calls), "the leader parks in the worker thread")
     follower = asyncio.create_task(guard("https://slow.example/other"))
     for _ in range(20):  # follower attaches to the shared future
         await asyncio.sleep(0)
@@ -320,8 +338,8 @@ async def test_follower_own_cancellation_propagates() -> None:
 
     guard = block_private_networks(resolver=resolver)
     leader = asyncio.create_task(guard("https://slow.example/"))
-    while not calls:
-        await asyncio.sleep(0)
+    # Leader is parked in the worker thread, inflight entry registered.
+    await wait_until(lambda: bool(calls), "the leader parks in the worker thread")
     follower = asyncio.create_task(guard("https://slow.example/other"))
     for _ in range(20):
         await asyncio.sleep(0)
@@ -347,8 +365,8 @@ async def test_same_tick_leader_and_follower_cancellation_honors_the_follower() 
 
     guard = block_private_networks(resolver=resolver)
     leader = asyncio.create_task(guard("https://slow.example/"))
-    while not calls:
-        await asyncio.sleep(0)
+    # Leader is parked in the worker thread, inflight entry registered.
+    await wait_until(lambda: bool(calls), "the leader parks in the worker thread")
     follower = asyncio.create_task(guard("https://slow.example/other"))
     for _ in range(20):
         await asyncio.sleep(0)
@@ -362,3 +380,18 @@ async def test_same_tick_leader_and_follower_cancellation_honors_the_follower() 
     with pytest.raises(asyncio.CancelledError):
         await leader
     release.set()
+
+
+def test_predicate_is_bound_to_the_event_loop_it_first_ran_on() -> None:
+    # The single-flight futures are loop-bound, so the documented contract is one
+    # predicate per event loop: the first call pins the loop, and using the same predicate
+    # from a different loop (here: a second asyncio.run) raises a diagnosable RuntimeError
+    # instead of corrupting shared state. Through evaluate_request_filter the raise fails
+    # closed.
+    resolver = RecordingResolver({"example.com": [PUBLIC_V4]})
+    guard = block_private_networks(resolver=resolver)
+    assert asyncio.run(guard("https://example.com/")) is True
+    with pytest.raises(RuntimeError, match="separate predicate per event loop"):
+        asyncio.run(guard("https://example.com/again"))
+    # The misuse never reached resolution machinery on the second loop.
+    assert resolver.calls == ["example.com"]

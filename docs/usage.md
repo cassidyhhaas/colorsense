@@ -193,7 +193,9 @@ policy** — whether a fetch is authorized is the consumer's decision, made *bef
   allowlist. It does not fully defeat DNS rebinding (Chromium resolves hostnames
   independently); its DNS lookups run off the event loop on a worker thread (cached per
   hostname with a TTL; concurrent misses for one host share a single lookup) — network
-  isolation remains the primary control.
+  isolation remains the primary control. Each predicate is bound to the event loop it
+  first runs on (calling it from another loop raises `RuntimeError`, which fails closed
+  through `request_filter`); create a separate predicate per event loop.
 - **`max_concurrent_renders`** — optional cap on simultaneous renders through the policy
   (unbounded by default — set it on servers; see [SECURITY.md](../SECURITY.md) §2). Cache
   hits and coalesced duplicate fetches never count against the cap, and a fetch waiting out
