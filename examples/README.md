@@ -8,10 +8,13 @@ Two ends of the trust spectrum, per [SECURITY.md](../SECURITY.md):
 - **[`webservice/`](webservice/)** — the untrusted-URL path: a FastAPI service that accepts
   user-supplied URLs and wires up the SECURITY.md checklist around `analyze` — pre-call URL
   validation ([`webservice/url_guard.py`](webservice/url_guard.py), the one control that
-  stays app code), the library's `block_private_networks()` egress `request_filter`, a
-  `max_concurrent_renders` cap, a `max_total_seconds` deadline, and a `browser_args`
-  V8-heap cap ([`webservice/app.py`](webservice/app.py)), with library errors mapped to
-  HTTP statuses.
+  stays app code), the library's `block_private_networks()` egress `request_filter` and
+  `max_concurrent_renders` cap ([`webservice/policy.py`](webservice/policy.py)), a
+  `max_total_seconds` deadline and a `browser_args` V8-heap cap (env-derived in
+  [`webservice/settings.py`](webservice/settings.py)), with library errors mapped to HTTP
+  statuses in [`webservice/routes.py`](webservice/routes.py). Start at
+  [`webservice/main.py`](webservice/main.py), whose docstring maps every control to its
+  SECURITY.md section.
 
 > **The webservice is a reference implementation, not a security guarantee.** It shows how
 > to configure the in-process controls [SECURITY.md](../SECURITY.md) requires, but a
@@ -39,7 +42,7 @@ uv run python examples/quickstart.py
 uv run python examples/quickstart.py https://your-site.example
 
 # Webservice — from the repo root, then POST a URL:
-uv run uvicorn examples.webservice.app:app
+uv run uvicorn examples.webservice.main:app
 curl -s -X POST localhost:8000/analyze \
     -H 'content-type: application/json' -d '{"url": "https://example.com"}'
 ```

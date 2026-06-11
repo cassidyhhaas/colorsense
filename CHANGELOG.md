@@ -7,6 +7,14 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- The `examples/webservice/` reference implementation is restructured from a single
+  `app.py` into an idiomatic mini FastAPI layout (`main.py`, `settings.py`, `policy.py`,
+  `schemas.py`, `routes.py`; `url_guard.py` unchanged). No behavior or security-control
+  change. The uvicorn entry point is now `examples.webservice.main:app` (was
+  `examples.webservice.app:app`).
+
 ## [0.3.0] - 2026-06-10
 
 Ships the safe-consumption controls for server-side use — the `block_private_networks()`

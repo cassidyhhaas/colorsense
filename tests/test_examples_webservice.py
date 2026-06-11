@@ -1,9 +1,10 @@
 """Tests for the example FastAPI service — no browser, no network.
 
-``analyze`` is monkeypatched on the app module, so these tests cover the endpoint's own
-responsibilities: pre-call validation rejects bad URLs *before* any render, library errors
-map to the documented HTTP statuses, and the response is the trimmed shape. Skips cleanly
-when fastapi is not installed (it lives in the ``examples`` dependency group, not ``dev``).
+``analyze`` is monkeypatched where the endpoint looks it up (``examples.webservice.routes``),
+so these tests cover the endpoint's own responsibilities: pre-call validation rejects bad
+URLs *before* any render, library errors map to the documented HTTP statuses, and the
+response is the trimmed shape. Skips cleanly when fastapi is not installed (it lives in
+the ``examples`` dependency group, not ``dev``).
 """
 
 from __future__ import annotations
@@ -30,7 +31,7 @@ from colorsense import (
     UnsupportedSchemeError,
     Viewport,
 )
-from examples.webservice import app as app_module
+from examples.webservice import main, policy, routes, settings
 
 VIEWPORT = Viewport(width=1280, height=800, device_scale_factor=1.0)
 
@@ -56,7 +57,7 @@ def fake_result(url: str) -> AnalysisResult:
 
 
 class AnalyzeStub:
-    """Replaces ``app_module.analyze``: records calls; returns or raises as configured."""
+    """Replaces ``routes.analyze``: records calls; returns or raises as configured."""
 
     def __init__(
         self, result: AnalysisResult | None = None, error: BaseException | None = None
@@ -77,12 +78,13 @@ class AnalyzeStub:
 
 @pytest.fixture
 def client() -> Iterator[TestClient]:
-    with TestClient(app_module.app) as test_client:
+    with TestClient(main.app) as test_client:
         yield test_client
 
 
 def install_stub(monkeypatch: pytest.MonkeyPatch, stub: AnalyzeStub) -> None:
-    monkeypatch.setattr(app_module, "analyze", stub)
+    # Patch where the endpoint looks the name up: the routes module, not colorsense.
+    monkeypatch.setattr(routes, "analyze", stub)
 
 
 @pytest.mark.parametrize(
@@ -124,7 +126,9 @@ def test_allowlist_enforced_before_any_render(
 ) -> None:
     stub = AnalyzeStub(result=fake_result("https://other.example/"))
     install_stub(monkeypatch, stub)
-    monkeypatch.setattr(app_module, "ALLOWED_HOSTS", frozenset({"example.com"}))
+    # The endpoint reads the module global at call time, so patch it on routes (where
+    # `from ...settings import ALLOWED_HOSTS` bound it), not on settings.
+    monkeypatch.setattr(routes, "ALLOWED_HOSTS", frozenset({"example.com"}))
     response = client.post("/analyze", json={"url": "https://other.example/"})
     assert response.status_code == 400
     assert "allowlist" in response.json()["detail"]
@@ -178,31 +182,31 @@ def test_endpoint_passes_policy_and_deadline_to_analyze(
     response = client.post("/analyze", json={"url": url})
     assert response.status_code == 200
     (kwargs,) = stub.kwargs
-    assert kwargs["politeness"] is app_module._policy
-    assert kwargs["max_total_seconds"] == app_module.ANALYZE_DEADLINE_SECONDS
-    assert kwargs["browser_args"] == app_module.BROWSER_ARGS
-    assert app_module._policy.max_concurrent_renders == app_module.MAX_CONCURRENT_ANALYSES
+    assert kwargs["politeness"] is policy.POLICY
+    assert kwargs["max_total_seconds"] == settings.ANALYZE_DEADLINE_SECONDS
+    assert kwargs["browser_args"] == settings.BROWSER_ARGS
+    assert policy.POLICY.max_concurrent_renders == settings.MAX_CONCURRENT_ANALYSES
     # The default (no COLORSENSE_BROWSER_ARGS override) is the documented V8-heap cap.
-    assert app_module.BROWSER_ARGS == ("--js-flags=--max-old-space-size=512",)
+    assert settings.BROWSER_ARGS == ("--js-flags=--max-old-space-size=512",)
 
 
 def test_browser_args_default_is_v8_heap_cap(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("COLORSENSE_BROWSER_ARGS", raising=False)
-    assert app_module._browser_args_from_env() == ("--js-flags=--max-old-space-size=512",)
+    assert settings.browser_args_from_env() == ("--js-flags=--max-old-space-size=512",)
 
 
 def test_browser_args_empty_string_means_no_extra_args(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("COLORSENSE_BROWSER_ARGS", "")
-    assert app_module._browser_args_from_env() == ()
+    assert settings.browser_args_from_env() == ()
 
 
 def test_browser_args_whitespace_separated(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv(
         "COLORSENSE_BROWSER_ARGS", "--disable-gpu  --js-flags=--max-old-space-size=256"
     )
-    assert app_module._browser_args_from_env() == (
+    assert settings.browser_args_from_env() == (
         "--disable-gpu",
         "--js-flags=--max-old-space-size=256",
     )
@@ -217,7 +221,7 @@ def test_browser_args_quoted_flag_with_commas_and_spaces_stays_one_arg(
         "COLORSENSE_BROWSER_ARGS",
         "--host-resolver-rules='MAP a 1.2.3.4, MAP b 5.6.7.8' --disable-gpu",
     )
-    assert app_module._browser_args_from_env() == (
+    assert settings.browser_args_from_env() == (
         "--host-resolver-rules=MAP a 1.2.3.4, MAP b 5.6.7.8",
         "--disable-gpu",
     )
@@ -227,4 +231,4 @@ def test_browser_args_unbalanced_quote_raises(monkeypatch: pytest.MonkeyPatch) -
     # Loud failure at import/startup for a misconfigured env var, never mangled args.
     monkeypatch.setenv("COLORSENSE_BROWSER_ARGS", "--host-resolver-rules='MAP a 1.2.3.4")
     with pytest.raises(ValueError):
-        app_module._browser_args_from_env()
+        settings.browser_args_from_env()
