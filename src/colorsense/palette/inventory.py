@@ -54,9 +54,9 @@ DELTA_E_MATCH_BG: float = 0.10
 
 # Maximum distance for the TEXT and BORDER channels — deliberately tighter (0.05, the
 # cluster radius below). Text/border colors are exact computed values, not quantized
-# pixels, and dark colors sit perceptually close in OKLab: at 0.10 a near-black body
-# text (#1f2328) gets absorbed into an adjacent dark surface bin (#002a36) instead of
-# forming its own zero-area entry, erasing the text hierarchy from the usage view.
+# pixels, and dark colors sit perceptually close in OKLab: at 0.10 near-black text gets
+# absorbed into adjacent dark surface bins instead of forming its own zero-area entry,
+# erasing the text hierarchy from the usage view (see docs/how-it-works.md).
 DELTA_E_MATCH_TEXT_BORDER: float = 0.05
 
 # Maximum OKLab deltaEOK distance at which two entries are merged into a single

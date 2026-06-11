@@ -116,6 +116,13 @@ measurement gaps the fixtures had masked; all are now encoded as offline fixture
   + mkdocstrings, built from the existing guides plus a generated API reference, deployed
   to GitHub Pages from `main` (`.github/workflows/docs.yml`; PRs get a strict build check).
   Build locally with `uv sync --group docs` and `uv run mkdocs serve`.
+- **"How it works" documentation page** (`docs/how-it-works.md`) — a plain-prose
+  walkthrough of every pipeline stage with the actual logic and calculations (harvesting,
+  classification, inventory clustering and the ΔE join radii, usage-keyed prominence
+  scoring, log-linear reconciliation, the 60/30/10 roles view, concurrency/safety
+  guarantees, and performance notes). The incident narratives and worked calibration
+  derivations formerly embedded in source comments and the bundled YAML now live there;
+  the code keeps one-line invariants pointing at the page.
 - **`request_filter` seams accept async predicates.** `PolitenessPolicy`, `harvest_page`,
   and `RenderSession` now take a synchronous *or* asynchronous `url -> bool` predicate;
   the new public **`RequestFilter`** type alias (exported from the package root and

@@ -319,42 +319,19 @@ component_classifier:
 
   # --- Feature family 4b: border presence. ------------------------------------
   # Applied to any element whose harvested `border` is non-None — the harvester
-  # width-gates it, so non-None means the element genuinely paints a border. Without
-  # this family only the <input> semantic rule ever voted `border`, so pages without
-  # classified inputs measured ZERO border mass (the live-probe failure: github.com's
-  # #d1d9e0 borders absent while token-only noise flooded the category).
-  #
-  # Calibration (softmax_temperature 0.5, min_component_prob 0.05), votes border: 2.5:
-  #   * bordered card (class "card" -> card_bg 3.0):
-  #       e^(3.0/0.5)=403.4 vs e^(2.5/0.5)=148.4 -> border prob 0.27, survives.
-  #   * bordered text input (input_bg 3.0; input[submit] no longer matches non-button
-  #     inputs, so no cta_bg 3.5):
-  #       e^(3.0/0.5)=403.4 vs e^(2.5/0.5)=148.4 -> border prob 0.27, survives.
-  #   * bordered submit input (input_bg 3.0; cta_bg 7.0 = input[submit] 3.5 +
-  #     clickable 1.5 + input[submit|button] 2.0):
-  #       e^14=1.2e6 vs e^6=403.4 vs e^5=148.4 -> border prob ~1e-4, pruned —
-  #       button-like inputs stay interactive, not borders.
-  #   * bordered CTA (button tag 3.5 + class/btn/clickable votes, cta_bg >= 9):
-  #       border prob < 1e-3, pruned — bordered CTAs stay interactive, not borders.
+  # width-gates it, so non-None means the element genuinely paints a border. The 2.5
+  # is calibrated against the softmax so structural borders (cards, inputs) survive
+  # pruning while button-like inputs/CTAs stay interactive, not borders (full
+  # derivation: docs/how-it-works.md).
   border_presence:
     votes: {border: 2.5}
 
   # --- Feature family 4c: text presence. --------------------------------------
   # Applied to any NON-clickable element with `has_text` (>=1 direct child text node
-  # with non-whitespace content; descendant text doesn't count). Without it only
-  # body/main/article/header-ish semantic rules voted *_text, so typography in plain
-  # <p>/<span>/<td> content was never measured (the live-probe failure: github.com's
-  # muted #59636e absent from usage.text). Clickable elements are deliberately
-  # excluded: their typography is interactive by definition and already routed via
-  # the `a`/link rules — letting them vote page_text would leak link colors into the
-  # text category and dilute the interactive channel.
-  #
-  # Calibration (softmax_temperature 0.5, min_component_prob 0.05), votes page_text: 2.0:
-  #   * bare <p>/<span> with text (no other votes): page_text prob 1.0.
-  #   * text-bearing card (class "card" -> card_bg 3.0):
-  #       e^6=403.4 vs e^4=54.6 -> page_text prob 0.12, survives without displacing
-  #       card_bg. 2.0 stays below every semantic *_text vote (body 4.0, main 3.0),
-  #       so semantic rules still dominate where they apply.
+  # with non-whitespace content; descendant text doesn't count). Clickable elements
+  # are deliberately excluded: their typography is interactive by definition and
+  # already routed via the `a`/link rules. The 2.0 stays below every semantic *_text
+  # vote so semantic rules dominate where they apply (derivation: docs/how-it-works.md).
   text_presence:
     votes: {page_text: 2.0}
 

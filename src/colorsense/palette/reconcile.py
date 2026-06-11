@@ -19,9 +19,9 @@ bin up to the inventory's bg join radius away from the color the author painted)
 
 The output is a posterior :class:`UsagePalette` plus a divergence report listing
 declared-but-unused and used-but-undeclared discrepancies. Declared-but-unused items are
-gated to **high-intent** tokens (origin ``relational`` or ``name_rule``): on token-heavy
-sites every unused shade of every color scale used to fire (54/54 noise items on
-github.com), so ``scale``/``alias``/``fallback`` origins are excluded.
+gated to **high-intent** tokens (origin ``relational`` or ``name_rule``);
+``scale``/``alias``/``fallback`` origins are excluded (see docs/how-it-works.md for the
+token-heavy-site failure that motivated the gate).
 
 All thresholds are module-level constants, documented and tunable.
 """
@@ -55,9 +55,7 @@ DELTA_E_MATCH: float = 0.08
 #: matched one, and an element may join a bin up to the bg join radius away
 #: (:data:`~colorsense.palette.inventory.DELTA_E_MATCH_BG`) — so this radius must be at
 #: least that, or a pixel-perfect rendered token can fail its own intent match purely
-#: from quantizer blending (observed cross-OS: an amber CTA over a blue hero bins to
-#: #c4a571 on Linux, > 0.08 but <= 0.10 from the declared #f59e0b, flipping the
-#: posterior winner and emitting a false "declared unused in render" divergence).
+#: from (platform-dependent) quantizer blending (see docs/how-it-works.md).
 DELTA_E_MATCH_MEASURED: float = DELTA_E_MATCH_BG
 
 #: Floor added inside the geometric mean so that a missing signal contributes
@@ -190,17 +188,12 @@ def _pool_category(
     usage_entries = usage.mapping.get(category, ())
 
     # EMPTY-CATEGORY GATE: a category with no measured usage candidates yields an empty
-    # posterior — token-only colors are NOT injected. With zero measurement, every
-    # token-only color gets the same ``EPS**(1-alpha)`` usage factor, so the posterior
-    # collapses to ``intent**alpha`` — a near-uniform spread where everything survives
-    # pruning (the live-probe failure: 16 token-only "borders" with no rendered border
-    # anywhere). Honest emptiness beats intent-only noise; declared intent for the
-    # category can still surface through the divergence report — though only when the
-    # declared color has no perceptual match (DELTA_E_MATCH_MEASURED) among measured usage in ANY
-    # category (e.g. a near-white border token on a white-surfaced page reads as "used"
-    # and stays silent). When measurement EXISTS,
-    # token-only colors stay in the universe: pooling against real usage mass crushes
-    # them naturally unless intent is strong enough to clear MIN_POSTERIOR_PROB.
+    # posterior — token-only colors are NOT injected (with zero measurement the posterior
+    # collapses to ``intent**alpha``, a near-uniform spread where everything survives
+    # pruning; see docs/how-it-works.md). Honest emptiness beats intent-only noise;
+    # declared intent can still surface through the divergence report. When measurement
+    # EXISTS, token-only colors stay in the universe: pooling against real usage mass
+    # crushes them unless intent is strong enough to clear MIN_POSTERIOR_PROB.
     if not usage_entries:
         return []
 

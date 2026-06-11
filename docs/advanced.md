@@ -47,7 +47,8 @@ package and is loaded automatically. It is the single source of truth for:
   harvester width-gates the border color) and `text_presence` (votes applied to any
   non-clickable element with direct text content, so plain `<p>`/`<span>` typography is
   measured even when no semantic rule matches). Each is a single `{votes: {component:
-  weight}}` mapping; the bundled YAML documents the calibration math next to each weight.
+  weight}}` mapping; the bundled YAML keeps a short calibration note next to each weight,
+  and the full worked derivations live on the [How it works](how-it-works.md) page.
 
 The weights are calibrated starting points, not ground truth. To tune them, copy the
 bundled file, edit your copy, and pass its path as `config_path=` to `analyze` (or load it
