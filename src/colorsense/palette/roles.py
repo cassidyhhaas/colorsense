@@ -1,7 +1,7 @@
 """Palette role assignment (60/30/10 taxonomy) — a derived, measured-only view.
 
-Assigns each :class:`~colorsense.models.ColorCluster` to the five palette roles
-(:class:`~colorsense.models.PaletteRole`) with a per-role probability distribution, then
+Assigns each `ColorCluster` to the five palette roles
+([`PaletteRole`][colorsense.PaletteRole]) with a per-role probability distribution, then
 computes a ``fit_score`` measuring how well the measured palette matches the canonical
 60/30/10 split. This view is a **derived 60/30/10 interpretation of measured usage**:
 the primary palette view is the usage-keyed one (``palette/usage.py``), and the roles
@@ -10,8 +10,8 @@ measured.
 
 Design notes
 ------------
-* The public entry point is :func:`assign_roles`. It takes *only* the cluster list (no
-  :class:`Config`); every threshold/weight is a documented, module-level **tunable**
+* The public entry point is `assign_roles`. It takes *only* the cluster list (no
+  [`Config`][colorsense.Config]); every threshold/weight is a documented, module-level **tunable**
   constant defined below.
 * Everything is deterministic: iteration over dicts is sorted, ties are broken by ``hex``,
   and there is no randomness.
@@ -110,7 +110,7 @@ COMPONENT_AFFINITY: dict[ComponentType, PaletteRole] = {
 
 
 class _Features:
-    """Precomputed per-cluster features (computed once in :func:`assign_roles`)."""
+    """Precomputed per-cluster features (computed once in `assign_roles`)."""
 
     __slots__ = ("area", "chroma", "cluster", "comp_assoc", "lightness", "neutrality")
 
@@ -158,7 +158,8 @@ def _build_candidates(
 ) -> list[PaletteCandidate]:
     """Softmax ``scores`` over clusters, prune, renormalize, and rank candidates.
 
-    Returns a probability-descending (ties by hex) list of :class:`PaletteCandidate`.
+    Returns a probability-descending (ties by hex) list of
+    [`PaletteCandidate`][colorsense.PaletteCandidate].
     """
     probs = _softmax(scores, SOFTMAX_T)
 

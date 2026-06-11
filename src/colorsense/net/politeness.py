@@ -9,7 +9,7 @@ capped), same-host fetches are spaced by one second, and only ``http(s)`` URLs a
 (``file://`` is an explicit opt-in).
 
 The policy is the only place networking policy is enforced: calling
-:func:`colorsense.harvest.harvest_page` or :class:`~colorsense.harvest.RenderSession`
+`colorsense.harvest.harvest_page` or `RenderSession`
 directly bypasses every gate here (scheme validation, robots, throttle, cache).
 
 ``PolitenessPolicy`` is the single object the pipeline talks to. It is *not* a frozen
@@ -53,13 +53,13 @@ wire identity tracks releases instead of going stale.
 DEFAULT_ROBOTS_AGENT = "colorsense"
 """The product token matched against ``robots.txt`` ``User-agent:`` groups.
 
-This is deliberately distinct from :data:`DEFAULT_USER_AGENT`. ``RobotFileParser`` matches a
+This is deliberately distinct from `DEFAULT_USER_AGENT`. ``RobotFileParser`` matches a
 robots ``User-agent`` group by checking whether the group name is a case-insensitive prefix
-of the agent string passed to :meth:`RobotFileParser.can_fetch`. Passing the full
+of the agent string passed to `RobotFileParser.can_fetch`. Passing the full
 descriptive UA (which begins with ``"Mozilla/5.0 ..."``) would only ever match the wire
 browser token, so a site-specific ``User-agent: colorsense`` group would be silently ignored.
 Matching on the bare product token honors those agent-specific rules while the full
-:data:`DEFAULT_USER_AGENT` is still what is sent on the wire.
+`DEFAULT_USER_AGENT` is still what is sent on the wire.
 """
 
 DEFAULT_MIN_INTERVAL = 1.0
@@ -93,13 +93,13 @@ _NETWORK_SCHEMES = frozenset({"http", "https"})
 class Harvester(Protocol):
     """Render seam: ``(url, theme, config, viewport, *, user_agent=, request_filter=, browser=)``.
 
-    A :class:`~typing.Protocol` rather than a plain ``Callable`` because the policy passes
-    its configured wire UA as the keyword-only ``user_agent``, its egress
-    ``request_filter`` predicate, and the caller-supplied shared-``browser`` handle (all
-    with defaults, so direct callers that ignore them remain expressible). The ``browser``
-    handle is opaque to the policy — it is threaded through from :meth:`PolitenessPolicy.fetch`
-    untouched; the harvester (and ultimately the render session) owns what it means.
-    Defaults to :func:`colorsense.harvest.harvest_page`.
+    A `Protocol` rather than a plain ``Callable`` because the policy passes its configured wire UA
+    as the keyword-only ``user_agent``, its egress ``request_filter`` predicate, and the
+    caller-supplied shared-``browser`` handle (all with defaults, so direct callers that ignore them
+    remain expressible). The ``browser`` handle is opaque to the policy — it is threaded through
+    from [`PolitenessPolicy.fetch`][colorsense.PolitenessPolicy.fetch] untouched; the harvester (and
+    ultimately the render session) owns what it means. Defaults to
+    `colorsense.harvest.harvest_page`.
     """
 
     def __call__(
@@ -118,12 +118,12 @@ class Harvester(Protocol):
 RobotsLoader = Callable[[str, str, RequestFilter | None], Awaitable[str | None]]
 """Robots seam: ``(robots_url, user_agent, request_filter) -> text | None``.
 
-The UA is sent on the wire. ``request_filter`` is the policy's egress predicate — sync or
-async (see :data:`colorsense.harvest.RequestFilter`) — or ``None``: a loader must apply it
-to the robots URL itself *and* to every redirect hop it follows, returning ``None`` (no
-rules) instead of fetching a rejected destination — the robots GET is server-side
-``httpx``, not the browser, so it would otherwise bypass the browser-route filter entirely
-(SSRF via a robots redirect).
+The UA is sent on the wire. ``request_filter`` is the policy's egress predicate — sync or async (see
+[`colorsense.harvest.RequestFilter`][colorsense.RequestFilter]) — or ``None``: a loader must apply
+it to the robots URL itself *and* to every redirect hop it follows, returning ``None`` (no rules)
+instead of fetching a rejected destination — the robots GET is server-side ``httpx``, not the
+browser, so it would otherwise bypass the browser-route filter entirely (SSRF via a robots
+redirect).
 """
 Clock = Callable[[], float]
 Sleeper = Callable[[float], Awaitable[None]]
@@ -138,12 +138,13 @@ class RobotsDisallowedError(RuntimeError):
 
 
 class UnsupportedSchemeError(ValueError):
-    """Raised by :meth:`PolitenessPolicy.fetch` for URLs whose scheme it refuses to render.
+    """Raised by [`PolitenessPolicy.fetch`][colorsense.PolitenessPolicy.fetch] for URLs whose scheme
+    it refuses to render.
 
     Only ``http``/``https`` URLs are fetchable by default. ``file://`` (a local-file-read
     primitive) is an explicit opt-in via ``PolitenessPolicy(allow_file_urls=True)``; every
     other scheme (``ftp``, ``data``, ``javascript``, scheme-less, ...) is always rejected.
-    The offending URL is available as :attr:`url`.
+    The offending URL is available as `url`.
     """
 
     def __init__(self, url: str, *, hint: str | None = None) -> None:
@@ -190,7 +191,7 @@ async def _default_robots_loader(
     unreachable ``robots.txt`` is treated by callers as "no rules", which permits fetching —
     the conventional interpretation.
 
-    The body is read in a streaming fashion and capped at :data:`_MAX_ROBOTS_BYTES`
+    The body is read in a streaming fashion and capped at `_MAX_ROBOTS_BYTES`
     (512 KiB, Google's documented robots.txt processing limit): a declared
     ``Content-Length`` over the cap aborts before the body is read, and a body that
     *streams* past the cap (chunked, lying, or absent ``Content-Length``) aborts
@@ -199,10 +200,10 @@ async def _default_robots_loader(
     arbitrarily large body within the per-read timeout.
 
     ``request_filter`` is the policy's egress predicate, sync or async — each hop is vetted
-    through :func:`colorsense.harvest.render.evaluate_request_filter`, the shared
+    through `colorsense.harvest.render.evaluate_request_filter`, the shared
     filter-invocation helper (awaits async predicates; any exception fails closed).
     Redirects are followed *manually* (``follow_redirects=False`` plus a loop capped at
-    :data:`_MAX_ROBOTS_REDIRECTS` hops) so the filter can vet **each** URL before it is
+    `_MAX_ROBOTS_REDIRECTS` hops) so the filter can vet **each** URL before it is
     requested — the initial robots URL and every redirect ``Location`` (resolved against
     the current URL). A rejected — or raising, which fails closed — verdict aborts the
     fetch and returns ``None``: the robots rules fail open as usual, while the navigation
@@ -264,44 +265,42 @@ class PolitenessPolicy:
     user_agent:
         Identifiable User-Agent sent on the wire for *both* the ``robots.txt`` GET and the
         page render itself (forwarded to the harvester, which sets it on the browser
-        context). Defaults to :data:`DEFAULT_USER_AGENT`.
+        context). Defaults to `DEFAULT_USER_AGENT`.
     robots_agent:
         The product token matched against ``robots.txt`` ``User-agent:`` groups by
-        :meth:`can_fetch`. Kept separate from ``user_agent`` so site-specific robots groups
-        still match — see :data:`DEFAULT_ROBOTS_AGENT` (the default, ``"colorsense"``) for
+        `can_fetch`. Kept separate from ``user_agent`` so site-specific robots groups
+        still match — see `DEFAULT_ROBOTS_AGENT` (the default, ``"colorsense"``) for
         the prefix-matching rationale.
     respect_robots:
-        When ``True`` (default), :meth:`can_fetch` consults ``robots.txt`` and
-        :meth:`fetch` raises :class:`RobotsDisallowedError` on a disallow. Set ``False`` to
-        bypass the check entirely — the consumer then owns authorization. Disabling robots
-        also disables ``Crawl-delay`` honoring (no ``robots.txt`` is ever fetched).
+        When ``True`` (default), `can_fetch` consults ``robots.txt`` and `fetch` raises
+        [`RobotsDisallowedError`][colorsense.RobotsDisallowedError] on a disallow. Set ``False`` to
+        bypass the check entirely — the consumer then owns authorization. Disabling robots also
+        disables ``Crawl-delay`` honoring (no ``robots.txt`` is ever fetched).
     allow_file_urls:
-        Whether :meth:`fetch` may render ``file://`` URLs. ``False`` by default —
+        Whether `fetch` may render ``file://`` URLs. ``False`` by default —
         ``file://`` reads arbitrary local files, so it must be an explicit opt-in (the test
         suite opts in to render its local fixtures). When allowed, ``file://`` still
         bypasses the robots gate and the rate limiter: it has no host and no robots
         concept. Schemes other than ``http``/``https``/``file`` are always rejected;
-        rejections raise :class:`UnsupportedSchemeError`.
+        rejections raise [`UnsupportedSchemeError`][colorsense.UnsupportedSchemeError].
     request_filter:
-        Optional synchronous or asynchronous predicate
-        (:data:`~colorsense.harvest.RequestFilter`) over **every request URL the browser
-        makes** while rendering — the navigation itself *and* all sub-resources (scripts,
-        images, XHR/``fetch`` issued by the page's own JS) — **and** over the policy's own
-        ``robots.txt`` GET (the initial robots URL and each redirect hop it follows; a
-        rejected hop aborts the fetch, which fails open as "no rules" while the navigation
-        stays gated by this same filter browser-side). Returning ``False`` aborts that
-        request. A *sync* predicate is invoked inline on the event loop's request path and
-        must not block (cheap string checks only); an *async* predicate is awaited — the
-        shipped :func:`colorsense.block_private_networks` guard is async and resolves
-        hostnames off-loop. This is the in-library mechanism against sub-resource SSRF:
-        validating the navigation URL alone cannot stop the rendered page from requesting
-        internal endpoints (e.g. ``169.254.169.254``). A predicate that *raises* fails
-        closed (the request is aborted). ``None`` (default) installs no interception at
-        all — zero overhead.
+        Optional synchronous or asynchronous predicate ([`RequestFilter`][colorsense.RequestFilter])
+        over **every request URL the browser makes** while rendering — the navigation itself *and*
+        all sub-resources (scripts, images, XHR/``fetch`` issued by the page's own JS) — **and**
+        over the policy's own ``robots.txt`` GET (the initial robots URL and each redirect hop it
+        follows; a rejected hop aborts the fetch, which fails open as "no rules" while the
+        navigation stays gated by this same filter browser-side). Returning ``False`` aborts that
+        request. A *sync* predicate is invoked inline on the event loop's request path and must not
+        block (cheap string checks only); an *async* predicate is awaited — the shipped
+        [`colorsense.block_private_networks`][colorsense.block_private_networks] guard is async and
+        resolves hostnames off-loop. This is the in-library mechanism against sub-resource SSRF:
+        validating the navigation URL alone cannot stop the rendered page from requesting internal
+        endpoints (e.g. ``169.254.169.254``). A predicate that *raises* fails closed (the request is
+        aborted). ``None`` (default) installs no interception at all — zero overhead.
     max_concurrent_renders:
         Optional cap on simultaneous *renders* through this policy — the SECURITY.md §2
         concurrency bound, shipped as a knob. ``None`` (default) is unbounded, the previous
-        behavior. When set, an :class:`asyncio.Semaphore` bounds concurrent harvester
+        behavior. When set, an `asyncio.Semaphore` bounds concurrent harvester
         calls. Composition with the other gates: **cache hits never take a slot** (they
         return before the limiter), **single-flight followers never take a slot** (they
         await the leader's future), and the throttle/robots wait happens *outside* the
@@ -319,18 +318,18 @@ class PolitenessPolicy:
         the second fetch to that host onward.
     max_crawl_delay:
         Upper bound (seconds) on an honored ``robots.txt`` ``Crawl-delay``. Defaults to
-        :data:`DEFAULT_MAX_CRAWL_DELAY` (30.0) so a hostile or typo'd ``robots.txt``
+        `DEFAULT_MAX_CRAWL_DELAY` (30.0) so a hostile or typo'd ``robots.txt``
         cannot stall a pipeline arbitrarily; raise it to honor longer delays.
     max_cache_entries:
-        Upper bound on the render cache (``_cache``), which holds full :class:`Harvest`
+        Upper bound on the render cache (``_cache``), which holds full `Harvest`
         objects — the largest things this policy retains. When the cache would exceed this,
-        the least-recently-used entry is evicted (the cache is an :class:`OrderedDict`; a
+        the least-recently-used entry is evicted (the cache is an `OrderedDict`; a
         hit moves its key to the most-recently-used end). Defaults to
-        :data:`DEFAULT_MAX_CACHE_ENTRIES`. Pass ``0`` or ``None`` for an unbounded cache
+        `DEFAULT_MAX_CACHE_ENTRIES`. Pass ``0`` or ``None`` for an unbounded cache
         (the legacy grow-forever behavior — only sensible for short-lived runs).
     harvester:
         The render function, injectable for testing. Defaults to
-        :func:`colorsense.harvest.harvest_page`.
+        `colorsense.harvest.harvest_page`.
     robots_loader / clock / sleeper:
         Injectable async seams for ``robots.txt`` retrieval and sleeping, plus a sync time
         source — swapped out by the test suite so no real network or wall-clock delay is
@@ -401,7 +400,8 @@ class PolitenessPolicy:
     # -- scheme gate ---------------------------------------------------------
 
     def _validate_scheme(self, url: str) -> None:
-        """Raise :class:`UnsupportedSchemeError` unless ``url``'s scheme is fetchable.
+        """Raise [`UnsupportedSchemeError`][colorsense.UnsupportedSchemeError] unless
+        ``url``'s scheme is fetchable.
 
         ``http``/``https`` are always allowed (the robots/throttle gates apply downstream);
         ``file`` only when this policy opted in via ``allow_file_urls=True``; everything
@@ -470,7 +470,7 @@ class PolitenessPolicy:
         """Effective pacing interval for ``host``: ``max(min_interval, capped Crawl-delay)``.
 
         The crawl delay is clamped to ``max_crawl_delay`` first (see
-        :data:`DEFAULT_MAX_CRAWL_DELAY` for why). With ``respect_robots=False`` no robots
+        `DEFAULT_MAX_CRAWL_DELAY` for why). With ``respect_robots=False`` no robots
         is ever fetched, ``_crawl_delay`` stays empty, and this reduces to ``min_interval``.
         """
         crawl_delay = self._crawl_delay.get(host)
@@ -481,10 +481,10 @@ class PolitenessPolicy:
     async def _throttle(self, url: str) -> None:
         """Wait until the host's effective interval has elapsed since its last fetch.
 
-        The interval is :meth:`_host_interval` — ``min_interval`` raised to the host's
+        The interval is `_host_interval` — ``min_interval`` raised to the host's
         (capped) ``robots.txt`` ``Crawl-delay`` once one has been learned.
 
-        The read-and-stamp step is guarded by an :class:`asyncio.Lock` so concurrent callers
+        The read-and-stamp step is guarded by an `asyncio.Lock` so concurrent callers
         serialize correctly, but the actual sleep happens *outside* the lock: we reserve this
         caller's slot by stamping the reserved next-fetch time (``last + interval``)
         before releasing, so two same-host callers arriving together chain (each waits
@@ -537,19 +537,20 @@ class PolitenessPolicy:
         *,
         browser: SharedBrowser | None = None,
     ) -> Harvest:
-        """Return a :class:`Harvest` for ``url``/``theme``/``viewport``, politely.
+        """Return a `Harvest` for ``url``/``theme``/``viewport``, politely.
 
         ``browser`` is an optional shared-browser handle forwarded to the harvester
         verbatim — the policy itself knows nothing about browser lifecycle (neither
-        launching nor closing). :func:`colorsense.analyze` passes one handle to all of a
-        call's theme fetches so they share a single Chromium launch; the handle is lazy,
+        launching nor closing). [`colorsense.analyze`][colorsense.analyze] passes one handle
+        to all of a call's theme fetches so they share a single Chromium launch; the handle is lazy,
         so a fetch served from the cache (or coalesced onto an in-flight leader) never
         triggers a launch. The cache key is unchanged (URL + theme + viewport): sharing a
         browser does not change *what* is rendered, only where the context lives.
 
         The URL scheme is validated first — before even the cache lookup, so a previously
         cached ``file://`` harvest can never be served by a policy that forbids file URLs
-        (raises :class:`UnsupportedSchemeError`; see ``allow_file_urls``).
+        (raises [`UnsupportedSchemeError`][colorsense.UnsupportedSchemeError]; see
+        ``allow_file_urls``).
 
         Cache hits return immediately (no robots check, no throttle, no render) and mark the
         entry most-recently-used. Otherwise the per-host rate limiter is applied, the robots
@@ -561,7 +562,7 @@ class PolitenessPolicy:
         becomes the leader and runs exactly one throttle → robots gate → render; any caller
         that arrives while that render is in flight becomes a follower, awaiting the leader's
         result instead of launching a redundant headless render. All followers receive the
-        leader's :class:`Harvest` — or, if the leader's gate/render fails, the *same*
+        leader's `Harvest` — or, if the leader's gate/render fails, the *same*
         exception (the failure is not cached, and the next fetch re-renders). Distinct keys
         never share, so unrelated renders still run in parallel.
 

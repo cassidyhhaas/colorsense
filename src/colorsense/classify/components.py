@@ -1,8 +1,8 @@
 """Rule-based component classifier.
 
 Scores each harvested DOM element into a probability distribution over
-:class:`~colorsense.models.ComponentType`. Every weight, threshold, predicate,
-and vocabulary entry is read from :class:`~colorsense.config.Config` (the palette
+[`ComponentType`][colorsense.ComponentType]. Every weight, threshold, predicate,
+and vocabulary entry is read from [`Config`][colorsense.Config] (the palette
 configuration YAML); nothing is hard-coded here.
 
 Scoring pipeline (per element):
@@ -65,7 +65,7 @@ def _add_votes(
     """Add a config vote dict (keyed by component-type strings) into ``accum``.
 
     Keys that are channel sentinels (e.g. ``"ignore"``) or otherwise not valid
-    :class:`ComponentType` members are skipped rather than crashing.
+    [`ComponentType`][colorsense.ComponentType] members are skipped rather than crashing.
     """
     for key, weight in votes.items():
         if key in _NON_COMPONENT_VOTE_KEYS:
@@ -81,7 +81,7 @@ def _matches_semantic_tag(rule: VoteRule, element: HarvestedElement) -> bool:
     """Return whether a semantic-tag rule matches the element's tag/role/input type.
 
     ``input[submit]`` matches only inputs whose harvested ``type`` attribute is
-    button-like (see :data:`_BUTTONLIKE_INPUT_TYPES`). Regression guard: it used to
+    button-like (see `_BUTTONLIKE_INPUT_TYPES`). Regression guard: it used to
     match EVERY ``<input>``, giving search/text inputs a spurious cta_bg vote.
     """
     match = rule.match

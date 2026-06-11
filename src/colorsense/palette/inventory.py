@@ -1,27 +1,27 @@
 """Inventory & clustering: join area-truth with semantics, then cluster.
 
-This module fuses two sources of truth from a :class:`~colorsense.models.Harvest`
-and its classified elements into area-weighted :class:`~colorsense.models.ColorCluster`
+This module fuses two sources of truth from a `Harvest`
+and its classified elements into area-weighted `ColorCluster`
 objects:
 
-* **Area truth** — :attr:`Harvest.screenshot_bins`. Each
-  :class:`~colorsense.models.ScreenshotBin` reports a rendered color and the fraction
+* **Area truth** — `Harvest.screenshot_bins`. Each
+  `ScreenshotBin` reports a rendered color and the fraction
   of page area it covers. This is the authoritative area weight.
 * **Semantic truth** — the classified elements. Each
-  :class:`~colorsense.models.ClassifiedElement` carries a ``component_dist`` over
-  :class:`~colorsense.models.ComponentType`. The distribution is split per color
+  `ClassifiedElement` carries a ``component_dist`` over
+  [`ComponentType`][colorsense.ComponentType]. The distribution is split per color
   channel and attributed to the nearest screenshot-bin color of the *matching*
   measured color: ``*_text`` components and ``link`` route to ``element.text``
-  (a link paints its typography), :attr:`~colorsense.models.ComponentType.border`
+  (a link paints its typography), `border`
   to ``element.border``, and everything else to ``element.bg``. This channel
-  routing is a fixed code-level convention (see :func:`_channel_for`). A channel
+  routing is a fixed code-level convention (see `_channel_for`). A channel
   whose measured color is **fully transparent** (``alpha == 0``) paints nothing
   and donates no mass — without this gate, every transparent-background element
   (links, paragraphs, wrappers) piles its votes onto a phantom ``#000000``
   zero-area cluster.
 
 Perceptual distance is measured exclusively with
-:func:`colorsense.color.primitives.delta_e` (OKLab ``deltaEOK``), whose units are small;
+`colorsense.color.primitives.delta_e` (OKLab ``deltaEOK``), whose units are small;
 the thresholds below are tuned for that scale.
 
 Determinism
@@ -78,7 +78,7 @@ def _channel_for(component: ComponentType) -> str:
     The routing convention is fixed in code: components whose value ends with
     ``_text`` — plus ``link``, whose painted color is its typography color, not
     its (usually transparent) background — are painted by the element's
-    ``color`` (its ``text`` channel), :attr:`~colorsense.models.ComponentType.border`
+    ``color`` (its ``text`` channel), `border`
     by its ``border-color``, and everything else (including ``badge``,
     ``third_party`` and ``button_secondary``) by its ``background-color``.
     """
@@ -126,22 +126,22 @@ def build_inventory(harvest: Harvest, classified: list[ClassifiedElement]) -> li
 
     See the module docstring for the data sources. The algorithm is:
 
-    1. Seed one entry per :class:`~colorsense.models.ScreenshotBin` (authoritative
+    1. Seed one entry per `ScreenshotBin` (authoritative
        area weight, empty mix).
     2. For each classified element, split its ``component_dist`` into per-channel
-       sub-distributions via :func:`_channel_for` and process the channels in a
+       sub-distributions via `_channel_for` and process the channels in a
        fixed (bg, text, border) order. For each channel whose measured color is
        non-``None`` and whose sub-distribution is non-empty, find the nearest
-       entry by :func:`~colorsense.color.primitives.delta_e`. If that nearest
-       entry is within the channel's join radius (:data:`DELTA_E_MATCH_BG` for
-       bg, the tighter :data:`DELTA_E_MATCH_TEXT_BORDER` for text/border), add
+       entry by `delta_e`. If that nearest
+       entry is within the channel's join radius (`DELTA_E_MATCH_BG` for
+       bg, the tighter `DELTA_E_MATCH_TEXT_BORDER` for text/border), add
        the channel's mass (each element weighted equally, raw) into the entry's
        mix. Otherwise create a
        new entry from the channel's color with ``area_weight = 0.0`` so its
        semantics are not lost. New entries are appended in element order then
        channel order, which is deterministic.
-    3. Cluster entries via union-find under :data:`DELTA_E_CLUSTER`. For each group
-       emit one :class:`~colorsense.models.ColorCluster`: representative color =
+    3. Cluster entries via union-find under `DELTA_E_CLUSTER`. For each group
+       emit one `ColorCluster`: representative color =
        member with the largest area weight (ties / all-zero broken by ``hex``);
        ``area_weight`` = sum of member weights; ``member_count`` = group size;
        ``component_mass`` = the raw summed member mixes (un-normalized vote mass —

@@ -1,8 +1,9 @@
-"""``colorsense`` command line — a convenience entry point over :func:`colorsense.analyze`.
+"""``colorsense`` command line — a convenience entry point over
+[`colorsense.analyze`][colorsense.analyze].
 
-The typed API (:func:`colorsense.analyze`) is the contract. The human-readable output of
-this command is **not stable** and may change between releases; ``--json`` emits the
-:class:`~colorsense.models.AnalysisResult` schema (``model_dump_json``), which follows the
+The typed API ([`colorsense.analyze`][colorsense.analyze]) is the contract. The human-readable
+output of this command is **not stable** and may change between releases; ``--json`` emits the
+[`AnalysisResult`][colorsense.AnalysisResult] schema (``model_dump_json``), which follows the
 library's compatibility story. Installed as the ``colorsense`` console script.
 
 stdout carries data only (the palette summary, or JSON documents under ``--json``);
@@ -61,7 +62,7 @@ def _version_callback(value: bool) -> None:
 
 
 def _parse_viewport(value: str, scale: float) -> Viewport:
-    """Parse ``WxH`` (plus the ``--scale`` factor) into a :class:`Viewport`."""
+    """Parse ``WxH`` (plus the ``--scale`` factor) into a [`Viewport`][colorsense.Viewport]."""
     width_text, sep, height_text = value.lower().partition("x")
     if not sep or not width_text.strip().isdigit() or not height_text.strip().isdigit():
         raise typer.BadParameter(

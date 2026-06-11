@@ -1,17 +1,18 @@
 """Usage-keyed palette assembly: what colors paint each usage category.
 
-Builds the **measured** :class:`~colorsense.models.UsagePalette` from the color
-inventory: per :class:`~colorsense.models.UsageCategory` (surface / text / interactive /
-border), a probability-ranked list of :class:`~colorsense.models.UsageEntry` colors.
+Builds the **measured** [`UsagePalette`][colorsense.UsagePalette] from the color
+inventory: per [`UsageCategory`][colorsense.UsageCategory] (surface / text / interactive /
+border), a probability-ranked list of [`UsageEntry`][colorsense.UsageEntry] colors.
 This is the primary palette view — unlike the 60/30/10 roles view it preserves the
 design's actual structure (e.g. a neutral-layered design's gray text/border hierarchy
 appears here directly).
 
 Design notes
 ------------
-* The public entry point is :func:`build_usage`. It takes *only* the cluster list (no
-  :class:`Config`); every threshold is a documented, module-level **tunable** constant.
-* :data:`COMPONENT_USAGE` — the component-type → usage-category routing — is a fixed
+* The public entry point is `build_usage`. It takes *only* the cluster list (no
+  [`Config`][colorsense.Config]); every threshold is a documented, module-level **tunable**
+  constant.
+* `COMPONENT_USAGE` — the component-type → usage-category routing — is a fixed
   code-level convention, exactly like the inventory's component → color-channel routing
   (``palette/inventory.py``'s ``_channel_for``): it describes what the taxonomy *means*,
   not a tunable weight, so it lives in code rather than the YAML config.
@@ -108,7 +109,7 @@ def _build_entries(
     """Normalize prominence scores into probabilities, prune, renormalize, and rank.
 
     ``scored`` is ``(cluster, prominence, per-component masses)`` per participating
-    cluster. Entries below :data:`MIN_SHARE` are pruned with the keep-argmax fallback;
+    cluster. Entries below `MIN_SHARE` are pruned with the keep-argmax fallback;
     output is sorted by ``(-probability, hex)``.
     """
     if not scored:
@@ -153,14 +154,13 @@ def _build_entries(
 def build_usage(clusters: list[ColorCluster]) -> UsagePalette:
     """Build the **measured** usage palette from the color inventory.
 
-    For each usage category, the participating clusters (those with nonzero raw vote
-    mass routed to the category via :data:`COMPONENT_USAGE`) are scored by prominence —
-    screenshot area for ``surface``, ``log1p`` of in-category vote mass for the others
-    (see the module docstring for the rationale) — normalized to probabilities, pruned below
-    :data:`MIN_SHARE` (argmax kept if pruning empties the category), and ranked by
-    ``(-probability, hex)``. A category with no mass anywhere maps to ``()`` (the
-    :class:`UsagePalette` validator backfills it). An empty cluster list yields an
-    empty (all-``()``) palette.
+    For each usage category, the participating clusters (those with nonzero raw vote mass routed to
+    the category via `COMPONENT_USAGE`) are scored by prominence — screenshot area for ``surface``,
+    ``log1p`` of in-category vote mass for the others (see the module docstring for the rationale) —
+    normalized to probabilities, pruned below `MIN_SHARE` (argmax kept if pruning empties the
+    category), and ranked by ``(-probability, hex)``. A category with no mass anywhere maps to
+    ``()`` (the [`UsagePalette`][colorsense.UsagePalette] validator backfills it). An empty cluster
+    list yields an empty (all-``()``) palette.
     """
     per_category: dict[UsageCategory, list[tuple[ColorCluster, float, dict[ComponentType, float]]]]
     per_category = {category: [] for category in UsageCategory}

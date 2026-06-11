@@ -4,7 +4,7 @@ Enumerates declared CSS custom properties (``--*``) across all *same-origin* sty
 (cross-origin sheets that throw on ``.cssRules`` are skipped), recursing into ``@media``
 rules and capturing the media text. For each declaration we capture the raw value and its
 scope selector, and separately read the value resolved against ``:root`` so it can be
-parsed into a :class:`~colorsense.models.Color`.
+parsed into a [`Color`][colorsense.Color].
 
 ``var(--x)`` aliases are detected from the raw value and recorded in ``alias_target``.
 
@@ -104,10 +104,10 @@ def _alias_target(raw_value: str) -> str | None:
 
 
 async def harvest_tokens(page: Page) -> list[TokenRecord]:
-    """Collect declared CSS custom properties as :class:`TokenRecord` objects.
+    """Collect declared CSS custom properties as `TokenRecord` objects.
 
     Same-origin stylesheets only. Each record's ``resolved`` is the ``:root``-resolved
-    value parsed via :func:`parse_css_color` (``None`` if non-color/unresolvable), and
+    value parsed via `parse_css_color` (``None`` if non-color/unresolvable), and
     ``alias_target`` is set (with leading ``--``) when the raw value is a ``var(--x)``
     reference.
     """

@@ -1,23 +1,23 @@
 """Reconcile declared-token intent with measured usage via log-linear pooling.
 
 This module fuses two independent signals about a site's palette, in **usage space**
-(:class:`~colorsense.models.UsageCategory`):
+([`UsageCategory`][colorsense.UsageCategory]):
 
 * **usage** — the measured per-category prominence over rendered *colors* produced by
   ``build_usage``; this is "what actually rendered".
 * **tokens** — the declared design-token *intent* produced by ``classify_tokens``; each
-  token carries a resolved :class:`Color` and a ``usage_prior`` distribution over
-  :class:`UsageCategory`; this is "what the author declared".
+  token carries a resolved [`Color`][colorsense.Color] and a ``usage_prior`` distribution over
+  [`UsageCategory`][colorsense.UsageCategory]; this is "what the author declared".
 
 The two are combined by **log-linear pooling** (a weighted geometric mean) with weight
 ``alpha`` on intent: ``alpha=0`` -> pure usage, ``alpha=1`` -> pure intent. Colors are
 matched across the two sources by nearest-color under two perceptual ΔE radii — the
-tight :data:`DELTA_E_MATCH` for declared-vs-declared and the looser
-:data:`DELTA_E_MATCH_MEASURED` for measured-vs-declared (rationale at each constant).
+tight `DELTA_E_MATCH` for declared-vs-declared and the looser
+`DELTA_E_MATCH_MEASURED` for measured-vs-declared (rationale at each constant).
 
-The output is a posterior :class:`UsagePalette` plus a divergence report listing
+The output is a posterior [`UsagePalette`][colorsense.UsagePalette] plus a divergence report listing
 declared-but-unused and used-but-undeclared discrepancies. Declared-but-unused items are
-gated to **high-intent** tokens (:data:`HIGH_INTENT_ORIGINS`, where the gate's rationale
+gated to **high-intent** tokens (`HIGH_INTENT_ORIGINS`, where the gate's rationale
 lives).
 
 All thresholds are module-level constants, documented and tunable.
@@ -51,7 +51,7 @@ DELTA_E_MATCH: float = 0.08
 #: Join threshold for matching a MEASURED usage entry against a declared token color.
 #: A measured entry's representative is a screenshot-quantizer bin whenever the cluster
 #: matched one, and an element may join a bin up to the bg join radius away
-#: (:data:`~colorsense.palette.inventory.DELTA_E_MATCH_BG`) — so this radius must be at
+#: (`DELTA_E_MATCH_BG`) — so this radius must be at
 #: least that, or a pixel-perfect rendered token can fail its own intent match purely
 #: from (platform-dependent) quantizer blending (see docs/how-it-works.md).
 DELTA_E_MATCH_MEASURED: float = DELTA_E_MATCH_BG
@@ -120,7 +120,7 @@ def _aggregate_intent(tokens: list[ClassifiedToken]) -> list[_IntentGroup]:
 
     Only tokens with a resolved color and a non-empty ``usage_prior`` are considered.
     Tokens are processed sorted by ``record.name`` for determinism; a token joins an
-    existing group when within :data:`DELTA_E_MATCH` of the group's color, else starts a
+    existing group when within `DELTA_E_MATCH` of the group's color, else starts a
     new group anchored on its own resolved color.
     """
     eligible = [t for t in tokens if t.record.resolved is not None and len(t.usage_prior) > 0]
@@ -158,13 +158,13 @@ def reconcile(
 ) -> tuple[UsagePalette, list[DivergenceItem]]:
     """Fuse declared intent (``tokens``) with measured ``usage`` by log-linear pooling.
 
-    The pipeline is aggregation (:func:`_aggregate_intent`) → per-category pooling
-    (:func:`_pool_category`) → divergence (:func:`_build_divergence`).
+    The pipeline is aggregation (`_aggregate_intent`) → per-category pooling
+    (`_pool_category`) → divergence (`_build_divergence`).
 
-    Returns a posterior :class:`UsagePalette` and a deterministic list of
-    :class:`DivergenceItem`. ``alpha`` weights intent vs. usage and is clamped to
-    ``[0, 1]``. Posterior entries carry the matched measured entry's ``area`` and
-    ``components``; token-only colors get ``area=0.0`` and empty ``components``.
+    Returns a posterior [`UsagePalette`][colorsense.UsagePalette] and a deterministic list of
+    [`DivergenceItem`][colorsense.DivergenceItem]. ``alpha`` weights intent vs. usage and is clamped
+    to ``[0, 1]``. Posterior entries carry the matched measured entry's ``area`` and ``components``;
+    token-only colors get ``area=0.0`` and empty ``components``.
     """
     alpha = _clamp_alpha(alpha)
     groups = _aggregate_intent(tokens)

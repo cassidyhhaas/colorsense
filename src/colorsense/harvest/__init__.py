@@ -2,16 +2,16 @@
 
 Public interface
 ----------------
-* :func:`harvest_page` — async: render a URL under a theme and produce a
-  :class:`~colorsense.models.Harvest`.
-* :class:`RenderSession` — the Playwright async context manager used internally (exported
+* `harvest_page` — async: render a URL under a theme and produce a
+  `Harvest`.
+* `RenderSession` — the Playwright async context manager used internally (exported
   for advanced/manual use).
-* :class:`SharedBrowser` — lazy handle sharing one Chromium launch across several renders
-  (each render still gets its own browser context); :func:`colorsense.analyze` uses one
-  per call so sibling theme renders don't each pay a browser launch.
-* :data:`RequestFilter` — the type of a ``request_filter`` predicate: a sync **or** async
-  ``url -> bool`` callable (sync runs inline on the event loop and must not block; async
-  is awaited).
+* `SharedBrowser` — lazy handle sharing one Chromium launch across several renders
+  (each render still gets its own browser context); [`colorsense.analyze`][colorsense.analyze]
+  uses one per call so sibling theme renders don't each pay a browser launch.
+* * [`RequestFilter`][colorsense.RequestFilter] — the type of a ``request_filter`` predicate: a sync
+  **or** async ``url -> bool`` callable (sync runs inline on the event loop and must not block;
+  async is awaited).
 """
 
 from __future__ import annotations
@@ -61,7 +61,7 @@ class RenderError(Exception):
     and a capture whose decoded dimensions exceed the decompression-bomb cap is rejected.
     All of these are wrapped into this one public type.
 
-    The offending URL is available as :attr:`url`; the original error is chained via
+    The offending URL is available as `url`; the original error is chained via
     ``__cause__`` (``raise ... from err``).
     """
 
@@ -85,40 +85,41 @@ async def harvest_page(
 ) -> Harvest:
     """Render ``url`` under ``theme``/``viewport`` and harvest everything into a Harvest.
 
-    Opens a single :class:`RenderSession`, navigates, then runs token, DOM, hover-state,
+    Opens a single `RenderSession`, navigates, then runs token, DOM, hover-state,
     and screenshot harvesting against the one live page, and assembles the
-    :class:`~colorsense.models.Harvest` contract.
+    `Harvest` contract.
 
     ``nav_timeout_ms`` is the per-navigation timeout passed through to
-    :meth:`RenderSession.goto` (defaults to :data:`DEFAULT_NAV_TIMEOUT_MS`); a navigation
-    that exceeds it surfaces as :class:`RenderError`. It is keyword-only with a default so
-    existing :class:`~colorsense.net.politeness.Harvester` callers/fakes remain compatible.
+    `RenderSession.goto` (defaults to `DEFAULT_NAV_TIMEOUT_MS`); a navigation
+    that exceeds it surfaces as [`RenderError`][colorsense.RenderError]. It is keyword-only
+    with a default so existing `Harvester` callers/fakes remain compatible.
 
-    Any render or harvest failure — Playwright navigation errors, malformed in-page
-    payloads from a DOM-tampering page, or an oversized screenshot capture — surfaces as
-    :class:`RenderError` with the original error chained (see :class:`RenderError`).
+    Any render or harvest failure — Playwright navigation errors, malformed in-page payloads from a
+    DOM-tampering page, or an oversized screenshot capture — surfaces as
+    [`RenderError`][colorsense.RenderError] with the original error chained (see
+    [`RenderError`][colorsense.RenderError]).
 
-    ``user_agent``, when not ``None``, is forwarded to :class:`RenderSession` and set on the
-    browser context, so the page navigation identifies itself with the configured UA instead
-    of the stock headless-Chromium one. :meth:`PolitenessPolicy.fetch` passes its configured
-    ``user_agent`` through here, making the documented "identifiable User-Agent" hold on the
-    actual render, not just the ``robots.txt`` GET.
+    ``user_agent``, when not ``None``, is forwarded to `RenderSession` and set on the browser
+    context, so the page navigation identifies itself with the configured UA instead of the stock
+    headless-Chromium one. [`PolitenessPolicy.fetch`][colorsense.PolitenessPolicy.fetch] passes its
+    configured ``user_agent`` through here, making the documented "identifiable User-Agent" hold on
+    the actual render, not just the ``robots.txt`` GET.
 
-    ``request_filter``, when not ``None``, is a :data:`RequestFilter` — sync or async —
-    forwarded to :class:`RenderSession`, which installs it as a browser-context route:
-    every request the render makes (the navigation *and* all sub-resources the page's own
-    JS/markup triggers) is aborted unless the predicate returns ``True`` (an async
-    predicate is awaited; a raising predicate fails closed and aborts).
-    :meth:`PolitenessPolicy.fetch` passes its configured ``request_filter`` through here.
+    ``request_filter``, when not ``None``, is a [`RequestFilter`][colorsense.RequestFilter] — sync
+    or async — forwarded to `RenderSession`, which installs it as a browser-context route: every
+    request the render makes (the navigation *and* all sub-resources the page's own JS/markup
+    triggers) is aborted unless the predicate returns ``True`` (an async predicate is awaited; a
+    raising predicate fails closed and aborts).
+    [`PolitenessPolicy.fetch`][colorsense.PolitenessPolicy.fetch] passes its configured
+    ``request_filter`` through here.
 
-    ``browser``, when not ``None``, is a :class:`SharedBrowser` handle resolved lazily
-    (launching on first use) and handed to :class:`RenderSession`, so this render opens a
-    fresh browser context inside the shared Chromium instead of launching its own. The
-    handle's owner (e.g. one :func:`colorsense.analyze` call sharing a browser across its
-    theme renders) is responsible for teardown; this function never closes it. ``None``
-    (the default) keeps the previous behavior: a dedicated browser per render. A failure
-    launching the shared browser surfaces as :class:`RenderError` like any other render
-    failure.
+    ``browser``, when not ``None``, is a `SharedBrowser` handle resolved lazily (launching on first
+    use) and handed to `RenderSession`, so this render opens a fresh browser context inside the
+    shared Chromium instead of launching its own. The handle's owner (e.g. one
+    [`colorsense.analyze`][colorsense.analyze] call sharing a browser across its theme renders) is
+    responsible for teardown; this function never closes it. ``None`` (the default) keeps the
+    previous behavior: a dedicated browser per render. A failure launching the shared browser
+    surfaces as [`RenderError`][colorsense.RenderError] like any other render failure.
 
     ``browser_args`` is a sequence of extra command-line arguments for the **dedicated**
     Chromium launch (the ``browser=None`` path), appended to the library's own launch
@@ -126,20 +127,20 @@ async def harvest_page(
     ``("--js-flags=--max-old-space-size=512",)`` to cap the renderer's V8 heap (JS heap
     only, not total renderer memory; container limits remain the enforceable bound, see
     ``SECURITY.md`` §2). Launch arguments only exist at launch time, so combining a
-    non-empty ``browser_args`` with a shared ``browser`` handle raises :class:`ValueError`
+    non-empty ``browser_args`` with a shared ``browser`` handle raises `ValueError`
     *before* any render — pass them to ``SharedBrowser(browser_args=...)`` instead (that is
-    what ``analyze(browser_args=...)`` does). Non-string entries raise :class:`TypeError`.
+    what ``analyze(browser_args=...)`` does). Non-string entries raise `TypeError`.
 
-    Calling ``harvest_page`` directly bypasses :class:`PolitenessPolicy` entirely — scheme
-    validation, the robots gate, the rate limiter, and the cache all live in the policy,
-    the only place networking policy is enforced.
+    Calling ``harvest_page`` directly bypasses [`PolitenessPolicy`][colorsense.PolitenessPolicy]
+    entirely — scheme validation, the robots gate, the rate limiter, and the cache all live
+    in the policy, the only place networking policy is enforced.
 
     The steps share one live page but overlap where it is safe to: token and DOM reads run
     together (both are read-only DOM queries). Hover probing runs on its own — it forces
     ``:hover`` pseudo-state per element, which would otherwise leak into the subsequent
     screenshot. Concurrency *across* themes/URLs is the caller's job (see
-    :meth:`PolitenessPolicy.fetch` and :func:`colorsense.analyze`, which render distinct
-    themes concurrently).
+    [`PolitenessPolicy.fetch`][colorsense.PolitenessPolicy.fetch] and
+    [`colorsense.analyze`][colorsense.analyze], which render distinct themes concurrently).
     """
     vendor_prefixes = config.component_classifier.third_party.vendor_prefixes
 

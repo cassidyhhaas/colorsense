@@ -1,16 +1,16 @@
 """The end-to-end pipeline and public ``analyze`` entry point.
 
 ``analyze`` wires every stage into one typed call: render each requested
-theme (gated by :class:`~colorsense.net.politeness.PolitenessPolicy`), classify tokens
+theme (gated by [`PolitenessPolicy`][colorsense.PolitenessPolicy]), classify tokens
 and components, build a color inventory, build the usage-keyed palette view, reconcile
 it against declared token intent, and derive the 60/30/10 roles view — per theme.
 Sites that ignore
 ``prefers-color-scheme`` (near-identical light/dark renders)
 are collapsed to a single theme. The whole thing is assembled into a typed
-:class:`~colorsense.models.AnalysisResult`.
+[`AnalysisResult`][colorsense.AnalysisResult].
 
 Networking lives entirely behind ``PolitenessPolicy``/``harvest_page``; everything else is
-pure given a :class:`~colorsense.models.Harvest`, so tests drive the pipeline against local
+pure given a `Harvest`, so tests drive the pipeline against local
 ``file://`` fixtures with no public network. The pure per-theme CPU work is offloaded to
 worker threads (``asyncio.to_thread``) so it never blocks the event loop.
 """
@@ -65,11 +65,11 @@ _COLLAPSE_TOP_BINS = 4
 
 
 class AnalysisTimeoutError(TimeoutError):
-    """Raised by :func:`analyze` when ``max_total_seconds`` expires.
+    """Raised by [`analyze`][colorsense.analyze] when ``max_total_seconds`` expires.
 
-    Subclasses the builtin :class:`TimeoutError`, so a generic ``except TimeoutError``
+    Subclasses the builtin `TimeoutError`, so a generic ``except TimeoutError``
     still catches it. The offending URL and the configured budget are available as
-    :attr:`url` and :attr:`max_total_seconds`.
+    `url` and `max_total_seconds`.
     """
 
     def __init__(self, url: str, max_total_seconds: float) -> None:
@@ -85,7 +85,8 @@ class _ThemeOutput:
     """Everything derived for one rendered theme.
 
     The per-theme analysis (usage view, roles view, fit score, divergence, tokens) lives
-    on the :class:`ThemePalette` itself; only the cross-theme aggregates ride alongside.
+    on the [`ThemePalette`][colorsense.ThemePalette] itself; only the cross-theme aggregates
+    ride alongside.
     """
 
     palette: ThemePalette
@@ -103,7 +104,7 @@ async def analyze(
     browser_args: tuple[str, ...] = (),
     include_tokens: bool = False,
 ) -> AnalysisResult:
-    """Analyze ``url`` and return a typed :class:`AnalysisResult`.
+    """Analyze ``url`` and return a typed [`AnalysisResult`][colorsense.AnalysisResult].
 
     Async-native: the requested themes are rendered concurrently — sharing one lazily
     launched headless Chromium, each theme in its own browser context — gated by
@@ -124,24 +125,24 @@ async def analyze(
     viewport:
         Render viewport; defaults to 1280x800 at 1x scale.
     themes:
-        Themes to render, in priority order (the first is "primary": it is the theme
-        kept when near-identical renders collapse). Duplicates are ignored. Defaults to
-        **light only** — most sites have no dark mode and a second theme roughly doubles the
-        work. Pass ``themes=(Theme.light, Theme.dark)`` (or the exported
-        :data:`LIGHT_AND_DARK`) to also analyze dark mode; near-identical renders still
-        collapse to a single reported theme.
+        Themes to render, in priority order (the first is "primary": it is the theme kept when
+        near-identical renders collapse). Duplicates are ignored. Defaults to **light only** — most
+        sites have no dark mode and a second theme roughly doubles the work. Pass
+        ``themes=(Theme.light, Theme.dark)`` (or the exported
+        [`LIGHT_AND_DARK`][colorsense.LIGHT_AND_DARK]) to also analyze dark mode; near-identical
+        renders still collapse to a single reported theme.
     politeness:
         Fetch policy (robots gate, rate limit, render cache). A conservative default
-        :class:`PolitenessPolicy` is created when omitted. The **consumer** is responsible
-        for authorization — see ``SECURITY.md``.
+        [`PolitenessPolicy`][colorsense.PolitenessPolicy] is created when omitted. The **consumer**
+        is responsible for authorization — see ``SECURITY.md``.
     max_total_seconds:
         Optional overall deadline for the entire call — every theme render *plus* the CPU
-        classification — enforced via :class:`asyncio.timeout` (the SECURITY.md §2
-        deadline, shipped as a knob). ``None`` (default) imposes no deadline, the previous
-        behavior. On expiry, all in-flight renders are cancelled, the shared browser is
-        closed on the way out, and :class:`AnalysisTimeoutError` is raised (a
-        :class:`TimeoutError` subclass carrying the url and budget). Must be positive when
-        set (``<= 0`` raises :class:`ValueError`).
+        classification — enforced via `asyncio.timeout` (the SECURITY.md §2 deadline, shipped as a
+        knob). ``None`` (default) imposes no deadline, the previous behavior. On expiry, all
+        in-flight renders are cancelled, the shared browser is closed on the way out, and
+        [`AnalysisTimeoutError`][colorsense.AnalysisTimeoutError] is raised (a `TimeoutError`
+        subclass carrying the url and budget). Must be positive when set (``<= 0`` raises
+        `ValueError`).
     browser_args:
         Extra command-line arguments for the call's Chromium launch, appended to the
         library's own launch arguments and passed **verbatim** to Chromium (the library
@@ -151,14 +152,14 @@ async def analyze(
         process's V8 heap at 512 MB. Note this bounds the **JS heap only**, not total
         renderer memory; hard per-render memory/CPU caps are the container/cgroup layer's
         job (see ``SECURITY.md`` §2). Default ``()``: no extra arguments, behavior
-        unchanged. Non-string entries (or a bare string) raise :class:`TypeError` before
+        unchanged. Non-string entries (or a bare string) raise `TypeError` before
         any render.
     include_tokens:
-        When ``True``, each :class:`ThemePalette` carries its declared design tokens as
-        ``tokens`` (a tuple of :class:`~colorsense.models.DesignToken`; ``()`` when the
-        page declares none). When ``False`` (the default) ``tokens`` is ``None``. The
-        flag gates **only output assembly**: token classification and reconciliation
-        always run, so every other field is identical either way.
+        When ``True``, each [`ThemePalette`][colorsense.ThemePalette] carries its declared design
+        tokens as ``tokens`` (a tuple of [`DesignToken`][colorsense.DesignToken]; ``()`` when the
+        page declares none). When ``False`` (the default) ``tokens`` is ``None``. The flag gates
+        **only output assembly**: token classification and reconciliation always run, so every other
+        field is identical either way.
 
     Raises
     ------
@@ -204,7 +205,7 @@ async def _analyze(
     browser_args: tuple[str, ...],
     include_tokens: bool,
 ) -> AnalysisResult:
-    """The deadline-free body of :func:`analyze` (which owns ``max_total_seconds``).
+    """The deadline-free body of [`analyze`][colorsense.analyze] (which owns ``max_total_seconds``).
 
     On cancellation (including an ``analyze`` deadline expiring mid-render), the
     ``async with SharedBrowser()`` below unwinds: the ``TaskGroup`` cancels in-flight
@@ -318,7 +319,7 @@ def _analyze_theme(
 
 
 def _design_tokens(classified: list[ClassifiedToken]) -> tuple[DesignToken, ...]:
-    """Project classified tokens onto the public :class:`DesignToken` shape.
+    """Project classified tokens onto the public [`DesignToken`][colorsense.DesignToken] shape.
 
     Keeps only meaningful tokens: a resolved color present, a semantic role other than
     ``ignore``, and a positive classification weight. Dedupes by name keeping the FIRST

@@ -1,6 +1,6 @@
 """A library-shipped egress filter blocking private-network destinations.
 
-:func:`block_private_networks` builds a predicate suitable for
+[`block_private_networks`][colorsense.block_private_networks] builds a predicate suitable for
 ``PolitenessPolicy(request_filter=...)``: it is applied by the library to **every** URL the
 browser requests while rendering (the navigation and all sub-resources) *and* to the
 policy's own server-side ``robots.txt`` GET (the robots URL and each redirect hop, vetted
@@ -14,7 +14,7 @@ failures fail **closed**. This is the shipped mechanism for the SECURITY.md §1
 The honest limits — DNS rebinding is not fully defeated (network isolation stays the
 primary control), resolution runs off-loop behind a TTL+LRU verdict cache with single-flight
 coalescing, and each predicate serves one event loop at a time — are documented in full on
-:func:`block_private_networks`, the public docstring users see.
+[`block_private_networks`][colorsense.block_private_networks], the public docstring users see.
 """
 
 from __future__ import annotations
@@ -87,9 +87,9 @@ def _is_public_address(ip: IPAddress) -> bool:
 
 
 class _PrivateNetworkBlocker:
-    """The predicate :func:`block_private_networks` returns; see the factory docstring —
-    including the single-event-loop-at-a-time contract its single-flight futures impose
-    (enforcement mechanics in :meth:`_check_loop_affinity`).
+    """The predicate [`block_private_networks`][colorsense.block_private_networks] returns;
+    see the factory docstring — including the single-event-loop-at-a-time contract its
+    single-flight futures impose (enforcement mechanics in `_check_loop_affinity`).
     """
 
     def __init__(
@@ -286,7 +286,7 @@ def block_private_networks(
     loop at a time. Reusing one predicate *sequentially* across loops (e.g. back-to-back
     ``asyncio.run`` calls) is supported — when idle it re-binds to the new loop and keeps
     its verdict cache. *Concurrent* use from multiple event loops raises
-    :class:`RuntimeError` (detected best-effort). Direct callers see that error; through
+    `RuntimeError` (detected best-effort). Direct callers see that error; through
     ``request_filter`` it fails closed instead, so misuse there manifests as requests from
     the other loop being aborted. Create a separate predicate per loop for concurrent use.
 
@@ -302,9 +302,9 @@ def block_private_networks(
         ``socket.getaddrinfo`` lookup; raising ``OSError`` fails closed.
     ttl:
         Seconds a hostname's verdict is reused before re-resolving. Defaults to
-        :data:`DEFAULT_GUARD_TTL_SECONDS` (60).
+        `DEFAULT_GUARD_TTL_SECONDS` (60).
     max_entries:
-        LRU bound on the verdict cache. Defaults to :data:`DEFAULT_GUARD_MAX_ENTRIES`
+        LRU bound on the verdict cache. Defaults to `DEFAULT_GUARD_MAX_ENTRIES`
         (1024).
     clock:
         Monotonic time source for the TTL, injectable for tests.
