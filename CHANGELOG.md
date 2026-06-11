@@ -92,6 +92,13 @@ measurement gaps the fixtures had masked; all are now encoded as offline fixture
   (monotonic), but element *count* no longer drowns high-confidence single-element
   evidence — github.com's lone green CTA (`#1f883d`) survives against ~200 link votes
   instead of pruning below the share floor.
+- **`input[submit]` no longer matches every `<input>`**: the harvester now captures the
+  input's lowercased `type` attribute (new internal `HarvestedElement.input_type` field;
+  `None` for non-inputs and untyped inputs), and both the `input[submit]` semantic rule
+  and the `input[submit|button]` interactivity predicate match only button-like input
+  types (`submit`/`button`/`image`/`reset`). Search/text inputs — and text inputs styled
+  with `cursor: pointer` — no longer receive spurious `cta_bg` votes that leaked their
+  backgrounds into the `interactive` usage category.
 
 ### Added
 
