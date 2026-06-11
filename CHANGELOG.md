@@ -92,6 +92,14 @@ measurement gaps the fixtures had masked; all are now encoded as offline fixture
   (monotonic), but element *count* no longer drowns high-confidence single-element
   evidence — github.com's lone green CTA (`#1f883d`) survives against ~200 link votes
   instead of pruning below the share floor.
+- **Measured-vs-declared match radius in reconciliation**: a measured usage entry now
+  matches a declared token color within the inventory's background join radius (0.10
+  deltaEOK) instead of the tight 0.08 used for grouping declared colors with each other.
+  A measured entry's representative is a screenshot-quantizer bin whenever the cluster
+  matched one, and an element joins a bin up to 0.10 away — at 0.08 a pixel-perfect
+  rendered token could fail its own intent match purely from quantizer blending
+  (platform-dependent anti-aliasing), flipping posterior winners across OSes and emitting
+  false "declared unused in render" / "used but undeclared" divergence pairs.
 - **`input[submit]` no longer matches every `<input>`**: the harvester now captures the
   input's lowercased `type` attribute (new internal `HarvestedElement.input_type` field;
   `None` for non-inputs and untyped inputs), and both the `input[submit]` semantic rule

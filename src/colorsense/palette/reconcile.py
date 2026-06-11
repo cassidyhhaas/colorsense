@@ -36,14 +36,25 @@ from colorsense.models import (
     UsageEntry,
     UsagePalette,
 )
+from colorsense.palette.inventory import DELTA_E_MATCH_BG
 
 __all__ = ["reconcile"]
 
 # --- Tunable constants -------------------------------------------------------
 
-#: Nearest-color join threshold in OKLab ΔE. Two colors within this distance are
-#: treated as the "same" color when joining usage entries and token colors.
+#: Nearest-color join threshold in OKLab ΔE for grouping DECLARED token colors with
+#: each other. Both sides are exact computed values, so the radius stays tight.
 DELTA_E_MATCH: float = 0.08
+
+#: Join threshold for matching a MEASURED usage entry against a declared token color.
+#: A measured entry's representative is a screenshot-quantizer bin whenever the cluster
+#: matched one, and an element may join a bin up to the bg join radius away
+#: (:data:`~colorsense.palette.inventory.DELTA_E_MATCH_BG`) — so this radius must be at
+#: least that, or a pixel-perfect rendered token can fail its own intent match purely
+#: from quantizer blending (observed cross-OS: an amber CTA over a blue hero bins to
+#: #c4a571 on Linux, > 0.08 but <= 0.10 from the declared #f59e0b, flipping the
+#: posterior winner and emitting a false "declared unused in render" divergence).
+DELTA_E_MATCH_MEASURED: float = DELTA_E_MATCH_BG
 
 #: Floor added inside the geometric mean so that a missing signal contributes
 #: ``log(EPS)`` (a large finite penalty) rather than ``log(0)`` (undefined). Also makes
@@ -181,7 +192,7 @@ def _pool_category(
     # pruning (the live-probe failure: 16 token-only "borders" with no rendered border
     # anywhere). Honest emptiness beats intent-only noise; declared intent for the
     # category can still surface through the divergence report — though only when the
-    # declared color has no perceptual match (DELTA_E_MATCH) among measured usage in ANY
+    # declared color has no perceptual match (DELTA_E_MATCH_MEASURED) among measured usage in ANY
     # category (e.g. a near-white border token on a white-surfaced page reads as "used"
     # and stays silent). When measurement EXISTS,
     # token-only colors stay in the universe: pooling against real usage mass crushes
@@ -201,7 +212,7 @@ def _pool_category(
 
     def intent_for(color: Color) -> float:
         best_idx: int | None = None
-        best_d = DELTA_E_MATCH
+        best_d = DELTA_E_MATCH_MEASURED
         for gi, group in enumerate(groups):
             if category not in intents[gi]:
                 continue
@@ -281,7 +292,7 @@ def _build_divergence(
     ]
 
     def matches_any_usage(color: Color) -> bool:
-        return any(delta_e(color, uc) <= DELTA_E_MATCH for uc in usage_colors)
+        return any(delta_e(color, uc) <= DELTA_E_MATCH_MEASURED for uc in usage_colors)
 
     items: list[DivergenceItem] = []
 
@@ -311,7 +322,7 @@ def _build_divergence(
     token_colors = [g.color for g in groups]
 
     def matches_any_token(color: Color) -> bool:
-        return any(delta_e(color, tc) <= DELTA_E_MATCH for tc in token_colors)
+        return any(delta_e(color, tc) <= DELTA_E_MATCH_MEASURED for tc in token_colors)
 
     seen: set[tuple[UsageCategory, str]] = set()
     for category, entries in usage.mapping.items():

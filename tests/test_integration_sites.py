@@ -445,8 +445,15 @@ async def test_live_probe_regressions_encoded_offline(fixtures_dir: Path) -> Non
     assert border, "expected border entries"
     assert border[0].components, "top border entry must carry component evidence"
     assert _color_near([border[0].color], "#d1d9e0")
+    # The leak check needs the TIGHT tolerance: a token entry that actually leaked
+    # would carry the token color (within the 0.05 cluster radius), while the REAL
+    # border #d1d9e0 sits only 0.095 ΔE from #7ae9ff — inside COLOR_MATCH_TOL, so the
+    # loose tolerance would flag the legitimate border as a leak (and does, on Linux,
+    # where the screenshot bin lands on #d1d9e0 exactly).
     for unrendered in ("#ff8182", "#a830e8", "#7ae9ff"):
-        assert not _color_near([e.color for e in border], unrendered)
+        target = parse_css_color(unrendered)
+        assert target is not None
+        assert all(delta_e(e.color, target) > COMPUTED_COLOR_TOL for e in border), unrendered
 
     # INTERACTIVE (log1p damping): the single green Primer-classed CTA survives
     # against five blue links.
