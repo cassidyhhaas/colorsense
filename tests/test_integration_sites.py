@@ -7,7 +7,7 @@ Three saved HTML pages stand in for real-world archetypes (no public network):
 * ``cards_site.html``  — a card-heavy catalog with a third-party chat widget.
 
 Each test makes two kinds of assertion. **Invariants** are hand-checked claims about
-what the analysis *must* say (a CTA token classifies as interactive, status colors are
+what the analysis *must* say (a CTA token classifies as interactive, status tokens are
 segregated, a vendor widget is tagged third-party, …). **Golden snapshots** pin a digest
 of the full result so accidental regressions surface; structural fields and color hexes are
 compared exactly while probabilities use a tolerance (the spec calls for ordering/dominance,
@@ -34,6 +34,7 @@ from colorsense.models import (
     Theme,
     ThemePalette,
     TokenSemanticRole,
+    UsageCategory,
 )
 
 GOLDEN_DIR = Path(__file__).parent / "golden"
@@ -52,7 +53,9 @@ async def _analyze(fixture: Path) -> AnalysisResult:
     # These fixtures exercise the full light+dark path (ds_site has a real dark-mode block;
     # the goldens pin both themes), so request dark explicitly — analyze defaults to light.
     # file:// fixtures require the explicit allow_file_urls opt-in.
-    return await analyze(fixture.as_uri(), themes=LIGHT_AND_DARK, politeness=file_policy())
+    return await analyze(
+        fixture.as_uri(), themes=LIGHT_AND_DARK, politeness=file_policy(), include_tokens=True
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -81,12 +84,15 @@ def _theme_structure(palette: ThemePalette) -> dict[str, Any]:
       (purely structural: which slots the pipeline managed to fill). Compared exactly.
     * ``top_role_colors`` — the dominant (argmax) candidate hex per populated role.
 
-    The top-candidate hexes are screenshot-derived and carry cross-OS anti-aliasing/gamma
+    * ``populated_usage`` / ``top_usage_colors`` — the same two signals for the primary,
+      usage-keyed view (which usage categories were filled, and the dominant hex each).
+
+    The top-entry hexes are screenshot-derived and carry cross-OS anti-aliasing/gamma
     drift (≈0.01 ΔE observed between macOS and Linux Chromium), so the golden stores a
     reference hex but :func:`_check_golden` compares them *perceptually* within
     :data:`COLOR_MATCH_TOL`, never by exact string — this catches dominance/color
-    regressions without flaking across the OS the goldens were generated on. Roles are
-    emitted in a stable, sorted order so the digest is deterministic.
+    regressions without flaking across the OS the goldens were generated on. Roles and
+    categories are emitted in a stable, sorted order so the digest is deterministic.
     """
     mapping = palette.roles.mapping
     populated = sorted(str(role) for role, cands in mapping.items() if cands)
@@ -95,32 +101,46 @@ def _theme_structure(palette: ThemePalette) -> dict[str, Any]:
         for role, cands in sorted(mapping.items(), key=lambda kv: str(kv[0]))
         if cands
     }
-    return {"populated_roles": populated, "top_role_colors": top_colors}
+    usage_mapping = palette.usage.mapping
+    populated_usage = sorted(str(cat) for cat, entries in usage_mapping.items() if entries)
+    top_usage_colors = {
+        str(cat): entries[0].color.hex
+        for cat, entries in sorted(usage_mapping.items(), key=lambda kv: str(kv[0]))
+        if entries
+    }
+    return {
+        "populated_roles": populated,
+        "top_role_colors": top_colors,
+        "populated_usage": populated_usage,
+        "top_usage_colors": top_usage_colors,
+    }
 
 
 def _digest(result: AnalysisResult) -> dict[str, Any]:
     """A deterministic summary of an AnalysisResult for golden comparison.
 
-    Captures the computed-style/structural fields (token classifications, token-resolved
-    status colors, theme set, fit_score) plus, for every kept theme, the populated palette
-    roles and dominant role colors (see :func:`_theme_structure`) and whether divergence was
-    reported. Everything is emitted in a stable, sorted order so the digest is deterministic.
+    Captures the computed-style/structural fields (token classifications from the primary
+    theme, theme set, the primary theme's fit_score) plus, for every kept theme, the
+    populated usage categories / palette roles and their dominant colors (see
+    :func:`_theme_structure`) and whether divergence was reported. Everything is emitted
+    in a stable, sorted order so the digest is deterministic.
 
     ``has_divergence`` is a bool rather than an exact count: the count of used-but-undeclared
     discrepancies can shift by one across OSes when a borderline cluster crosses the
     threshold (4 vs 3 observed), so only the stable presence/absence signal is pinned.
     """
+    primary = result.themes[result.metadata.themes_analyzed[0]]
+    tokens = primary.tokens if primary.tokens is not None else ()
     return {
         "themes": sorted(str(theme) for theme in result.themes),
-        "single_theme": result.metadata.single_theme,
-        "tokens": {ct.record.name: str(ct.semantic_role) for ct in result.tokens},
-        "status_colors": sorted(c.hex for c in result.status_colors),
-        "has_divergence": bool(result.divergence),
+        "single_theme": len(result.metadata.themes_analyzed) == 1,
+        "tokens": {t.name: str(t.semantic_role) for t in tokens},
+        "has_divergence": any(bool(p.divergence) for p in result.themes.values()),
         "theme_structure": {
             str(theme): _theme_structure(palette)
             for theme, palette in sorted(result.themes.items(), key=lambda kv: str(kv[0]))
         },
-        "fit_score": round(result.fit_score, 4),
+        "fit_score": round(primary.fit_score, 4),
     }
 
 
@@ -135,10 +155,11 @@ def _check_golden(name: str, digest: dict[str, Any], golden_dir: Path = GOLDEN_D
     Three comparison modes, by field stability:
 
     * ``fit_score`` — within :data:`FIT_SCORE_TOL`.
-    * ``theme_structure`` — ``populated_roles`` exact; ``top_role_colors`` perceptually,
-      within :data:`COLOR_MATCH_TOL` ΔE (screenshot-derived hexes drift across OSes).
-    * everything else (themes, token classifications, token-resolved status colors,
-      ``single_theme``, ``has_divergence``) — computed-style/structural, compared exactly.
+    * ``theme_structure`` — ``populated_roles`` / ``populated_usage`` exact;
+      ``top_role_colors`` / ``top_usage_colors`` perceptually, within
+      :data:`COLOR_MATCH_TOL` ΔE (screenshot-derived hexes drift across OSes).
+    * everything else (themes, token classifications, ``single_theme``,
+      ``has_divergence``) — computed-style/structural, compared exactly.
     """
     path = golden_dir / f"{name}.json"
     if os.environ.get("UPDATE_GOLDEN"):
@@ -166,23 +187,25 @@ def _check_golden(name: str, digest: dict[str, Any], golden_dir: Path = GOLDEN_D
     )
     for theme, exp in expected_struct.items():
         act = actual_struct[theme]
-        assert act["populated_roles"] == exp["populated_roles"], (
-            f"{name}/{theme}: populated_roles {act['populated_roles']} "
-            f"!= golden {exp['populated_roles']}"
-        )
-        exp_colors, act_colors = exp["top_role_colors"], act["top_role_colors"]
-        assert act_colors.keys() == exp_colors.keys(), (
-            f"{name}/{theme}: role-color keys {sorted(act_colors)} != golden {sorted(exp_colors)}"
-        )
-        for role, exp_hex in exp_colors.items():
-            act_hex = act_colors[role]
-            act_color, exp_color = parse_css_color(act_hex), parse_css_color(exp_hex)
-            assert act_color is not None and exp_color is not None
-            drift = delta_e(act_color, exp_color)
-            assert drift <= COLOR_MATCH_TOL, (
-                f"{name}/{theme}/{role}: color {act_hex} drifted {drift:.4f} ΔE from "
-                f"golden {exp_hex} (tol {COLOR_MATCH_TOL})"
+        for exact_key in ("populated_roles", "populated_usage"):
+            assert act[exact_key] == exp[exact_key], (
+                f"{name}/{theme}: {exact_key} {act[exact_key]} != golden {exp[exact_key]}"
             )
+        for color_key in ("top_role_colors", "top_usage_colors"):
+            exp_colors, act_colors = exp[color_key], act[color_key]
+            assert act_colors.keys() == exp_colors.keys(), (
+                f"{name}/{theme}: {color_key} keys {sorted(act_colors)} "
+                f"!= golden {sorted(exp_colors)}"
+            )
+            for key, exp_hex in exp_colors.items():
+                act_hex = act_colors[key]
+                act_color, exp_color = parse_css_color(act_hex), parse_css_color(exp_hex)
+                assert act_color is not None and exp_color is not None
+                drift = delta_e(act_color, exp_color)
+                assert drift <= COLOR_MATCH_TOL, (
+                    f"{name}/{theme}/{color_key}/{key}: color {act_hex} drifted "
+                    f"{drift:.4f} ΔE from golden {exp_hex} (tol {COLOR_MATCH_TOL})"
+                )
 
     assert digest == expected, f"{name}: digest diverged from golden (run UPDATE_GOLDEN=1)"
 
@@ -198,10 +221,13 @@ async def test_design_system_site(fixtures_dir: Path) -> None:
 
     # A real dark-mode block: both themes survive (no collapse).
     assert {str(t) for t in result.themes} == {"light", "dark"}
-    assert result.metadata.single_theme is False
+    assert len(result.metadata.themes_analyzed) == 2
+
+    light = result.themes[Theme.light]
+    assert light.tokens is not None
 
     # Tokens classify by name, with the `--color-` namespace stripped first.
-    semantic = {ct.record.name: ct.semantic_role for ct in result.tokens}
+    semantic = {t.name: t.semantic_role for t in light.tokens}
     assert semantic["--color-primary"] is TokenSemanticRole.brand_primary
     assert semantic["--color-secondary"] is TokenSemanticRole.brand_secondary
     assert semantic["--color-accent"] is TokenSemanticRole.brand_accent
@@ -209,20 +235,26 @@ async def test_design_system_site(fixtures_dir: Path) -> None:
     assert semantic["--color-bg"] is TokenSemanticRole.surface_base
     assert semantic["--color-border"] is TokenSemanticRole.border
 
-    # Status colors are segregated out of the palette and reported separately.
-    assert {c.hex for c in result.status_colors} == {"#16a34a", "#dc2626"}
+    # Status tokens are kept out of the palette views but still surface as DesignTokens.
     assert semantic["--color-success"] is TokenSemanticRole.status
+    status_hexes = {t.color.hex for t in light.tokens if t.semantic_role == "status"}
+    assert status_hexes == {"#16a34a", "#dc2626"}
+    all_usage_hexes = {e.color.hex for entries in light.usage.mapping.values() for e in entries}
+    assert not status_hexes & all_usage_hexes
     assert not result.third_party_colors
 
     # A token-driven site agrees well between declared intent and measured usage.
-    assert result.fit_score > 0.6
+    assert light.fit_score > 0.6
 
     # Dominance (perceptual, platform-robust): the accent role is led by a declared
-    # brand color.
-    accent = result.themes[Theme.light].roles.mapping.get(PaletteRole.accent, [])
+    # brand color, and the same brand colors lead the interactive usage category.
+    accent = light.roles.mapping.get(PaletteRole.accent, [])
     assert accent, "expected accent candidates"
     brand_hexes = ("#2563eb", "#7c3aed", "#f59e0b")
     assert any(_color_near([accent[0].color], h) for h in brand_hexes)
+    interactive = light.usage.mapping[UsageCategory.interactive]
+    assert interactive, "expected interactive usage entries"
+    assert any(_color_near([interactive[0].color], h) for h in brand_hexes)
 
     # The result is a clean Pydantic round-trip.
     assert AnalysisResult.model_validate_json(result.model_dump_json()) == result
@@ -241,14 +273,14 @@ async def test_legacy_site(fixtures_dir: Path) -> None:
 
     # No dark-mode block -> identical renders -> single theme.
     assert len(result.themes) == 1
-    assert result.metadata.single_theme is True
+    assert len(result.metadata.themes_analyzed) == 1
 
-    # No custom properties: nothing to declare, so the palette is usage-driven and
-    # every prominent color is "used but undeclared".
-    assert result.tokens == ()
-    assert result.status_colors == ()
-    assert result.divergence  # used-but-undeclared discrepancies are reported
-    assert all("undeclared" in item.note.lower() for item in result.divergence)
+    # No custom properties: tokens were requested but none exist -> () (not None), the
+    # palette is usage-driven, and every prominent color is "used but undeclared".
+    (palette,) = result.themes.values()
+    assert palette.tokens == ()
+    assert palette.divergence  # used-but-undeclared discrepancies are reported
+    assert all("undeclared" in item.note.lower() for item in palette.divergence)
 
     _check_golden("legacy_site", _digest(result))
 
@@ -277,6 +309,48 @@ async def test_cards_site(fixtures_dir: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Fixture 4 — neutral-layered repo page: THE regression test for the usage-keyed
+# palette redesign. A GitHub-repo-page-like design is almost entirely grays; the
+# 60/30/10 roles view cannot express its gray text/border hierarchy, the usage
+# view must.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.browser
+async def test_usage_redesign_captures_neutral_layered_design(fixtures_dir: Path) -> None:
+    result = await _analyze(fixtures_dir / "repo_site.html")
+
+    assert len(result.themes) == 1
+    (palette,) = result.themes.values()
+    usage = palette.usage.mapping
+
+    # SURFACE: the white page background dominates, with the layered light-gray
+    # surfaces (header/nav/cards, #f6f8fa) also present.
+    surface = usage[UsageCategory.surface]
+    assert surface, "expected surface entries"
+    assert _color_near([surface[0].color], "#ffffff")
+    assert _color_near([e.color for e in surface], "#f6f8fa")
+
+    # TEXT: the gray text scale survives — at least two distinct grays (dark body
+    # #1f2328 and muted #59636e), the structure the roles view loses entirely.
+    text_colors = [e.color for e in usage[UsageCategory.text]]
+    assert len(text_colors) >= 2
+    assert _color_near(text_colors, "#1f2328")
+    assert _color_near(text_colors, "#59636e")
+
+    # INTERACTIVE: both the blue links and the green CTA buttons.
+    interactive_colors = [e.color for e in usage[UsageCategory.interactive]]
+    assert _color_near(interactive_colors, "#0969da")
+    assert _color_near(interactive_colors, "#1f883d")
+
+    # BORDER: the gray border/divider color.
+    border_colors = [e.color for e in usage[UsageCategory.border]]
+    assert _color_near(border_colors, "#d1d9e0")
+
+    _check_golden("repo_site", _digest(result))
+
+
+# ---------------------------------------------------------------------------
 # Browserless unit tests of the golden helper itself
 # ---------------------------------------------------------------------------
 
@@ -287,12 +361,13 @@ def _unit_digest() -> dict[str, Any]:
         "themes": ["light"],
         "single_theme": True,
         "tokens": {"--color-primary": "brand_primary"},
-        "status_colors": ["#dc2626"],
         "has_divergence": False,
         "theme_structure": {
             "light": {
                 "populated_roles": ["accent", "primary"],
                 "top_role_colors": {"accent": "#2563eb", "primary": "#ffffff"},
+                "populated_usage": ["interactive", "surface"],
+                "top_usage_colors": {"interactive": "#2563eb", "surface": "#ffffff"},
             }
         },
         "fit_score": 0.8123,

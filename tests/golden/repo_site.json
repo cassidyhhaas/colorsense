@@ -1,5 +1,5 @@
 {
-  "fit_score": 0.8029,
+  "fit_score": 0.8,
   "has_divergence": true,
   "single_theme": true,
   "theme_structure": {
@@ -12,21 +12,23 @@
         "secondary"
       ],
       "populated_usage": [
+        "border",
         "interactive",
         "surface",
         "text"
       ],
       "top_role_colors": {
-        "accent": "#6a5e45",
-        "neutral_dark": "#2b2b2b",
+        "accent": "#0969da",
+        "neutral_dark": "#1f2328",
         "neutral_light": "#ffffff",
         "primary": "#ffffff",
-        "secondary": "#c14930"
+        "secondary": "#ffffff"
       },
       "top_usage_colors": {
-        "interactive": "#6a5e45",
-        "surface": "#c14930",
-        "text": "#2b2b2b"
+        "border": "#d3d7da",
+        "interactive": "#0969da",
+        "surface": "#ffffff",
+        "text": "#1f2328"
       }
     }
   },

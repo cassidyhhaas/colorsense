@@ -143,17 +143,69 @@ def test_component_mix_aggregates_multiple_types() -> None:
     assert dominant == ComponentType.cta_bg
 
 
+def test_component_mass_keeps_raw_unnormalized_sums() -> None:
+    # component_mass preserves the RAW vote mass (cross-cluster magnitude, which the
+    # usage view ranks by); component_mix is the same sums normalized to ~1.0.
+    surface = _color("#3366cc")
+    harvest = _harvest([ScreenshotBin(color=surface, area_fraction=0.5)])
+    classified = [
+        _classified(_color("#3366cc"), {ComponentType.cta_bg: 0.75}),
+        _classified(_color("#3367cc"), {ComponentType.header_bg: 0.25}),
+        _classified(_color("#3366cc"), {ComponentType.cta_bg: 0.75}),
+    ]
+
+    clusters = build_inventory(harvest, classified)
+
+    assert len(clusters) == 1
+    mass = clusters[0].component_mass
+    assert mass[ComponentType.cta_bg] == pytest.approx(1.5, abs=1e-9)
+    assert mass[ComponentType.header_bg] == pytest.approx(0.25, abs=1e-9)
+    # The mix is exactly the normalized mass.
+    total = sum(mass.values())
+    for comp, raw in mass.items():
+        assert clusters[0].component_mix[comp] == pytest.approx(raw / total, abs=1e-9)
+
+
 def test_unmatched_element_creates_zero_area_entry() -> None:
     # No bins at all; an element's semantics must still be preserved.
     harvest = _harvest([])
-    classified = [_classified(_color("#112233"), {ComponentType.link: 1.0})]
+    classified = [_classified(_color("#112233"), {ComponentType.cta_bg: 1.0})]
 
     clusters = build_inventory(harvest, classified)
 
     assert len(clusters) == 1
     assert clusters[0].area_weight == pytest.approx(0.0, abs=1e-9)
     assert clusters[0].color.hex == "#112233"
-    assert max(clusters[0].component_mix) == ComponentType.link
+    assert max(clusters[0].component_mix) == ComponentType.cta_bg
+
+
+def test_link_mass_routes_to_text_color_not_bg() -> None:
+    # A link paints its typography color; its background is usually transparent, so
+    # link mass routes to the TEXT channel (like *_text components).
+    blue_text = _color("#0969da")
+    bg = _color("#ffffff")
+    harvest = _harvest([ScreenshotBin(color=bg, area_fraction=0.9)])
+    classified = [_classified(bg, {ComponentType.link: 1.0}, text=blue_text)]
+
+    clusters = build_inventory(harvest, classified)
+
+    blue = next(c for c in clusters if c.color.hex == "#0969da")
+    white = next(c for c in clusters if c.color.hex == "#ffffff")
+    assert ComponentType.link in blue.component_mix
+    assert ComponentType.link not in white.component_mix
+
+
+def test_fully_transparent_channel_color_donates_no_mass() -> None:
+    # alpha == 0 means the channel paints nothing: without the gate, transparent
+    # backgrounds would pile votes onto a phantom #000000 zero-area cluster.
+    transparent = Color(hex="#000000", lightness=0.0, chroma=0.0, hue=0.0, alpha=0.0)
+    harvest = _harvest([ScreenshotBin(color=_color("#ffffff"), area_fraction=1.0)])
+    classified = [_classified(transparent, {ComponentType.card_bg: 1.0})]
+
+    clusters = build_inventory(harvest, classified)
+
+    assert [c.color.hex for c in clusters] == ["#ffffff"]
+    assert clusters[0].component_mass == {}
 
 
 def test_element_far_from_all_bins_is_new_cluster() -> None:

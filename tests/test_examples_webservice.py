@@ -21,6 +21,7 @@ from colorsense import (
     AnalysisResult,
     AnalysisTimeoutError,
     Color,
+    ComponentType,
     PaletteCandidate,
     PaletteRole,
     RenderError,
@@ -29,6 +30,9 @@ from colorsense import (
     Theme,
     ThemePalette,
     UnsupportedSchemeError,
+    UsageCategory,
+    UsageEntry,
+    UsagePalette,
     Viewport,
 )
 from examples.webservice import main, policy, routes, settings
@@ -37,11 +41,20 @@ VIEWPORT = Viewport(width=1280, height=800, device_scale_factor=1.0)
 
 
 def fake_result(url: str) -> AnalysisResult:
-    candidate = PaletteCandidate(
-        color=Color(hex="#336699", lightness=0.5, chroma=0.1, hue=250.0),
-        probability=0.9,
-        area=0.6,
-        evidence={"internal": 1.0},  # must be trimmed from the API response
+    blue = Color(hex="#336699", lightness=0.5, chroma=0.1, hue=250.0)
+    candidate = PaletteCandidate(color=blue, probability=0.9, area=0.6)
+    usage = UsagePalette(
+        mapping={
+            UsageCategory.surface: (
+                UsageEntry(
+                    color=blue,
+                    probability=0.9,
+                    area=0.6,
+                    # Component evidence must be trimmed from the API response.
+                    components={ComponentType.page_bg: 1.0},
+                ),
+            ),
+        }
     )
     return AnalysisResult(
         url=url,
@@ -49,10 +62,11 @@ def fake_result(url: str) -> AnalysisResult:
         themes={
             Theme.light: ThemePalette(
                 theme=Theme.light,
+                usage=usage,
                 roles=RoleResults(mapping={PaletteRole.primary: (candidate,)}),
+                fit_score=0.8,
             )
         },
-        fit_score=0.8,
     )
 
 
@@ -144,12 +158,18 @@ def test_success_returns_trimmed_palette(
     assert response.status_code == 200
     body = response.json()
     assert body["url"] == url
-    assert body["fit_score"] == 0.8
-    primary = body["themes"]["light"]["primary"]
+    theme = body["themes"]["light"]
+    assert theme["fit_score"] == 0.8
+    surface = theme["usage"]["surface"]
+    assert surface == [{"hex": "#336699", "probability": 0.9, "area": 0.6}]
+    primary = theme["roles"]["primary"]
     assert primary == [{"hex": "#336699", "probability": 0.9, "area": 0.6}]
-    # Empty roles are present (the library guarantees all five); internals are trimmed.
-    assert body["themes"]["light"]["accent"] == []
-    assert "evidence" not in str(body)
+    # Empty categories/roles are present (the library guarantees the full key sets);
+    # internals (component evidence, OKLCH coordinates) are trimmed.
+    assert theme["usage"]["interactive"] == []
+    assert theme["roles"]["accent"] == []
+    assert "components" not in str(body)
+    assert "page_bg" not in str(body)
 
 
 @pytest.mark.parametrize(

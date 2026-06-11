@@ -32,7 +32,7 @@ def test_load_returns_typed_config(config: Config) -> None:
 
 
 def test_distribution_rows_normalized_and_channels_recognized(config: Config) -> None:
-    priors = config.token_vocabulary.role_to_palette_prior
+    priors = config.token_vocabulary.role_to_usage_prior
 
     channel_roles = {
         TokenSemanticRole.text_on,

@@ -8,6 +8,7 @@ exercised with an injected fake harvester so they need neither Playwright nor re
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 
 import pytest
@@ -29,6 +30,7 @@ from colorsense.models import (
     Theme,
     TokenRecord,
     TokenSemanticRole,
+    UsageCategory,
     Viewport,
 )
 from colorsense.net.politeness import (
@@ -389,7 +391,7 @@ async def test_failed_fetch_cancels_sibling_render(config: Config) -> None:
 # Orchestration on a fully-faked Harvest (no browser): assert analyze() wires the
 # stages together and segregates outputs correctly. The pipeline is pure given a
 # Harvest, so an injected harvester returning a populated Harvest exercises the whole
-# classify -> inventory -> roles -> reconcile -> assemble chain browserlessly.
+# classify -> inventory -> usage -> reconcile -> roles -> assemble chain browserlessly.
 # ---------------------------------------------------------------------------
 
 
@@ -478,7 +480,7 @@ async def test_analyze_orchestrates_faked_harvest(config: Config) -> None:
         return _populated_harvest(u, theme, vp)
 
     policy = PolitenessPolicy(harvester=harvester, robots_loader=_no_robots)
-    result = await analyze(url, viewport=VIEWPORT, politeness=policy)
+    result = await analyze(url, viewport=VIEWPORT, politeness=policy, include_tokens=True)
 
     assert isinstance(result, AnalysisResult)
     assert result.url == url
@@ -490,31 +492,42 @@ async def test_analyze_orchestrates_faked_harvest(config: Config) -> None:
     assert palette.theme is Theme.light
     assert result.metadata.themes_requested == (Theme.light,)
     assert result.metadata.themes_analyzed == (Theme.light,)
-    assert result.metadata.single_theme is True
 
-    # Roles populated: the mapping has every role key, and the area-truth bins yield real
-    # candidates for the dominant surface roles.
+    # The usage view (the primary view) is populated: every category key is present and
+    # the dominant ~60% light surface anchors the surface category.
+    usage = palette.usage.mapping
+    assert set(usage) == set(UsageCategory)
+    assert usage[UsageCategory.surface], "surface should be populated from the 60% bin"
+    surface_hexes = {entry.color.hex for entry in usage[UsageCategory.surface]}
+    assert "#ffffff" in surface_hexes
+    # The clickable CTA button surfaces its accent in the interactive category.
+    interactive_hexes = {entry.color.hex for entry in usage[UsageCategory.interactive]}
+    assert "#2244aa" in interactive_hexes
+
+    # The derived roles view: the mapping has every role key, and the area-truth bins
+    # yield real candidates for the dominant surface roles.
     roles = palette.roles.mapping
     assert set(roles) == set(PaletteRole)
     nonempty = {role for role, cands in roles.items() if cands}
     assert nonempty, "expected at least one palette role to carry a candidate"
-    # The dominant ~60% light surface should anchor the primary role.
     assert roles[PaletteRole.primary], "primary role should be populated from the 60% bin"
     primary_hexes = {cand.color.hex for cand in roles[PaletteRole.primary]}
     assert "#ffffff" in primary_hexes
+    assert 0.0 <= palette.fit_score <= 1.0
 
-    # Tokens carried through and classified (token names preserved, semantic roles assigned).
-    token_names = {ct.record.name for ct in result.tokens}
+    # Tokens requested (include_tokens=True): carried through, classified, public shape.
+    assert palette.tokens is not None
+    token_names = {t.name for t in palette.tokens}
     assert token_names == {"--color-primary", "--gray-100", "--gray-900", "--destructive"}
-    by_name = {ct.record.name: ct for ct in result.tokens}
+    by_name = {t.name: t for t in palette.tokens}
     assert by_name["--color-primary"].semantic_role is TokenSemanticRole.brand_primary
     assert by_name["--gray-100"].semantic_role is TokenSemanticRole.neutral
     assert by_name["--destructive"].semantic_role is TokenSemanticRole.status
 
-    # Status colors are segregated OUT of the palette: the destructive red is reported as a
-    # status color and must NOT appear as a palette-role candidate.
-    status_hexes = {c.hex for c in result.status_colors}
-    assert "#ef4444" in status_hexes
+    # Status colors are segregated OUT of the palette views: the destructive red appears
+    # only as a status-role DesignToken, never as a usage entry or role candidate.
+    all_usage_hexes = {entry.color.hex for entries in usage.values() for entry in entries}
+    assert "#ef4444" not in all_usage_hexes
     all_role_hexes = {cand.color.hex for cands in roles.values() for cand in cands}
     assert "#ef4444" not in all_role_hexes
 
@@ -680,8 +693,8 @@ def _dark_populated_harvest(url: str, theme: Theme, viewport: Viewport) -> Harve
 
 
 async def test_first_requested_theme_is_primary(config: Config) -> None:
-    # ``themes=(dark, light)`` makes dark the primary theme: its tokens populate the
-    # top-level fields, and the metadata preserves the requested order.
+    # ``themes=(dark, light)`` keeps both themes (distinct renders) with per-theme tokens
+    # on each ThemePalette, and the metadata preserves the requested order.
     async def harvester(
         u: str,
         theme: Theme,
@@ -698,18 +711,24 @@ async def test_first_requested_theme_is_primary(config: Config) -> None:
 
     policy = PolitenessPolicy(harvester=harvester, robots_loader=_no_robots)
     result = await analyze(
-        "https://example.test/page", themes=(Theme.dark, Theme.light), politeness=policy
+        "https://example.test/page",
+        themes=(Theme.dark, Theme.light),
+        politeness=policy,
+        include_tokens=True,
     )
 
     assert result.metadata.themes_requested == (Theme.dark, Theme.light)
     # The renders genuinely differ (dark-dominant vs light-dominant bins): no collapse.
     assert result.metadata.themes_analyzed == (Theme.dark, Theme.light)
     assert set(result.themes) == {Theme.dark, Theme.light}
-    # Top-level tokens come from the PRIMARY (dark) harvest: --dark-surface is declared
-    # only there, and --gray-100 only in the light harvest.
-    token_names = {ct.record.name for ct in result.tokens}
-    assert token_names == {"--dark-surface", "--color-primary"}
-    assert 0.0 <= result.fit_score <= 1.0
+    # Tokens are PER THEME now: --dark-surface is declared only in the dark harvest, and
+    # --gray-100 only in the light harvest.
+    dark_palette = result.themes[Theme.dark]
+    light_palette = result.themes[Theme.light]
+    assert dark_palette.tokens is not None and light_palette.tokens is not None
+    assert {t.name for t in dark_palette.tokens} == {"--dark-surface", "--color-primary"}
+    assert "--gray-100" in {t.name for t in light_palette.tokens}
+    assert 0.0 <= dark_palette.fit_score <= 1.0
 
 
 async def test_config_path_flows_through_analyze(tmp_path: Path, config: Config) -> None:
@@ -732,8 +751,12 @@ async def test_config_path_flows_through_analyze(tmp_path: Path, config: Config)
         return _populated_harvest(u, theme, vp)
 
     policy = PolitenessPolicy(harvester=harvester, robots_loader=_no_robots)
-    result = await analyze("https://example.test/page", config_path=copied, politeness=policy)
-    by_name = {ct.record.name: ct for ct in result.tokens}
+    result = await analyze(
+        "https://example.test/page", config_path=copied, politeness=policy, include_tokens=True
+    )
+    palette = result.themes[Theme.light]
+    assert palette.tokens is not None
+    by_name = {t.name: t for t in palette.tokens}
     assert by_name["--color-primary"].semantic_role is TokenSemanticRole.brand_primary
 
     # The path genuinely flows through: a nonexistent config_path must fail the run
@@ -744,6 +767,108 @@ async def test_config_path_flows_through_analyze(tmp_path: Path, config: Config)
             config_path=tmp_path / "missing.yaml",
             politeness=policy,
         )
+
+
+# ---------------------------------------------------------------------------
+# include_tokens: the opt-in DesignToken projection on each ThemePalette.
+# ---------------------------------------------------------------------------
+
+
+def _harvester_for(
+    harvest_factory: Callable[[str, Theme, Viewport], Harvest],
+) -> Callable[..., Awaitable[Harvest]]:
+    async def harvester(
+        u: str,
+        theme: Theme,
+        _cfg: Config,
+        vp: Viewport,
+        *,
+        user_agent: str | None = None,
+        request_filter: RequestFilter | None = None,
+        browser: SharedBrowser | None = None,
+    ) -> Harvest:
+        return harvest_factory(u, theme, vp)
+
+    return harvester
+
+
+async def test_tokens_default_to_none(config: Config) -> None:
+    # Without include_tokens, every ThemePalette carries tokens=None ("not requested").
+    policy = PolitenessPolicy(
+        harvester=_harvester_for(_populated_harvest), robots_loader=_no_robots
+    )
+    result = await analyze("https://example.test/page", politeness=policy)
+    assert result.themes[Theme.light].tokens is None
+
+
+async def test_include_tokens_filters_dedupes_and_sorts(config: Config) -> None:
+    def harvest(url: str, theme: Theme, viewport: Viewport) -> Harvest:
+        return Harvest(
+            url=url,
+            theme=theme,
+            viewport=viewport,
+            tokens=[
+                # Kept (resolved + classified + weighted). Deliberately out of name order.
+                _token("--text", "#111827"),
+                _token("--color-primary", "#2244aa"),
+                # Duplicate name: the FIRST occurrence in document order wins (the
+                # harvester resolves all records against the rendered :root, so both
+                # carry the same resolved color anyway).
+                _token("--color-primary", "#2244aa"),
+                # Dropped: no resolved color.
+                TokenRecord(
+                    name="--background", raw_value="var(--x)", resolved=None, scope=":root"
+                ),
+                # Dropped: classifies to ignore (weight 0).
+                _token("--zxqw", "#aabbcc"),
+            ],
+            elements=[_bg_element(tag="body", bg=_color("#ffffff"))],
+            screenshot_bins=[ScreenshotBin(color=_color("#ffffff"), area_fraction=1.0)],
+        )
+
+    policy = PolitenessPolicy(harvester=_harvester_for(harvest), robots_loader=_no_robots)
+    result = await analyze("https://example.test/page", politeness=policy, include_tokens=True)
+
+    tokens = result.themes[Theme.light].tokens
+    assert tokens is not None
+    # Filtered (unresolved + ignore dropped), deduped, and sorted by name.
+    assert [t.name for t in tokens] == ["--color-primary", "--text"]
+    assert tokens[0].color.hex == "#2244aa"
+    assert tokens[0].semantic_role is TokenSemanticRole.brand_primary
+
+
+async def test_include_tokens_empty_when_site_declares_none(config: Config) -> None:
+    # tokens=() (requested but none found) is distinct from tokens=None (not requested).
+    def harvest(url: str, theme: Theme, viewport: Viewport) -> Harvest:
+        return Harvest(
+            url=url,
+            theme=theme,
+            viewport=viewport,
+            tokens=[],
+            elements=[_bg_element(tag="body", bg=_color("#ffffff"))],
+            screenshot_bins=[ScreenshotBin(color=_color("#ffffff"), area_fraction=1.0)],
+        )
+
+    policy = PolitenessPolicy(harvester=_harvester_for(harvest), robots_loader=_no_robots)
+    result = await analyze("https://example.test/page", politeness=policy, include_tokens=True)
+    assert result.themes[Theme.light].tokens == ()
+
+
+async def test_include_tokens_does_not_change_other_fields(config: Config) -> None:
+    # include_tokens gates only output assembly: classification/reconciliation always
+    # run, so the rest of the result is byte-identical either way.
+    policy = PolitenessPolicy(
+        harvester=_harvester_for(_populated_harvest), robots_loader=_no_robots
+    )
+    without = await analyze("https://example.test/page", politeness=policy)
+    with_tokens = await analyze("https://example.test/page", politeness=policy, include_tokens=True)
+
+    a, b = without.themes[Theme.light], with_tokens.themes[Theme.light]
+    assert a.usage == b.usage
+    assert a.roles == b.roles
+    assert a.fit_score == b.fit_score
+    assert a.divergence == b.divergence
+    assert a.tokens is None and b.tokens is not None
 
 
 def test_dedupe_colors_preserves_first_seen_order() -> None:
@@ -775,22 +900,25 @@ async def _analyze_fixture(name: str, fixtures_dir: Path, **kwargs: object) -> A
 async def test_end_to_end_light_and_dark(fixtures_dir: Path) -> None:
     # tokens.html has a `prefers-color-scheme: dark` block, so the two renders differ
     # and both themes survive collapse. Dark is opt-in, so request it explicitly.
-    result = await _analyze_fixture("tokens.html", fixtures_dir, themes=LIGHT_AND_DARK)
+    result = await _analyze_fixture(
+        "tokens.html", fixtures_dir, themes=LIGHT_AND_DARK, include_tokens=True
+    )
 
     assert isinstance(result, AnalysisResult)
     assert set(result.themes) == {Theme.light, Theme.dark}
-    assert result.metadata.single_theme is False
-    assert 0.0 <= result.fit_score <= 1.0
+    assert len(result.metadata.themes_analyzed) == 2
 
     for theme, palette in result.themes.items():
         assert palette.theme is theme
-        # Each surviving theme carries reconciled palette roles for consumers to use.
+        # Each surviving theme carries the reconciled usage view and the derived roles.
+        assert any(palette.usage.mapping.values())
         assert palette.roles.mapping
+        assert 0.0 <= palette.fit_score <= 1.0
 
-    # Declared tokens were classified and carried onto the result.
-    assert result.tokens
-    token_names = {ct.record.name for ct in result.tokens}
-    assert "--color-primary" in token_names
+        # Declared tokens were classified and carried onto each theme palette.
+        assert palette.tokens
+        token_names = {t.name for t in palette.tokens}
+        assert "--color-primary" in token_names
 
     # The result is a clean Pydantic round-trip.
     restored = AnalysisResult.model_validate_json(result.model_dump_json())
@@ -804,7 +932,6 @@ async def test_single_theme_site_collapses(fixtures_dir: Path) -> None:
     result = await _analyze_fixture("hover.html", fixtures_dir, themes=LIGHT_AND_DARK)
 
     assert len(result.themes) == 1
-    assert result.metadata.single_theme is True
     assert result.metadata.themes_requested == (Theme.light, Theme.dark)
     assert result.metadata.themes_analyzed == (Theme.light,)
 
@@ -818,7 +945,6 @@ async def test_default_is_light_only(fixtures_dir: Path) -> None:
     assert set(result.themes) == {Theme.light}
     assert result.metadata.themes_requested == (Theme.light,)
     assert result.metadata.themes_analyzed == (Theme.light,)
-    assert result.metadata.single_theme is True
 
 
 @pytest.mark.browser
