@@ -6,8 +6,13 @@ import math
 
 import pytest
 
-from colorsense.classify.components import _finalize_distribution, classify_components
-from colorsense.config import load_default_config
+from colorsense.classify.components import (
+    _finalize_distribution,
+    _matches_interactivity,
+    _matches_semantic_tag,
+    classify_components,
+)
+from colorsense.config import VoteRule, WhenRule, load_default_config
 from colorsense.models import (
     Color,
     ComponentType,
@@ -37,6 +42,7 @@ def _element(
     bg: Color | None = None,
     text: Color | None = None,
     border: Color | None = None,
+    input_type: str | None = None,
     has_box_shadow: bool = False,
     has_text: bool = False,
     is_iframe: bool = False,
@@ -60,6 +66,7 @@ def _element(
         bg=bg,
         text=text,
         border=border,
+        input_type=input_type,
         has_box_shadow=has_box_shadow,
         has_text=has_text,
         is_iframe=is_iframe,
@@ -346,11 +353,96 @@ def test_role_banner_is_header_bg() -> None:
 
 
 def test_input_submit_semantic_rule() -> None:
-    """An <input> matches both input[submit] (cta_bg) and the bare input rule."""
-    submit = _element(tag="input", rect=Rect(x=100.0, y=300.0, width=300.0, height=60.0))
+    """An <input type=submit> is cta_bg-dominant.
+
+    cta_bg collects input[submit] 3.5 + clickable 1.5 + input[submit|button] 2.0 = 7.0,
+    crushing the bare-input input_bg 3.0 below the prune floor — a submit button is a
+    CTA, not an input-background source.
+    """
+    submit = _element(
+        tag="input",
+        input_type="submit",
+        clickable=True,
+        rect=Rect(x=100.0, y=300.0, width=400.0, height=60.0),
+    )
     [result] = classify_components([submit], CONFIG, VIEWPORT)
-    assert _argmax(result.component_dist) is ComponentType.cta_bg
-    assert ComponentType.input_bg in result.component_dist
+    assert result.component_dist == {ComponentType.cta_bg: 1.0}
+
+
+@pytest.mark.parametrize("input_type", ["text", "search", "email", "checkbox", None])
+def test_non_button_input_gets_no_cta_votes(input_type: str | None) -> None:
+    """A text-like (or untyped) input receives NO cta_bg votes from any family.
+
+    Regression: input[submit] used to match EVERY <input>, so search/text inputs
+    carried a spurious cta_bg 3.5 vote. A missing type attribute is NOT submit —
+    the HTML default type is "text".
+    """
+    box = _element(
+        tag="input",
+        input_type=input_type,
+        rect=Rect(x=100.0, y=300.0, width=300.0, height=60.0),
+    )
+    [result] = classify_components([box], CONFIG, VIEWPORT)
+    assert result.component_dist == {ComponentType.input_bg: 1.0}
+
+
+def test_clickable_text_input_gets_no_input_submit_button_vote() -> None:
+    """A cursor:pointer text input must not pick up the input[submit|button] vote.
+
+    The generic clickable votes (cta_bg 1.5, link 1.0) still apply but are crushed
+    by input_bg 3.0 and pruned; with the spurious semantic 3.5 + interactivity 2.0
+    votes restored, cta_bg would dominate instead.
+    """
+    # Rect kept above small_area so the small-clickable geometry rule stays out of frame.
+    box = _element(
+        tag="input",
+        input_type="text",
+        clickable=True,
+        rect=Rect(x=100.0, y=300.0, width=400.0, height=60.0),
+    )
+    [result] = classify_components([box], CONFIG, VIEWPORT)
+    assert result.component_dist == {ComponentType.input_bg: 1.0}
+    assert ComponentType.cta_bg not in result.component_dist
+
+
+# Pin the button-like membership for BOTH input predicates: the shared frozenset is
+# submit/button/image/reset (all four paint as real buttons — the classifier scores
+# visual roles, not form semantics); everything else, including None, is excluded.
+_SEMANTIC_RULE = VoteRule(match="input[submit]", votes={"cta_bg": 3.5})
+_INTERACTIVITY_RULE = WhenRule(when="input[submit|button]", votes={"cta_bg": 2.0})
+
+
+@pytest.mark.parametrize(
+    ("input_type", "buttonlike"),
+    [
+        ("submit", True),
+        ("button", True),
+        ("image", True),
+        ("reset", True),
+        ("text", False),
+        ("search", False),
+        (None, False),
+    ],
+)
+def test_buttonlike_input_type_membership(input_type: str | None, buttonlike: bool) -> None:
+    """Each type's membership decision holds for both input predicates."""
+    el = _element(tag="input", input_type=input_type, clickable=True)
+    assert _matches_semantic_tag(_SEMANTIC_RULE, el) is buttonlike
+    assert _matches_interactivity(_INTERACTIVITY_RULE, el) is buttonlike
+
+
+def test_input_submit_predicates_require_input_tag() -> None:
+    """Neither input predicate matches a non-input even with a button-like type.
+
+    <button> still satisfies the interactivity predicate via its own clickable gate.
+    """
+    div = _element(tag="div", input_type=None, clickable=True)
+    assert _matches_semantic_tag(_SEMANTIC_RULE, div) is False
+    assert _matches_interactivity(_INTERACTIVITY_RULE, div) is False
+    button = _element(tag="button", clickable=True)
+    assert _matches_interactivity(_INTERACTIVITY_RULE, button) is True
+    unclickable_button = _element(tag="button", clickable=False)
+    assert _matches_interactivity(_INTERACTIVITY_RULE, unclickable_button) is False
 
 
 def test_hover_color_change_votes_cta() -> None:
@@ -445,13 +537,25 @@ def test_borderless_element_gets_no_border_vote() -> None:
     assert ComponentType.border not in result.component_dist
 
 
-def test_bordered_input_keeps_border_component() -> None:
-    """The input border vote moved into border_presence; a bordered input still
-    carries surviving border mass alongside its input_bg/cta_bg votes."""
-    submit = _element(tag="input", border=_color("#d1d9e0"))
+def test_bordered_text_input_keeps_border_component() -> None:
+    """The input border vote moved into border_presence; a bordered text input
+    carries surviving border mass alongside its input_bg vote (and, post the
+    input[submit] fix, no cta_bg at all)."""
+    box = _element(tag="input", input_type="text", border=_color("#d1d9e0"))
+    [result] = classify_components([box], CONFIG, VIEWPORT)
+    assert _argmax(result.component_dist) is ComponentType.input_bg
+    # YAML calibration: input_bg 3.0 vs border 2.5 -> border prob ~0.27, survives.
+    assert result.component_dist.get(ComponentType.border, 0.0) > 0.05
+    assert ComponentType.cta_bg not in result.component_dist
+
+
+def test_bordered_submit_input_stays_cta_dominated() -> None:
+    """A bordered submit input keeps cta_bg dominant; its border mass prunes
+    (YAML calibration: cta_bg 7.0 crushes the 2.5 border vote post-softmax)."""
+    submit = _element(tag="input", input_type="submit", clickable=True, border=_color("#d1d9e0"))
     [result] = classify_components([submit], CONFIG, VIEWPORT)
     assert _argmax(result.component_dist) is ComponentType.cta_bg
-    assert result.component_dist.get(ComponentType.border, 0.0) > 0.05
+    assert ComponentType.border not in result.component_dist
 
 
 def test_bordered_cta_stays_cta_dominated() -> None:

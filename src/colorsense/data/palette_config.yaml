@@ -225,6 +225,8 @@ component_classifier:
     - {match: "a",                 votes: {link: 4.5}}
     - {match: "button",            votes: {cta_bg: 3.5}}
     - {match: "role=button",       votes: {cta_bg: 3.0}}
+    # input[submit] matches only inputs whose type attribute is button-like
+    # (submit/button/image/reset); plain text/search inputs get no cta_bg vote.
     - {match: "input[submit]",     votes: {cta_bg: 3.5}}
     - {match: "dialog",            votes: {modal_bg: 4.0}}
     - {match: "role=dialog",       votes: {modal_bg: 3.5}}
@@ -325,9 +327,13 @@ component_classifier:
   # Calibration (softmax_temperature 0.5, min_component_prob 0.05), votes border: 2.5:
   #   * bordered card (class "card" -> card_bg 3.0):
   #       e^(3.0/0.5)=403.4 vs e^(2.5/0.5)=148.4 -> border prob 0.27, survives.
-  #   * bordered input (input_bg 3.0 + implicit input[submit] cta_bg 3.5):
-  #       e^6=403.4, e^7=1096.6, e^5=148.4 -> border prob 0.09, survives — identical
-  #       to the previous in-rule `border: 2.5` vote, now width-gated.
+  #   * bordered text input (input_bg 3.0; input[submit] no longer matches non-button
+  #     inputs, so no cta_bg 3.5):
+  #       e^(3.0/0.5)=403.4 vs e^(2.5/0.5)=148.4 -> border prob 0.27, survives.
+  #   * bordered submit input (input_bg 3.0; cta_bg 7.0 = input[submit] 3.5 +
+  #     clickable 1.5 + input[submit|button] 2.0):
+  #       e^14=1.2e6 vs e^6=403.4 vs e^5=148.4 -> border prob ~1e-4, pruned —
+  #       button-like inputs stay interactive, not borders.
   #   * bordered CTA (button tag 3.5 + class/btn/clickable votes, cta_bg >= 9):
   #       border prob < 1e-3, pruned — bordered CTAs stay interactive, not borders.
   border_presence:

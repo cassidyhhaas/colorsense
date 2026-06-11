@@ -49,6 +49,14 @@ _DEFAULT_VIEWPORT = Viewport(width=1280, height=800, device_scale_factor=1.0)
 # channel_routing sentinels that are NOT ComponentType values.
 _NON_COMPONENT_VOTE_KEYS = frozenset({"ignore"})
 
+# <input> type attributes that render as a real button (button chrome, button-styled
+# background): these — and only these — make an input button-like for both the
+# `input[submit]` semantic rule and the `input[submit|button]` interactivity predicate.
+# "reset" and "image" are included deliberately: both paint as buttons, and this
+# classifier scores visual roles, not form semantics. A missing/None type is NOT
+# button-like — the HTML default type is "text".
+_BUTTONLIKE_INPUT_TYPES = frozenset({"submit", "button", "image", "reset"})
+
 
 def _add_votes(
     accum: dict[ComponentType, float],
@@ -70,12 +78,17 @@ def _add_votes(
 
 
 def _matches_semantic_tag(rule: VoteRule, element: HarvestedElement) -> bool:
-    """Return whether a semantic-tag rule matches the element's tag/role/input."""
+    """Return whether a semantic-tag rule matches the element's tag/role/input type.
+
+    ``input[submit]`` matches only inputs whose harvested ``type`` attribute is
+    button-like (see :data:`_BUTTONLIKE_INPUT_TYPES`). Regression guard: it used to
+    match EVERY ``<input>``, giving search/text inputs a spurious cta_bg vote.
+    """
     match = rule.match
     if match.startswith("role="):
         return element.role == match[len("role=") :]
     if match == "input[submit]":
-        return element.tag == "input"
+        return element.tag == "input" and element.input_type in _BUTTONLIKE_INPUT_TYPES
     # Bare tag name.
     return element.tag == match
 
@@ -86,7 +99,12 @@ def _matches_interactivity(rule: WhenRule, element: HarvestedElement) -> bool:
     if when == "clickable":
         return element.clickable
     if when == "input[submit|button]":
-        return element.tag in {"input", "button"} and element.clickable
+        # Inputs are gated on the harvested type attribute, not `clickable`: a text
+        # input styled with cursor:pointer (or carrying onclick) is still a text
+        # input, not a button. <button> keeps the clickable gate.
+        if element.tag == "input":
+            return element.input_type in _BUTTONLIKE_INPUT_TYPES
+        return element.tag == "button" and element.clickable
     if when == "has_hover_color_change":
         return element.has_hover_color_change
     if when == "has_focus_ring":
