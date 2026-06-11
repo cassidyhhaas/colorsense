@@ -81,7 +81,10 @@ changed in your PR description.
 - Keep PRs focused; separate refactors from behavior changes where practical.
 - Make sure `ruff`, `mypy`, and the full `pytest` suite pass locally before pushing.
 - Update the documentation (`README.md`, `docs/`, `SECURITY.md`) when behavior or public
-  API changes, and add a line to `CHANGELOG.md` under *Unreleased*.
+  API changes, and add a line to `CHANGELOG.md` under *Unreleased*. The `docs/` pages are
+  also published as a [documentation site](https://cassidyhhaas.github.io/colorsense/)
+  (MkDocs Material); preview it locally with `uv sync --group docs` and
+  `uv run mkdocs serve`, and keep `uv run mkdocs build --strict` passing (CI checks it).
 - The public API surface is `colorsense.__init__` — anything not exported there is
   internal and free to change; be deliberate about adding new exports.
 

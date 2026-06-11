@@ -7,6 +7,8 @@ Extract the rendered color palette of any website as a structured, typed Python 
 [![Python](https://img.shields.io/pypi/pyversions/colorsense)](https://pypi.org/project/colorsense/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/cassidyhhaas/colorsense/blob/main/LICENSE)
 
+**Documentation:** [cassidyhhaas.github.io/colorsense](https://cassidyhhaas.github.io/colorsense/)
+
 colorsense renders a page in a headless browser, harvests its design tokens and computed
 element colors, and classifies them by **usage** — what colors paint the page's surfaces,
 text, interactive elements, and borders — with ranked, scored entries per category, plus a
@@ -133,6 +135,7 @@ implementation of the SECURITY.md controls for untrusted, user-supplied URLs.
 
 ## Documentation
 
+- [Documentation site](https://cassidyhhaas.github.io/colorsense/) — everything below, plus the API reference, in one place.
 - [Usage guide](https://github.com/cassidyhhaas/colorsense/blob/main/docs/usage.md) — options, the result schema, errors, and fetch policy.
 - [Advanced guide](https://github.com/cassidyhhaas/colorsense/blob/main/docs/advanced.md) — design-token auditing and custom tuning.
 - [SECURITY.md](https://github.com/cassidyhhaas/colorsense/blob/main/SECURITY.md) — threat model and consumer responsibilities.

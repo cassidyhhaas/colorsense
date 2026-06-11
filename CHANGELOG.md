@@ -112,6 +112,10 @@ measurement gaps the fixtures had masked; all are now encoded as offline fixture
 
 ### Added
 
+- **Documentation site** at <https://cassidyhhaas.github.io/colorsense/> — MkDocs Material
+  + mkdocstrings, built from the existing guides plus a generated API reference, deployed
+  to GitHub Pages from `main` (`.github/workflows/docs.yml`; PRs get a strict build check).
+  Build locally with `uv sync --group docs` and `uv run mkdocs serve`.
 - **`request_filter` seams accept async predicates.** `PolitenessPolicy`, `harvest_page`,
   and `RenderSession` now take a synchronous *or* asynchronous `url -> bool` predicate;
   the new public **`RequestFilter`** type alias (exported from the package root and

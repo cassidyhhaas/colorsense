@@ -34,7 +34,7 @@ human-readable `note`.
 
 ## Custom tuning
 
-[`palette_config.yaml`](../src/colorsense/data/palette_config.yaml) ships bundled with the
+[`palette_config.yaml`](https://github.com/cassidyhhaas/colorsense/blob/main/src/colorsense/data/palette_config.yaml) ships bundled with the
 package and is loaded automatically. It is the single source of truth for:
 
 - the **token vocabulary** — CSS custom-property names → semantic roles → usage-category
@@ -62,13 +62,13 @@ config = load_default_config()
 `config_path=` tunes the token vocabulary and the component classifier. The measurement-side
 scoring constants are documented in-code, not part of the YAML: the usage view's pruning
 threshold, component→category routing, and log-damped vote-mass prominence in
-[`palette/usage.py`](../src/colorsense/palette/usage.py) (`MIN_SHARE`, `COMPONENT_USAGE`),
+[`palette/usage.py`](https://github.com/cassidyhhaas/colorsense/blob/main/src/colorsense/palette/usage.py) (`MIN_SHARE`, `COMPONENT_USAGE`),
 the per-channel perceptual join radii in
-[`palette/inventory.py`](../src/colorsense/palette/inventory.py) (`DELTA_E_MATCH_BG`,
+[`palette/inventory.py`](https://github.com/cassidyhhaas/colorsense/blob/main/src/colorsense/palette/inventory.py) (`DELTA_E_MATCH_BG`,
 `DELTA_E_MATCH_TEXT_BORDER`, `DELTA_E_CLUSTER`),
 the declared/measured token-match radii in
-[`palette/reconcile.py`](../src/colorsense/palette/reconcile.py) (`DELTA_E_MATCH`,
+[`palette/reconcile.py`](https://github.com/cassidyhhaas/colorsense/blob/main/src/colorsense/palette/reconcile.py) (`DELTA_E_MATCH`,
 `DELTA_E_MATCH_MEASURED`),
 and the 60/30/10 role-scoring weights in
-[`palette/roles.py`](../src/colorsense/palette/roles.py) (e.g. `W_AREA`, `SOFTMAX_T`,
+[`palette/roles.py`](https://github.com/cassidyhhaas/colorsense/blob/main/src/colorsense/palette/roles.py) (e.g. `W_AREA`, `SOFTMAX_T`,
 `TARGET_SPLIT`).
