@@ -61,15 +61,38 @@ def test_surface_ranked_by_area_not_vote_mass() -> None:
     assert math.isclose(surface[0].probability, 0.86 / 0.94, abs_tol=1e-9)
 
 
-def test_text_ranked_by_vote_mass() -> None:
+def test_text_ranked_by_log_damped_vote_mass() -> None:
     body = _cluster("#1f2328", 0.0, {ComponentType.page_text: 10.0})
     muted = _cluster("#59636e", 0.0, {ComponentType.page_text: 4.0, ComponentType.card_text: 1.0})
     palette = build_usage([body, muted])
 
     text = palette.mapping[UsageCategory.text]
+    # Ordering follows raw mass (log1p is monotonic); shares are the log1p-compressed
+    # prominences, NOT the raw mass ratio 10:5.
     assert [e.color.hex for e in text] == [_color("#1f2328").hex, _color("#59636e").hex]
-    assert math.isclose(text[0].probability, 10.0 / 15.0, abs_tol=1e-9)
-    assert math.isclose(text[1].probability, 5.0 / 15.0, abs_tol=1e-9)
+    total = math.log1p(10.0) + math.log1p(5.0)
+    assert math.isclose(text[0].probability, math.log1p(10.0) / total, abs_tol=1e-9)
+    assert math.isclose(text[1].probability, math.log1p(5.0) / total, abs_tol=1e-9)
+
+
+def test_single_cta_survives_against_many_links() -> None:
+    # The github.com regression for log1p damping: one high-confidence CTA (mass 1.0)
+    # against link clusters with masses ~93/55/48 (~200 link votes). Under raw-mass
+    # shares the CTA fell to ~0.005 (< MIN_SHARE) and the brand accent vanished from
+    # the interactive category; log1p compression keeps it above the pruning floor.
+    links_a = _cluster("#59636e", 0.0, {ComponentType.link: 93.0})
+    links_b = _cluster("#002a36", 0.1, {ComponentType.link: 55.0})
+    links_c = _cluster("#0969da", 0.0, {ComponentType.link: 48.0})
+    cta = _cluster("#1f883d", 0.0, {ComponentType.cta_bg: 1.0})
+    raw_share = 1.0 / (93.0 + 55.0 + 48.0 + 1.0)
+    assert raw_share < MIN_SHARE  # the old behavior would have pruned the CTA
+
+    palette = build_usage([links_a, links_b, links_c, cta])
+    interactive = palette.mapping[UsageCategory.interactive]
+    hexes = [e.color.hex for e in interactive]
+    assert _color("#1f883d").hex in hexes
+    # Ordering is still mass-monotonic: the heavy link clusters outrank the CTA.
+    assert hexes[0] == _color("#59636e").hex
 
 
 def test_dual_use_color_appears_in_both_categories_with_correct_masses() -> None:
@@ -135,10 +158,11 @@ def test_all_zero_area_surfaces_keep_argmax_fallback() -> None:
 
 
 def test_prune_below_min_share_with_renormalization() -> None:
-    # 0.01 share < MIN_SHARE (0.02) prunes; survivors renormalize to sum 1.
+    # A genuinely tiny vote mass still prunes under log1p damping (log1p(0.05) ~ 0.05,
+    # a < MIN_SHARE share against log1p(99) ~ 4.6); survivors renormalize to sum 1.
     strong = _cluster("#111111", 0.0, {ComponentType.page_text: 99.0})
-    weak = _cluster("#222222", 0.0, {ComponentType.page_text: 1.0})
-    assert MIN_SHARE > 1.0 / 100.0
+    weak = _cluster("#222222", 0.0, {ComponentType.page_text: 0.05})
+    assert math.log1p(0.05) / (math.log1p(99.0) + math.log1p(0.05)) < MIN_SHARE
     palette = build_usage([strong, weak])
 
     text = palette.mapping[UsageCategory.text]

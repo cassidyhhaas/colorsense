@@ -20,14 +20,23 @@ Design notes
       authoritative signal for surfaces — ranking by vote count would let 30 repeated
       cards outrank an 86%-area page background. Only clusters with nonzero surface
       vote mass participate (area alone does not prove a color is a surface).
-    - **text / interactive / border**: prominence ∝ the cluster's raw vote mass in that
-      category. These paint negligible screenshot area, so area is *not* a useful
-      ranking signal there; how many elements use the color is.
+    - **text / interactive / border**: prominence ∝ ``log1p`` of the cluster's raw vote
+      mass in that category. These paint negligible screenshot area, so area is *not* a
+      useful ranking signal there; how many elements use the color is — but only
+      **sub-linearly**. Raw (linear) mass let element *count* drown high-confidence
+      single-element evidence: on github.com ~200 link votes (clusters with mass 93/55/48)
+      pushed the lone green CTA (``cta_bg`` mass 1.0) to a 0.005 share, below
+      :data:`MIN_SHARE` — the brand accent vanished from ``interactive``. ``log1p`` is
+      monotonic, so within-category *ordering* is unchanged; only the shares compress
+      (the CTA's share becomes ~0.04 and survives), while genuinely tiny masses
+      (``log1p(0.05) ≈ 0.05``) still prune.
 * Everything is deterministic: iteration is over stable sort orders, ties are broken by
   color ``hex``, and there is no randomness.
 """
 
 from __future__ import annotations
+
+import math
 
 from colorsense.models import (
     ColorCluster,
@@ -152,8 +161,8 @@ def build_usage(clusters: list[ColorCluster]) -> UsagePalette:
 
     For each usage category, the participating clusters (those with nonzero raw vote
     mass routed to the category via :data:`COMPONENT_USAGE`) are scored by prominence —
-    screenshot area for ``surface``, in-category vote mass for the others (see the
-    module docstring for the rationale) — normalized to probabilities, pruned below
+    screenshot area for ``surface``, ``log1p`` of in-category vote mass for the others
+    (see the module docstring for the rationale) — normalized to probabilities, pruned below
     :data:`MIN_SHARE` (argmax kept if pruning empties the category), and ranked by
     ``(-probability, hex)``. A category with no mass anywhere maps to ``()`` (the
     :class:`UsagePalette` validator backfills it). An empty cluster list yields an
@@ -171,7 +180,10 @@ def build_usage(clusters: list[ColorCluster]) -> UsagePalette:
                 # unless it ends up the argmax fallback.
                 prominence = cluster.area_weight
             else:
-                prominence = sum(masses.values())
+                # Sub-linear (log1p) in vote mass: monotonic, so ordering matches raw
+                # mass, but repeated same-component votes saturate instead of letting
+                # element count drown one-element evidence (see the module docstring).
+                prominence = math.log1p(sum(masses.values()))
             per_category[category].append((cluster, prominence, masses))
 
     mapping = {
