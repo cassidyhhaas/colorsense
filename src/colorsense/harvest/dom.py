@@ -3,7 +3,8 @@
 Walks the rendered DOM in-page, capturing for each element its computed
 ``background-color`` / ``color`` / ``border-color`` (parsed to :class:`Color`), bounding rect,
 position, tag/role/id/class tokens, and structural flags (iframe, cross-origin, shadow
-host, clickable, box shadow, vendor match, visible, aria-hidden). Hidden, zero-area, or
+host, clickable, box shadow, direct text content, vendor match, visible, aria-hidden).
+Hidden, zero-area, or
 aria-hidden elements are excluded from the returned list (their flags are still computed
 on what is returned).
 
@@ -41,6 +42,7 @@ class _RawElement(TypedDict):
     text: str
     border: str
     has_box_shadow: bool
+    has_text: bool
     is_iframe: bool
     cross_origin: bool
     shadow_host: bool
@@ -125,6 +127,17 @@ _COLLECT_DOM_JS: str = r"""
         const borderColor = borderWidth > 0 ? style.borderTopColor : '';
         const hasBoxShadow = style.boxShadow !== 'none';
 
+        // True iff the element has at least one DIRECT child text node with
+        // non-whitespace content. Descendant text deliberately does not count:
+        // otherwise every ancestor wrapper of any text would carry the flag.
+        let hasText = false;
+        for (const child of el.childNodes) {
+            if (child.nodeType === 3 && child.nodeValue.trim() !== '') {
+                hasText = true;
+                break;
+            }
+        }
+
         const vendorBlob = (
             (el.id || '') + ' ' + classList.join(' ') + ' ' + (el.getAttribute('src') || '')
         ).toLowerCase();
@@ -141,6 +154,7 @@ _COLLECT_DOM_JS: str = r"""
             text: style.color,
             border: borderColor,
             has_box_shadow: hasBoxShadow,
+            has_text: hasText,
             is_iframe: isIframe,
             cross_origin: crossOrigin,
             shadow_host: shadowHost,
@@ -187,6 +201,7 @@ async def harvest_elements(
                 text=parse_css_color(raw["text"]),
                 border=parse_css_color(raw["border"]),
                 has_box_shadow=raw["has_box_shadow"],
+                has_text=raw["has_text"],
                 is_iframe=raw["is_iframe"],
                 cross_origin=raw["cross_origin"],
                 shadow_host=raw["shadow_host"],

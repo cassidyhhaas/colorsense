@@ -110,6 +110,26 @@ async def test_border_only_reported_when_painted(fixtures_dir: Path, config: Con
     assert primary.has_box_shadow is False
 
 
+async def test_has_text_set_for_direct_text_only(fixtures_dir: Path, config: Config) -> None:
+    """``has_text`` is true iff the element has a DIRECT non-whitespace child text node.
+
+    Descendant text must not count — ``<body>`` contains text-bearing children but only
+    whitespace text nodes of its own, so it carries ``has_text=False`` while the leaf
+    elements carry ``True``.
+    """
+    harvest = await _harvest(fixtures_dir / "tokens.html", config)
+
+    primary = next(el for el in harvest.elements if "primary-box" in el.class_tokens)
+    assert primary.has_text is True  # <div class="primary-box">Primary</div>
+    btn = next(el for el in harvest.elements if "btn" in el.class_tokens)
+    assert btn.has_text is True
+
+    body = next(el for el in harvest.elements if el.tag == "body")
+    assert body.has_text is False  # only whitespace text nodes between children
+    html = next(el for el in harvest.elements if el.tag == "html")
+    assert html.has_text is False
+
+
 async def test_vendor_match_detected(fixtures_dir: Path, config: Config) -> None:
     harvest = await _harvest(fixtures_dir / "tokens.html", config)
     intercom = next(el for el in harvest.elements if "intercom-launcher" in el.class_tokens)

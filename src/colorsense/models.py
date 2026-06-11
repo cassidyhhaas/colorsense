@@ -3,7 +3,12 @@
 These models are the single shared-contract surface for the pipeline. This file is
 **frozen** by design: downstream code must not modify it. A change to a contract here
 must be made centrally and re-validated against every dependent module, never patched
-locally by a consumer. (Most recent central change: the usage-keyed palette redesign —
+locally by a consumer. (Most recent central change: ``HarvestedElement`` gained
+``has_text: bool = False`` — true iff the element has a direct child text node with
+non-whitespace content; mirrors the ``has_box_shadow`` precedent (default ``False``, the
+DOM harvester always sets it) — re-validated against ``harvest.dom``,
+``classify.components``, and every test constructing ``HarvestedElement``. Previous
+central change: the usage-keyed palette redesign —
 ``UsageCategory``/``UsageEntry``/``UsagePalette``/``DesignToken`` added, ``ThemePalette``
 gained ``usage``/``fit_score``/``divergence``/``tokens``, ``DivergenceItem`` re-keyed to
 ``UsageCategory``, ``PaletteCandidate.evidence`` and ``AnalysisResult``'s
@@ -222,6 +227,10 @@ class HarvestedElement(BaseModel):
     border (border width > 0); borderless elements carry ``None``. ``has_box_shadow``
     defaults to ``False`` (mirroring ``has_hover_color_change``'s harvest-time default)
     so pre-existing constructions remain valid; the DOM harvester always sets it.
+    ``has_text`` follows the same precedent (default ``False``, always set by the
+    harvester): true iff the element has at least one **direct child** text node with
+    non-whitespace content — descendant text does not count, otherwise every ancestor
+    wrapper of any text would carry the flag.
     """
 
     tag: str
@@ -234,6 +243,7 @@ class HarvestedElement(BaseModel):
     text: Color | None
     border: Color | None
     has_box_shadow: bool = False
+    has_text: bool = False
     is_iframe: bool
     cross_origin: bool
     shadow_host: bool
