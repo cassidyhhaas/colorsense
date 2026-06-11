@@ -32,9 +32,10 @@ fixtures). All other schemes (`ftp`, `data`, `javascript`, ...) are always rejec
 and sub-resource requests** (scripts, images, XHR/`fetch`) can reach internal endpoints
 regardless of where the navigation pointed — a perfectly public page can still probe
 `169.254.169.254` from inside the browser. The in-library mechanism for this is
-`PolitenessPolicy(request_filter=...)`: a predicate over **every** request URL the browser
-makes (the navigation included), aborting any request it rejects (and failing closed if the
-predicate itself errors). `block_private_networks()` is a shipped filter for the common
+`PolitenessPolicy(request_filter=...)`: a predicate — synchronous or asynchronous — over
+**every** request URL the browser makes (the navigation included), aborting any request it
+rejects (and failing closed if the predicate itself errors); a sync predicate runs inline
+on the event loop and must not block. `block_private_networks()` is a shipped filter for the common
 case (see "What you must do" below); deciding *which* destinations are safe remains your
 policy, and network isolation (below) remains the strong recommendation even with a filter
 in place.
@@ -56,10 +57,12 @@ must enforce your own guard rails before and around the call**:
 - **Allowlist** the schemes and hosts you are willing to fetch; reject everything else.
 - **Filter egress in-library** with `request_filter`, so the rendered page's sub-resource
   requests are subject to the same rules as the navigation. The library ships an
-  implementation: `block_private_networks()` builds a filter that resolves each hostname
-  and rejects any URL resolving to a private, loopback, link-local (metadata), CGNAT,
-  multicast, or otherwise non-public address — failing closed on resolution failure, with
-  an optional narrowing host allowlist. It does **not** fully defeat DNS rebinding: the
+  implementation: `block_private_networks()` builds an async filter that resolves each
+  hostname — off the event loop, on a worker thread, with per-host verdict caching and
+  single-flight coalescing — and rejects any URL resolving to a private, loopback,
+  link-local (metadata), CGNAT, multicast, or otherwise non-public address — failing
+  closed on resolution failure, with an optional narrowing host allowlist. It does **not**
+  fully defeat DNS rebinding: the
   filter sees URL strings, while Chromium resolves hostnames independently when it
   connects, so a hostname can flip to an internal address between check and connection.
 - **Pin redirects**: re-validate the destination on every hop, or disallow redirects to
@@ -152,7 +155,7 @@ cannot stall your pipeline; raise the cap to honor longer delays. Two caveats:
 
 | Risk | Library's stance | Your responsibility |
 | --- | --- | --- |
-| **SSRF** | `http(s)` only by default (`file://` opt-in, other schemes rejected); no host/IP validation unless configured; follows redirects; optional `request_filter` over every browser request and the policy's own `robots.txt` fetch (each redirect hop included), with `block_private_networks()` as the shipped filter (does not fully defeat DNS rebinding) | Allowlist hosts, configure `request_filter` (e.g. `block_private_networks()`), pin redirects, isolate egress — network isolation stays primary |
+| **SSRF** | `http(s)` only by default (`file://` opt-in, other schemes rejected); no host/IP validation unless configured; follows redirects; optional `request_filter` (sync or async) over every browser request and the policy's own `robots.txt` fetch (each redirect hop included), with `block_private_networks()` as the shipped filter — async, resolving DNS off the event loop (does not fully defeat DNS rebinding) | Allowlist hosts, configure `request_filter` (e.g. `block_private_networks()`), pin redirects, isolate egress — network isolation stays primary |
 | **Resource / DoS** | Timeout, rate limiter (incl. capped `Crawl-delay`), capture dimension + decode pixel caps, robots-fetch caps (timeout, redirects, body size); opt-in `max_concurrent_renders` and `max_total_seconds` (both unset by default); opt-in V8-heap cap via `browser_args`; no in-process memory/CPU cap (by design) | Container limits (the enforceable cap), set `max_concurrent_renders` + `max_total_seconds`, cap the V8 heap via `browser_args`, network isolation |
 | **`robots.txt`** | Respected by default (incl. `Crawl-delay`, capped at 30s), but fails open; can be disabled | Don't disable without authorization; gate authorization yourself before calling |
 

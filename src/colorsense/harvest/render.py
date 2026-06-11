@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import inspect
 from collections.abc import Awaitable, Callable, Sequence
 from types import TracebackType
 from typing import Literal, Self
@@ -37,6 +38,38 @@ from playwright.async_api import (
 )
 
 from colorsense.models import Rect, Theme, Viewport
+
+RequestFilter = Callable[[str], bool] | Callable[[str], Awaitable[bool]]
+"""An egress predicate over a request URL: ``True`` permits, ``False`` aborts.
+
+Either a plain synchronous callable or an async one. A sync predicate is invoked inline on
+the event loop's request path, so it must not block (cheap string checks only); an async
+predicate is awaited, free to move slow work (e.g. DNS resolution) off the loop — the
+shipped :func:`colorsense.block_private_networks` guard is async for exactly that reason.
+Both seams that apply a filter (the browser route handler and the robots loader) evaluate
+it through :func:`evaluate_request_filter`, so raising — sync or async — always fails
+closed.
+"""
+
+
+async def evaluate_request_filter(request_filter: RequestFilter, url: str) -> bool:
+    """Apply ``request_filter`` to ``url``; awaits async predicates; never raises (fail closed).
+
+    The single place filter-invocation semantics live: the predicate is called, an
+    awaitable result is awaited, and the outcome is coerced to ``bool``. ANY exception —
+    from the call or from the await — yields ``False``, so a buggy filter can never
+    silently wave traffic through. Module-level (and browser-free) so both seams that
+    enforce a filter share one behavior and it stays unit-testable.
+    """
+    try:
+        verdict = request_filter(url)
+        if inspect.isawaitable(verdict):
+            verdict = await verdict
+        return bool(verdict)
+    except Exception:
+        # Fail CLOSED: a broken predicate must block, not permit.
+        return False
+
 
 # Map our Theme to Playwright's color_scheme literal.
 _COLOR_SCHEME: dict[Theme, Literal["light", "dark"]] = {
@@ -146,24 +179,19 @@ def normalize_browser_args(browser_args: Sequence[str]) -> tuple[str, ...]:
 
 
 def _route_handler(
-    request_filter: Callable[[str], bool],
+    request_filter: RequestFilter,
 ) -> Callable[[Route], Awaitable[None]]:
     """Build the ``context.route`` handler enforcing ``request_filter`` on every request.
 
     The predicate sees the request URL (the navigation itself and every sub-resource the
     rendered page asks for: scripts, images, XHR/``fetch``). ``False`` aborts the request.
-    A predicate that *raises* fails CLOSED — the request is aborted — so a buggy filter can
-    never silently wave traffic through. Module-level so the abort/continue logic is unit
-    testable without a browser.
+    Evaluation goes through :func:`evaluate_request_filter`, so sync and async predicates
+    are handled uniformly and a predicate that *raises* fails CLOSED — the request is
+    aborted. Module-level so the abort/continue logic is unit testable without a browser.
     """
 
     async def handle(route: Route) -> None:
-        try:
-            allowed = request_filter(route.request.url)
-        except Exception:
-            # Fail CLOSED: a broken predicate must block, not permit.
-            allowed = False
-        if allowed:
+        if await evaluate_request_filter(request_filter, route.request.url):
             await route.continue_()
         else:
             await route.abort()
@@ -266,11 +294,12 @@ class RenderSession:
         The politeness layer passes its configured wire UA through here. ``None`` (the
         default) keeps Playwright's stock UA.
     request_filter:
-        When not ``None``, a synchronous predicate over every request URL the browser
-        makes (the navigation and all sub-resources), installed as a ``context.route``
-        interceptor: requests for which it returns ``False`` — or for which it raises
-        (fail closed) — are aborted. ``None`` (the default) installs no route at all, so
-        the unfiltered path has zero interception overhead.
+        When not ``None``, a :data:`RequestFilter` — a sync or async predicate over every
+        request URL the browser makes (the navigation and all sub-resources), installed as
+        a ``context.route`` interceptor: requests for which it returns ``False`` — or for
+        which it raises (fail closed) — are aborted. A sync predicate runs inline on the
+        event loop and must not block; an async one is awaited. ``None`` (the default)
+        installs no route at all, so the unfiltered path has zero interception overhead.
     browser:
         When not ``None``, an externally owned :class:`~playwright.async_api.Browser` the
         session opens its context inside instead of launching its own Chromium (the per-
@@ -295,7 +324,7 @@ class RenderSession:
         viewport: Viewport,
         *,
         user_agent: str | None = None,
-        request_filter: Callable[[str], bool] | None = None,
+        request_filter: RequestFilter | None = None,
         browser: Browser | None = None,
         browser_args: Sequence[str] = (),
     ) -> None:

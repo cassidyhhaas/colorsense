@@ -14,7 +14,6 @@ politeness/pipeline seams are driven with recording fake harvesters.
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -24,7 +23,7 @@ import colorsense.harvest.render as render_mod
 from colorsense import LIGHT_AND_DARK, analyze
 from colorsense.color.primitives import parse_css_color
 from colorsense.config import Config, load_default_config
-from colorsense.harvest import SharedBrowser, harvest_page
+from colorsense.harvest import RequestFilter, SharedBrowser, harvest_page
 from colorsense.harvest.render import RenderSession
 from colorsense.models import (
     Harvest,
@@ -46,7 +45,7 @@ def config() -> Config:
 
 
 async def _no_robots(
-    _url: str, _user_agent: str, _request_filter: Callable[[str], bool] | None = None
+    _url: str, _user_agent: str, _request_filter: RequestFilter | None = None
 ) -> str | None:
     return None
 
@@ -344,7 +343,7 @@ class _BrowserRecordingHarvester:
         viewport: Viewport,
         *,
         user_agent: str | None = None,
-        request_filter: Callable[[str], bool] | None = None,
+        request_filter: RequestFilter | None = None,
         browser: SharedBrowser | None = None,
     ) -> Harvest:
         self.browsers.append(browser)
@@ -434,7 +433,7 @@ class _MiniHarvester(_BrowserRecordingHarvester):
         viewport: Viewport,
         *,
         user_agent: str | None = None,
-        request_filter: Callable[[str], bool] | None = None,
+        request_filter: RequestFilter | None = None,
         browser: SharedBrowser | None = None,
     ) -> Harvest:
         self.browsers.append(browser)

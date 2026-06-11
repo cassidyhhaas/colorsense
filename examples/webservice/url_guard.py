@@ -8,8 +8,9 @@ Everything address-level — resolving hostnames and rejecting private/loopback/
 metadata destinations, on the navigation, every redirect hop, every sub-resource, and the
 policy's own ``robots.txt`` fetch (including each of *its* redirect hops) — is the
 library's job now: :func:`colorsense.block_private_networks` builds the egress
-``request_filter`` that ``policy.py`` installs on its :class:`~colorsense.PolitenessPolicy`.
-See that factory's docstring for the honest limits (DNS rebinding, blocking resolution).
+``request_filter`` that ``policy.py`` installs on its :class:`~colorsense.PolitenessPolicy`
+(an async predicate — its DNS resolution runs off the event loop). See that factory's
+docstring for the honest limits (DNS rebinding above all).
 """
 
 from __future__ import annotations

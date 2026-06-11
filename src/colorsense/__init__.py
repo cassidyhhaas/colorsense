@@ -32,9 +32,13 @@ Inputs & policy
 * :class:`PolitenessPolicy` — opt-in fetch policy (robots, rate limit, cache, scheme gate,
   egress ``request_filter``, ``max_concurrent_renders`` render cap); the consumer owns
   authorization.
-* :func:`block_private_networks` — factory for a ``request_filter`` predicate that rejects
-  non-public destinations (loopback, RFC 1918, link-local/metadata, CGNAT, ...), failing
-  closed; the shipped SECURITY.md §1 egress filter.
+* :func:`block_private_networks` — factory for an async ``request_filter`` predicate that
+  rejects non-public destinations (loopback, RFC 1918, link-local/metadata, CGNAT, ...),
+  failing closed, resolving hostnames off the event loop; the shipped SECURITY.md §1
+  egress filter.
+* :data:`RequestFilter` — the type a ``request_filter`` must satisfy: a sync **or** async
+  ``url -> bool`` predicate (sync runs inline on the event loop and must not block; async
+  is awaited).
 * :class:`RenderError` / :class:`RobotsDisallowedError` / :class:`UnsupportedSchemeError` /
   :class:`AnalysisTimeoutError` — raised by :func:`analyze` when a page fails to
   render/navigate, when ``robots.txt`` disallows the fetch, when the URL scheme is not
@@ -45,7 +49,7 @@ Inputs & policy
 from __future__ import annotations
 
 from colorsense.config import Config, load_config, load_default_config
-from colorsense.harvest import RenderError
+from colorsense.harvest import RenderError, RequestFilter
 from colorsense.models import (
     AnalysisResult,
     ClassifiedToken,
@@ -82,6 +86,7 @@ __all__ = [
     "PaletteRole",
     "PolitenessPolicy",
     "RenderError",
+    "RequestFilter",
     "RobotsDisallowedError",
     "RoleResults",
     "RunMetadata",

@@ -19,20 +19,23 @@ Honest limits — read before relying on this filter alone:
   browser connects. Per SECURITY.md, network isolation of the browser environment (egress
   firewalling, no route to internal ranges) remains the primary control; this filter is
   defense in depth, not a substitute.
-* **Resolution here is blocking.** ``request_filter`` is a synchronous callable invoked on
-  the event loop's request path, so DNS lookups in it block the loop. The trade-off is
-  deliberate: the alternative (no resolution) cannot catch hostnames pointing at internal
-  addresses at all. The per-hostname TTL+LRU verdict cache keeps the blocking lookups to
-  roughly one per distinct hostname per TTL; budget concurrency/deadlines accordingly.
+* **Resolution runs off the event loop, but it still costs.** The predicate is **async**
+  (only usable under a running loop, designed for the ``request_filter`` seam): on a cache
+  miss the blocking ``getaddrinfo`` runs on a worker thread via ``asyncio.to_thread``, so a
+  slow nameserver costs a worker thread plus latency for that host's requests only — never
+  a loop stall. Per-host verdicts are TTL+LRU cached, and concurrent misses for one host
+  coalesce into a single lookup, so a page fanning out requests to a novel hostname cannot
+  exhaust the thread pool with duplicate resolutions.
 """
 
 from __future__ import annotations
 
+import asyncio
 import ipaddress
 import socket
 import time
 from collections import OrderedDict
-from collections.abc import Callable, Iterable
+from collections.abc import Awaitable, Callable, Iterable
 from urllib.parse import urlsplit
 
 IPAddress = ipaddress.IPv4Address | ipaddress.IPv6Address
@@ -55,7 +58,8 @@ the cache without bound."""
 def _default_resolver(host: str) -> list[IPAddress]:
     """Resolve ``host`` to all of its addresses via stdlib ``socket.getaddrinfo``.
 
-    Blocking by design (see the module docstring); the guard caches the verdict. IP
+    Blocking by design — the guard runs it inside ``asyncio.to_thread`` on a cache miss,
+    so the ``Resolver`` seam stays a plain synchronous callable; the verdict is cached. IP
     literals pass straight through ``getaddrinfo`` without a network round trip. Raises
     ``OSError`` on resolution failure — the guard treats that as fail-closed.
     """
@@ -112,10 +116,19 @@ class _PrivateNetworkBlocker:
         self._clock = clock
         # hostname -> (expiry, verdict). Most-recently-used keys at the end; overflow
         # evicts from the front. Negative verdicts are cached too — repeatedly re-resolving
-        # a hostile hostname would hand the page a blocking-lookup amplifier.
+        # a hostile hostname would hand the page a worker-thread-lookup amplifier. Read and
+        # mutated ONLY on the event loop thread; the worker thread runs nothing but
+        # _resolve_verdict.
         self._cache: OrderedDict[str, tuple[float, bool]] = OrderedDict()
+        # In-flight resolution coalescing (single-flight): concurrent misses for the same
+        # host await one shared Future instead of each dispatching a worker-thread lookup —
+        # otherwise a page fanning N requests at one slow novel hostname pins N executor
+        # threads on the same getaddrinfo. Entries are always popped in a ``finally``, so a
+        # guard reused across sequential ``asyncio.run`` calls never sees a stale-loop
+        # Future.
+        self._inflight: dict[str, asyncio.Future[bool]] = {}
 
-    def __call__(self, url: str) -> bool:
+    async def __call__(self, url: str) -> bool:
         try:
             parts = urlsplit(url)
             host = parts.hostname
@@ -133,20 +146,61 @@ class _PrivateNetworkBlocker:
         # (before any resolution), and a host ON the list must still resolve public.
         if self._allowed_hosts is not None and host not in self._allowed_hosts:
             return False
-        return self._host_is_public(host)
+        return await self._host_is_public(host)
 
-    def _host_is_public(self, host: str) -> bool:
+    async def _host_is_public(self, host: str) -> bool:
         now = self._clock()
         cached = self._cache.get(host)
         if cached is not None and cached[0] > now:
             self._cache.move_to_end(host)
-            return cached[1]
-        verdict = self._resolve_verdict(host)
-        self._cache[host] = (now + self._ttl, verdict)
-        self._cache.move_to_end(host)
-        while len(self._cache) > self._max_entries:
-            self._cache.popitem(last=False)
-        return verdict
+            return cached[1]  # fast path: cache hit returns without awaiting
+        existing = self._inflight.get(host)
+        if existing is not None:
+            # Follower: share the leader's single lookup. ``shield`` keeps this follower's
+            # OWN cancellation from cancelling the shared Future other waiters still use.
+            # Cancellation behavior (deterministic, fail closed): if the LEADER is
+            # cancelled it cancels the Future, and followers return False — fail closed is
+            # always safe here, and the next request for the host simply re-resolves. A
+            # follower whose own task is cancelled still raises CancelledError normally.
+            try:
+                return await asyncio.shield(existing)
+            except asyncio.CancelledError:
+                if not existing.cancelled():
+                    raise  # the follower's own task was cancelled — propagate
+                current = asyncio.current_task()
+                if current is not None and current.cancelling() > 0:
+                    # The leader's cancellation landed in the same tick as this follower's
+                    # own pending cancel; the latter must be honored, not swallowed.
+                    raise
+                return False
+        # Leader: dispatch exactly one worker-thread lookup for this host. Only
+        # _resolve_verdict (pure: catches OSError/ValueError, returns a bool) runs in the
+        # thread; the cache write/eviction happens back on the loop thread.
+        loop = asyncio.get_running_loop()
+        future: asyncio.Future[bool] = loop.create_future()
+        self._inflight[host] = future
+        try:
+            verdict = await asyncio.to_thread(self._resolve_verdict, host)
+        except BaseException:
+            # Leader cancelled — or a buggy custom resolver raised something outside the
+            # OSError/ValueError set _resolve_verdict catches: cancel the shared Future so
+            # followers observe it and fail closed (see above), then re-raise (the seam's
+            # evaluate_request_filter turns a raising predicate into False). On
+            # cancellation the lookup thread keeps running to completion; its verdict is
+            # simply discarded.
+            if not future.done():
+                future.cancel()
+            raise
+        else:
+            self._cache[host] = (now + self._ttl, verdict)
+            self._cache.move_to_end(host)
+            while len(self._cache) > self._max_entries:
+                self._cache.popitem(last=False)
+            if not future.done():
+                future.set_result(verdict)
+            return verdict
+        finally:
+            self._inflight.pop(host, None)
 
     def _resolve_verdict(self, host: str) -> bool:
         try:
@@ -168,11 +222,12 @@ def block_private_networks(
     ttl: float = DEFAULT_GUARD_TTL_SECONDS,
     max_entries: int = DEFAULT_GUARD_MAX_ENTRIES,
     clock: Clock = time.monotonic,
-) -> Callable[[str], bool]:
+) -> Callable[[str], Awaitable[bool]]:
     """Build a ``request_filter`` predicate that rejects non-public destinations.
 
-    The returned synchronous predicate (``guard(url) -> bool``; ``True`` permits, ``False``
-    aborts) is meant for ``PolitenessPolicy(request_filter=...)``, where the library applies
+    The returned **async** predicate (``await guard(url) -> bool``; ``True`` permits,
+    ``False`` aborts; only usable under a running event loop, as the ``request_filter``
+    seams are) is meant for ``PolitenessPolicy(request_filter=...)``, where the library applies
     it to **every** URL the browser requests while rendering — the navigation, every
     redirect hop, and all sub-resources, including the page's own ``fetch`` calls — and to
     the policy's own ``robots.txt`` GET, whose initial URL and every redirect ``Location``
@@ -194,8 +249,11 @@ def block_private_networks(
     Chromium resolves hostnames independently when it connects, so a hostname can flip from
     public to internal between this check and the connection. Network isolation of the
     browser environment remains the primary control per SECURITY.md; this filter is defense
-    in depth. Resolution is also **blocking** on the event loop's request path — hence the
-    per-hostname TTL+LRU verdict cache (negative verdicts cached too).
+    in depth. Resolution runs **off the event loop**: a cache miss dispatches the blocking
+    ``getaddrinfo`` to a worker thread via ``asyncio.to_thread``, concurrent misses for one
+    host coalesce into a single lookup, and verdicts land in a per-hostname TTL+LRU cache
+    (negative verdicts cached too) — so a slow resolver costs a worker thread plus latency
+    for that host only, never a loop stall.
 
     Parameters
     ----------
@@ -204,7 +262,8 @@ def block_private_networks(
         a host not on the list is rejected, and a host on the list must still resolve to
         only-public addresses. The allowlist narrows the filter, never widens it.
     resolver:
-        ``host -> [addresses]`` seam, injectable for tests. Defaults to a blocking
+        ``host -> [addresses]`` seam, injectable for tests. Stays *synchronous* — the
+        guard runs it inside ``asyncio.to_thread`` on a cache miss. Defaults to a blocking
         ``socket.getaddrinfo`` lookup; raising ``OSError`` fails closed.
     ttl:
         Seconds a hostname's verdict is reused before re-resolving. Defaults to

@@ -9,12 +9,15 @@ Public interface
 * :class:`SharedBrowser` — lazy handle sharing one Chromium launch across several renders
   (each render still gets its own browser context); :func:`colorsense.analyze` uses one
   per call so sibling theme renders don't each pay a browser launch.
+* :data:`RequestFilter` — the type of a ``request_filter`` predicate: a sync **or** async
+  ``url -> bool`` callable (sync runs inline on the event loop and must not block; async
+  is awaited).
 """
 
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable, Sequence
+from collections.abc import Sequence
 
 from playwright.async_api import Error as PlaywrightError
 from pydantic import ValidationError
@@ -24,6 +27,7 @@ from colorsense.harvest.dom import harvest_elements
 from colorsense.harvest.render import (
     DEFAULT_NAV_TIMEOUT_MS,
     RenderSession,
+    RequestFilter,
     SharedBrowser,
     normalize_browser_args,
 )
@@ -36,6 +40,7 @@ __all__ = [
     "DEFAULT_NAV_TIMEOUT_MS",
     "RenderError",
     "RenderSession",
+    "RequestFilter",
     "SharedBrowser",
     "harvest_page",
 ]
@@ -74,7 +79,7 @@ async def harvest_page(
     *,
     nav_timeout_ms: float = DEFAULT_NAV_TIMEOUT_MS,
     user_agent: str | None = None,
-    request_filter: Callable[[str], bool] | None = None,
+    request_filter: RequestFilter | None = None,
     browser: SharedBrowser | None = None,
     browser_args: Sequence[str] = (),
 ) -> Harvest:
@@ -99,10 +104,11 @@ async def harvest_page(
     ``user_agent`` through here, making the documented "identifiable User-Agent" hold on the
     actual render, not just the ``robots.txt`` GET.
 
-    ``request_filter``, when not ``None``, is forwarded to :class:`RenderSession`, which
-    installs it as a browser-context route: every request the render makes (the navigation
-    *and* all sub-resources the page's own JS/markup triggers) is aborted unless the
-    predicate returns ``True`` (a raising predicate fails closed and aborts).
+    ``request_filter``, when not ``None``, is a :data:`RequestFilter` — sync or async —
+    forwarded to :class:`RenderSession`, which installs it as a browser-context route:
+    every request the render makes (the navigation *and* all sub-resources the page's own
+    JS/markup triggers) is aborted unless the predicate returns ``True`` (an async
+    predicate is awaited; a raising predicate fails closed and aborts).
     :meth:`PolitenessPolicy.fetch` passes its configured ``request_filter`` through here.
 
     ``browser``, when not ``None``, is a :class:`SharedBrowser` handle resolved lazily

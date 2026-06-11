@@ -10,7 +10,6 @@ shared-browser teardown must run on the timeout path (asserted through a fake
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable
 from types import TracebackType
 from typing import ClassVar
 
@@ -18,7 +17,7 @@ import pytest
 
 from colorsense import AnalysisTimeoutError, analyze
 from colorsense.config import Config, load_default_config
-from colorsense.harvest import SharedBrowser
+from colorsense.harvest import RequestFilter, SharedBrowser
 from colorsense.models import Harvest, Theme, Viewport
 from colorsense.net.politeness import PolitenessPolicy
 from colorsense.pipeline import DEFAULT_VIEWPORT
@@ -32,7 +31,7 @@ def config() -> Config:
 
 
 async def _no_robots(
-    _url: str, _user_agent: str, _request_filter: Callable[[str], bool] | None = None
+    _url: str, _user_agent: str, _request_filter: RequestFilter | None = None
 ) -> str | None:
     return None
 
@@ -52,7 +51,7 @@ class _SlowHarvester:
         viewport: Viewport,
         *,
         user_agent: str | None = None,
-        request_filter: Callable[[str], bool] | None = None,
+        request_filter: RequestFilter | None = None,
         browser: SharedBrowser | None = None,
     ) -> Harvest:
         self.started.set()
@@ -73,7 +72,7 @@ class _ImmediateHarvester:
         viewport: Viewport,
         *,
         user_agent: str | None = None,
-        request_filter: Callable[[str], bool] | None = None,
+        request_filter: RequestFilter | None = None,
         browser: SharedBrowser | None = None,
     ) -> Harvest:
         return Harvest(url=url, theme=theme, viewport=viewport, screenshot_bins=[])
@@ -115,7 +114,7 @@ class _TimeoutRaisingHarvester:
         viewport: Viewport,
         *,
         user_agent: str | None = None,
-        request_filter: Callable[[str], bool] | None = None,
+        request_filter: RequestFilter | None = None,
         browser: SharedBrowser | None = None,
     ) -> Harvest:
         raise TimeoutError("unrelated upstream timeout")

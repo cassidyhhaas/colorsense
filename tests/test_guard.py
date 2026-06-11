@@ -7,8 +7,10 @@ narrowing) in isolation from the browser and the politeness machinery.
 
 from __future__ import annotations
 
+import asyncio
 import ipaddress
-from collections.abc import Callable
+import threading
+from collections.abc import Awaitable, Callable
 
 import pytest
 
@@ -34,7 +36,7 @@ class RecordingResolver:
             raise OSError(f"no such host {host!r}") from err
 
 
-def guard_for(mapping: dict[str, list[IPAddress]]) -> Callable[[str], bool]:
+def guard_for(mapping: dict[str, list[IPAddress]]) -> Callable[[str], Awaitable[bool]]:
     return block_private_networks(resolver=RecordingResolver(mapping))
 
 
@@ -90,9 +92,9 @@ def test_ipv4_mapped_public_address_accepted() -> None:
 # -- the guard predicate ------------------------------------------------------
 
 
-def test_public_host_allowed() -> None:
+async def test_public_host_allowed() -> None:
     guard = guard_for({"example.com": [PUBLIC_V4, PUBLIC_V6]})
-    assert guard("https://example.com/page") is True
+    assert await guard("https://example.com/page") is True
 
 
 @pytest.mark.parametrize(
@@ -106,127 +108,257 @@ def test_public_host_allowed() -> None:
         [PUBLIC_V4, ipaddress.ip_address("192.168.0.10")],
     ],
 )
-def test_hosts_resolving_to_non_public_addresses_rejected(resolved: list[IPAddress]) -> None:
+async def test_hosts_resolving_to_non_public_addresses_rejected(resolved: list[IPAddress]) -> None:
     guard = guard_for({"evil.example": resolved})
-    assert guard("http://evil.example/") is False
+    assert await guard("http://evil.example/") is False
 
 
-def test_ip_literal_metadata_endpoint_rejected() -> None:
+async def test_ip_literal_metadata_endpoint_rejected() -> None:
     # IP literals resolve to themselves; no mapping entry needed with the real resolver,
     # but here the injected resolver supplies the literal explicitly.
     guard = guard_for({"169.254.169.254": [ipaddress.ip_address("169.254.169.254")]})
-    assert guard("http://169.254.169.254/latest/meta-data/") is False
+    assert await guard("http://169.254.169.254/latest/meta-data/") is False
 
 
-def test_ip_literals_pass_through_default_resolver() -> None:
+async def test_ip_literals_pass_through_default_resolver() -> None:
     # The default getaddrinfo resolver maps literals to themselves with no network round
     # trip, so the guard classifies them directly: loopback rejected, public allowed.
     guard = block_private_networks()
-    assert guard("http://127.0.0.1/") is False
-    assert guard("http://[::1]/") is False
-    assert guard(f"http://{PUBLIC_V4}/") is True
+    assert await guard("http://127.0.0.1/") is False
+    assert await guard("http://[::1]/") is False
+    assert await guard(f"http://{PUBLIC_V4}/") is True
 
 
-def test_non_http_schemes_rejected_without_resolving() -> None:
+async def test_non_http_schemes_rejected_without_resolving() -> None:
     resolver = RecordingResolver({})
     guard = block_private_networks(resolver=resolver)
     for url in ("ftp://example.com/", "file:///etc/passwd", "data:text/html,hi", "about:blank"):
-        assert guard(url) is False
+        assert await guard(url) is False
     assert resolver.calls == []
 
 
-def test_userinfo_rejected_without_resolving() -> None:
+async def test_userinfo_rejected_without_resolving() -> None:
     resolver = RecordingResolver({"example.com": [PUBLIC_V4]})
     guard = block_private_networks(resolver=resolver)
-    assert guard("https://user:pass@example.com/") is False
+    assert await guard("https://user:pass@example.com/") is False
     assert resolver.calls == []
 
 
-def test_missing_host_rejected() -> None:
-    assert guard_for({})("https:///nohost") is False
+async def test_missing_host_rejected() -> None:
+    assert await guard_for({})("https:///nohost") is False
 
 
-def test_malformed_url_fails_closed() -> None:
-    assert guard_for({})("https://[::1/broken") is False
+async def test_malformed_url_fails_closed() -> None:
+    assert await guard_for({})("https://[::1/broken") is False
 
 
-def test_resolver_failure_fails_closed() -> None:
+async def test_resolver_failure_fails_closed() -> None:
     guard = guard_for({})  # every lookup raises OSError
-    assert guard("https://does-not-resolve.example/") is False
+    assert await guard("https://does-not-resolve.example/") is False
 
 
-def test_empty_resolution_fails_closed() -> None:
+async def test_empty_resolution_fails_closed() -> None:
     guard = guard_for({"empty.example": []})
-    assert guard("https://empty.example/") is False
+    assert await guard("https://empty.example/") is False
 
 
 # -- caching ------------------------------------------------------------------
 
 
-def test_verdict_cached_within_ttl_and_reresolved_after() -> None:
+async def test_verdict_cached_within_ttl_and_reresolved_after() -> None:
     now = 0.0
     resolver = RecordingResolver({"example.com": [PUBLIC_V4]})
     guard = block_private_networks(resolver=resolver, ttl=60.0, clock=lambda: now)
-    assert guard("https://example.com/a")
-    assert guard("https://example.com/b")
+    assert await guard("https://example.com/a")
+    assert await guard("https://example.com/b")
     assert resolver.calls == ["example.com"]  # second hit served from cache
     now = 61.0
-    assert guard("https://example.com/c")
+    assert await guard("https://example.com/c")
     assert resolver.calls == ["example.com", "example.com"]  # TTL expiry re-resolves
 
 
-def test_negative_verdicts_cached_too() -> None:
+async def test_negative_verdicts_cached_too() -> None:
     resolver = RecordingResolver({"internal.example": [ipaddress.ip_address("10.0.0.1")]})
     guard = block_private_networks(resolver=resolver)
-    assert guard("https://internal.example/") is False
-    assert guard("https://internal.example/again") is False
+    assert await guard("https://internal.example/") is False
+    assert await guard("https://internal.example/again") is False
     assert resolver.calls == ["internal.example"]
 
 
-def test_cache_is_lru_bounded() -> None:
+async def test_cache_is_lru_bounded() -> None:
     resolver = RecordingResolver({f"h{i}.example": [PUBLIC_V4] for i in range(3)})
     guard = block_private_networks(resolver=resolver, max_entries=2)
     for i in range(3):
-        assert guard(f"https://h{i}.example/")
+        assert await guard(f"https://h{i}.example/")
     # h0 was evicted by h2; touching it again must re-resolve.
-    assert guard("https://h0.example/")
+    assert await guard("https://h0.example/")
     assert resolver.calls.count("h0.example") == 2
 
 
-def test_hostname_cache_key_is_case_insensitive() -> None:
+async def test_hostname_cache_key_is_case_insensitive() -> None:
     resolver = RecordingResolver({"example.com": [PUBLIC_V4]})
     guard = block_private_networks(resolver=resolver)
-    assert guard("https://EXAMPLE.com/")
-    assert guard("https://example.COM/")
+    assert await guard("https://EXAMPLE.com/")
+    assert await guard("https://example.COM/")
     assert resolver.calls == ["example.com"]  # one lowercase key, one resolution
 
 
 # -- allowlist narrowing --------------------------------------------------------
 
 
-def test_allowlist_rejects_off_list_host_without_resolving() -> None:
+async def test_allowlist_rejects_off_list_host_without_resolving() -> None:
     resolver = RecordingResolver({"other.example": [PUBLIC_V4]})
     guard = block_private_networks(allowed_hosts={"example.com"}, resolver=resolver)
-    assert guard("https://other.example/") is False
+    assert await guard("https://other.example/") is False
     assert resolver.calls == []  # rejected before any resolution
 
 
-def test_allowlist_is_compared_lowercase() -> None:
+async def test_allowlist_is_compared_lowercase() -> None:
     resolver = RecordingResolver({"example.com": [PUBLIC_V4]})
     guard = block_private_networks(allowed_hosts={"EXAMPLE.com"}, resolver=resolver)
-    assert guard("https://Example.COM/") is True
+    assert await guard("https://Example.COM/") is True
 
 
-def test_allowlisted_host_must_still_resolve_public() -> None:
+async def test_allowlisted_host_must_still_resolve_public() -> None:
     # The allowlist NARROWS, never widens: an allowlisted host resolving to an internal
     # address is still rejected.
     resolver = RecordingResolver({"example.com": [ipaddress.ip_address("10.0.0.5")]})
     guard = block_private_networks(allowed_hosts={"example.com"}, resolver=resolver)
-    assert guard("https://example.com/") is False
+    assert await guard("https://example.com/") is False
     assert resolver.calls == ["example.com"]
 
 
-def test_allowlisted_public_host_allowed() -> None:
+async def test_allowlisted_public_host_allowed() -> None:
     resolver = RecordingResolver({"example.com": [PUBLIC_V4]})
     guard = block_private_networks(allowed_hosts={"example.com"}, resolver=resolver)
-    assert guard("https://example.com/") is True
+    assert await guard("https://example.com/") is True
+
+
+# -- off-loop resolution & single-flight coalescing -----------------------------
+
+
+async def test_resolution_runs_off_the_event_loop() -> None:
+    # The whole point of the async predicate: the (blocking) resolver must execute on a
+    # worker thread, never on the loop thread that called the guard.
+    loop_thread = threading.current_thread()
+    seen: list[threading.Thread] = []
+
+    def resolver(host: str) -> list[IPAddress]:
+        seen.append(threading.current_thread())
+        return [PUBLIC_V4]
+
+    guard = block_private_networks(resolver=resolver)
+    assert await guard("https://example.com/") is True
+    assert seen and all(thread is not loop_thread for thread in seen)
+
+
+async def test_concurrent_misses_for_one_host_coalesce_into_one_lookup() -> None:
+    # Executor-exhaustion amplifier guard: N concurrent requests to one slow novel
+    # hostname must dispatch ONE worker-thread lookup, with all callers sharing its
+    # verdict. The resolver parks on an Event so the test deterministically observes all
+    # five tasks pending behind a single in-flight resolution before releasing it.
+    release = threading.Event()
+    calls: list[str] = []
+
+    def resolver(host: str) -> list[IPAddress]:
+        calls.append(host)
+        if not release.wait(timeout=10.0):  # pragma: no cover - hang guard
+            raise OSError("test resolver was never released")
+        return [PUBLIC_V4]
+
+    guard = block_private_networks(resolver=resolver)
+    tasks = [asyncio.create_task(guard(f"https://example.com/{i}")) for i in range(5)]
+    while not calls:  # let the leader reach the worker-thread dispatch
+        await asyncio.sleep(0)
+    for _ in range(20):  # let every follower attach to the in-flight future
+        await asyncio.sleep(0)
+    assert all(not task.done() for task in tasks)
+    release.set()
+    assert await asyncio.gather(*tasks) == [True] * 5
+    assert calls == ["example.com"]  # exactly one lookup served all five
+
+
+async def test_leader_cancellation_fails_followers_closed() -> None:
+    # Documented cancellation behavior: cancelling the task that owns the in-flight
+    # lookup cancels the shared future, and followers fail CLOSED (False) rather than
+    # inheriting the leader's CancelledError; the next request simply re-resolves.
+    release = threading.Event()
+    calls: list[str] = []
+
+    def resolver(host: str) -> list[IPAddress]:
+        calls.append(host)
+        release.wait(timeout=10.0)
+        return [PUBLIC_V4]
+
+    guard = block_private_networks(resolver=resolver)
+    leader = asyncio.create_task(guard("https://slow.example/"))
+    while not calls:  # leader is parked in the worker thread, inflight entry registered
+        await asyncio.sleep(0)
+    follower = asyncio.create_task(guard("https://slow.example/other"))
+    for _ in range(20):  # follower attaches to the shared future
+        await asyncio.sleep(0)
+    leader.cancel()
+    assert await follower is False  # fail closed, no CancelledError leak
+    with pytest.raises(asyncio.CancelledError):
+        await leader
+    release.set()  # unblock the (still running) worker thread for clean teardown
+    # Nothing was cached by the cancelled lookup: a later call re-resolves.
+    assert await guard("https://slow.example/retry") is True
+    assert calls == ["slow.example", "slow.example"]
+
+
+async def test_follower_own_cancellation_propagates() -> None:
+    # A follower whose OWN task is cancelled raises CancelledError normally — and the
+    # shared future survives, so the leader (and its verdict) are unaffected.
+    release = threading.Event()
+    calls: list[str] = []
+
+    def resolver(host: str) -> list[IPAddress]:
+        calls.append(host)
+        release.wait(timeout=10.0)
+        return [PUBLIC_V4]
+
+    guard = block_private_networks(resolver=resolver)
+    leader = asyncio.create_task(guard("https://slow.example/"))
+    while not calls:
+        await asyncio.sleep(0)
+    follower = asyncio.create_task(guard("https://slow.example/other"))
+    for _ in range(20):
+        await asyncio.sleep(0)
+    follower.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await follower
+    release.set()
+    assert await leader is True  # the shared lookup was not poisoned by the follower
+    assert calls == ["slow.example"]
+
+
+async def test_same_tick_leader_and_follower_cancellation_honors_the_follower() -> None:
+    # The race branch: the leader's cancellation (which cancels the shared future) lands
+    # in the same tick as the follower's own pending cancel. The follower's cancel must be
+    # honored — CancelledError propagates — not swallowed into a False verdict.
+    release = threading.Event()
+    calls: list[str] = []
+
+    def resolver(host: str) -> list[IPAddress]:
+        calls.append(host)
+        release.wait(timeout=10.0)
+        return [PUBLIC_V4]
+
+    guard = block_private_networks(resolver=resolver)
+    leader = asyncio.create_task(guard("https://slow.example/"))
+    while not calls:
+        await asyncio.sleep(0)
+    follower = asyncio.create_task(guard("https://slow.example/other"))
+    for _ in range(20):
+        await asyncio.sleep(0)
+    # Cancel both without yielding in between: the leader (scheduled first) cancels the
+    # shared future before the follower's shield wakes, so the follower observes a
+    # cancelled future WITH its own cancel pending.
+    leader.cancel()
+    follower.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await follower
+    with pytest.raises(asyncio.CancelledError):
+        await leader
+    release.set()

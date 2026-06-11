@@ -8,7 +8,6 @@ exercised with an injected fake harvester so they need neither Playwright nor re
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -18,7 +17,7 @@ import colorsense
 from colorsense import LIGHT_AND_DARK, analyze
 from colorsense.color.primitives import delta_e, parse_css_color
 from colorsense.config import Config, load_default_config
-from colorsense.harvest import RenderError, SharedBrowser
+from colorsense.harvest import RenderError, RequestFilter, SharedBrowser
 from colorsense.models import (
     AnalysisResult,
     Color,
@@ -72,7 +71,7 @@ class _CountingHarvester:
         viewport: Viewport,
         *,
         user_agent: str | None = None,
-        request_filter: Callable[[str], bool] | None = None,
+        request_filter: RequestFilter | None = None,
         browser: SharedBrowser | None = None,
     ) -> Harvest:
         self.calls.append((url, theme))
@@ -95,13 +94,13 @@ class _Clock:
 # Async robots_loader seams (the policy awaits the loader with the configured wire UA).
 # One permits all (no rules), the other disallows everything.
 async def _no_robots(
-    _url: str, _user_agent: str, _request_filter: Callable[[str], bool] | None = None
+    _url: str, _user_agent: str, _request_filter: RequestFilter | None = None
 ) -> str | None:
     return None
 
 
 async def _disallow_all(
-    _url: str, _user_agent: str, _request_filter: Callable[[str], bool] | None = None
+    _url: str, _user_agent: str, _request_filter: RequestFilter | None = None
 ) -> str | None:
     return "User-agent: *\nDisallow: /"
 
@@ -349,7 +348,7 @@ class _FailFastCancelAwareHarvester:
         viewport: Viewport,
         *,
         user_agent: str | None = None,
-        request_filter: Callable[[str], bool] | None = None,
+        request_filter: RequestFilter | None = None,
         browser: SharedBrowser | None = None,
     ) -> Harvest:
         if theme is Theme.dark:
@@ -473,7 +472,7 @@ async def test_analyze_orchestrates_faked_harvest(config: Config) -> None:
         vp: Viewport,
         *,
         user_agent: str | None = None,
-        request_filter: Callable[[str], bool] | None = None,
+        request_filter: RequestFilter | None = None,
         browser: SharedBrowser | None = None,
     ) -> Harvest:
         return _populated_harvest(u, theme, vp)
@@ -636,7 +635,7 @@ class _RecordingPopulatedHarvester:
         viewport: Viewport,
         *,
         user_agent: str | None = None,
-        request_filter: Callable[[str], bool] | None = None,
+        request_filter: RequestFilter | None = None,
         browser: SharedBrowser | None = None,
     ) -> Harvest:
         self.calls.append((url, theme))
@@ -690,7 +689,7 @@ async def test_first_requested_theme_is_primary(config: Config) -> None:
         vp: Viewport,
         *,
         user_agent: str | None = None,
-        request_filter: Callable[[str], bool] | None = None,
+        request_filter: RequestFilter | None = None,
         browser: SharedBrowser | None = None,
     ) -> Harvest:
         if theme is Theme.dark:
@@ -727,7 +726,7 @@ async def test_config_path_flows_through_analyze(tmp_path: Path, config: Config)
         vp: Viewport,
         *,
         user_agent: str | None = None,
-        request_filter: Callable[[str], bool] | None = None,
+        request_filter: RequestFilter | None = None,
         browser: SharedBrowser | None = None,
     ) -> Harvest:
         return _populated_harvest(u, theme, vp)

@@ -91,6 +91,52 @@ async def test_filter_applies_to_initial_robots_url() -> None:
     assert requested == []
 
 
+async def test_async_filter_vets_hops_too() -> None:
+    # The seam accepts async predicates (the shipped block_private_networks() is one): the
+    # loader must await the verdict per hop, blocking the redirect to the metadata
+    # endpoint exactly as a sync filter would.
+    transport, requested = _transport_recording(
+        {
+            ROBOTS_URL: httpx.Response(302, headers={"location": METADATA_URL}),
+            METADATA_URL: httpx.Response(200, text="SECRET"),
+        }
+    )
+
+    async def async_block_metadata(url: str) -> bool:
+        return not url.startswith("http://169.254.")
+
+    text = await _default_robots_loader(ROBOTS_URL, UA, async_block_metadata, _transport=transport)
+
+    assert text is None
+    assert requested == [ROBOTS_URL]
+
+
+async def test_async_filter_permits_the_fetch_when_it_allows() -> None:
+    # Control: an async filter returning True lets the robots fetch proceed normally.
+    transport, requested = _transport_recording({ROBOTS_URL: httpx.Response(200, text=ROBOTS_TEXT)})
+
+    async def allow_all(_url: str) -> bool:
+        return True
+
+    text = await _default_robots_loader(ROBOTS_URL, UA, allow_all, _transport=transport)
+
+    assert text == ROBOTS_TEXT
+    assert requested == [ROBOTS_URL]
+
+
+async def test_raising_async_filter_fails_closed() -> None:
+    # An async predicate that raises during its await must block too: no request goes out.
+    transport, requested = _transport_recording({ROBOTS_URL: httpx.Response(200, text=ROBOTS_TEXT)})
+
+    async def broken(_url: str) -> bool:
+        raise RuntimeError("async predicate boom")
+
+    text = await _default_robots_loader(ROBOTS_URL, UA, broken, _transport=transport)
+
+    assert text is None
+    assert requested == []
+
+
 async def test_no_filter_follows_redirects_unchanged() -> None:
     # Without a filter, behavior is the pre-existing one: redirects are followed (up to
     # the cap) and the terminal body is returned.

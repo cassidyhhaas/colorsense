@@ -13,8 +13,6 @@ the test deterministic and browser-free.
 
 from __future__ import annotations
 
-from collections.abc import Callable
-
 import httpx
 import pytest
 from playwright.async_api import Error as PlaywrightError
@@ -22,7 +20,7 @@ from playwright.async_api import Error as PlaywrightError
 import colorsense.harvest as harvest_mod
 import colorsense.harvest.render as render_mod
 from colorsense.config import Config, load_default_config
-from colorsense.harvest import RenderError, SharedBrowser, harvest_page
+from colorsense.harvest import RenderError, RequestFilter, SharedBrowser, harvest_page
 from colorsense.harvest.render import RenderSession
 from colorsense.models import Harvest, Theme, Viewport
 from colorsense.net.politeness import PolitenessPolicy, _default_robots_loader
@@ -35,7 +33,7 @@ VIEWPORT = Viewport(width=1280, height=800, device_scale_factor=1.0)
 
 def _loader_for(text: str | None):
     async def _loader(
-        _url: str, _user_agent: str, _request_filter: Callable[[str], bool] | None = None
+        _url: str, _user_agent: str, _request_filter: RequestFilter | None = None
     ) -> str | None:
         return text
 
@@ -201,7 +199,7 @@ class _RecordingHarvester:
 
     def __init__(self) -> None:
         self.user_agents: list[str | None] = []
-        self.request_filters: list[Callable[[str], bool] | None] = []
+        self.request_filters: list[RequestFilter | None] = []
 
     async def __call__(
         self,
@@ -211,7 +209,7 @@ class _RecordingHarvester:
         viewport: Viewport,
         *,
         user_agent: str | None = None,
-        request_filter: Callable[[str], bool] | None = None,
+        request_filter: RequestFilter | None = None,
         browser: SharedBrowser | None = None,
     ) -> Harvest:
         self.user_agents.append(user_agent)
@@ -225,7 +223,7 @@ async def test_policy_passes_configured_user_agent_to_robots_loader() -> None:
     seen: list[tuple[str, str]] = []
 
     async def recording_loader(
-        url: str, user_agent: str, _request_filter: Callable[[str], bool] | None = None
+        url: str, user_agent: str, _request_filter: RequestFilter | None = None
     ) -> str | None:
         seen.append((url, user_agent))
         return None  # no rules => permitted
@@ -241,7 +239,7 @@ async def test_policy_passes_configured_user_agent_to_harvester() -> None:
     harvester = _RecordingHarvester()
 
     async def no_robots(
-        _url: str, _user_agent: str, _request_filter: Callable[[str], bool] | None = None
+        _url: str, _user_agent: str, _request_filter: RequestFilter | None = None
     ) -> str | None:
         return None
 
@@ -257,7 +255,7 @@ async def test_policy_passes_request_filter_to_harvester() -> None:
     harvester = _RecordingHarvester()
 
     async def no_robots(
-        _url: str, _user_agent: str, _request_filter: Callable[[str], bool] | None = None
+        _url: str, _user_agent: str, _request_filter: RequestFilter | None = None
     ) -> str | None:
         return None
 
@@ -323,6 +321,61 @@ async def test_route_handler_fails_closed_on_predicate_error() -> None:
     route = _FakeRoute("https://ok.test/page")
     await handler(route)  # type: ignore[arg-type]
     assert (route.continued, route.aborted) == (0, 1)
+
+
+async def test_route_handler_supports_async_predicates() -> None:
+    # The seam accepts async predicates too (e.g. the shipped block_private_networks()):
+    # the handler awaits the verdict instead of treating the coroutine as truthy.
+    async def only_ok(url: str) -> bool:
+        return url.startswith("https://ok.test/")
+
+    handler = render_mod._route_handler(only_ok)
+    allowed = _FakeRoute("https://ok.test/asset.css")
+    blocked = _FakeRoute("http://169.254.169.254/latest/meta-data/")
+    await handler(allowed)  # type: ignore[arg-type]
+    await handler(blocked)  # type: ignore[arg-type]
+    assert (allowed.continued, allowed.aborted) == (1, 0)
+    assert (blocked.continued, blocked.aborted) == (0, 1)
+
+
+# --- evaluate_request_filter: the shared sync-or-async invocation helper ----------------
+
+
+async def test_evaluate_request_filter_sync_verdicts() -> None:
+    assert await render_mod.evaluate_request_filter(lambda _url: True, "https://a.test/") is True
+    assert await render_mod.evaluate_request_filter(lambda _url: False, "https://a.test/") is False
+
+
+async def test_evaluate_request_filter_async_verdicts() -> None:
+    async def allow(_url: str) -> bool:
+        return True
+
+    async def deny(_url: str) -> bool:
+        return False
+
+    assert await render_mod.evaluate_request_filter(allow, "https://a.test/") is True
+    assert await render_mod.evaluate_request_filter(deny, "https://a.test/") is False
+
+
+async def test_evaluate_request_filter_sync_raise_fails_closed() -> None:
+    def broken(_url: str) -> bool:
+        raise RuntimeError("sync predicate boom")
+
+    assert await render_mod.evaluate_request_filter(broken, "https://a.test/") is False
+
+
+async def test_evaluate_request_filter_async_raise_fails_closed() -> None:
+    async def broken(_url: str) -> bool:
+        raise RuntimeError("async predicate boom")
+
+    assert await render_mod.evaluate_request_filter(broken, "https://a.test/") is False
+
+
+async def test_evaluate_request_filter_coerces_non_bool_results() -> None:
+    # A sloppy predicate returning a truthy non-bool (e.g. a match object or string) is
+    # coerced, never compared by identity.
+    assert await render_mod.evaluate_request_filter(lambda _url: "yes", "https://a.test/") is True  # type: ignore[arg-type]
+    assert await render_mod.evaluate_request_filter(lambda _url: "", "https://a.test/") is False  # type: ignore[arg-type]
 
 
 async def test_default_robots_loader_sends_given_user_agent() -> None:
