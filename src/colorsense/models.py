@@ -24,26 +24,25 @@ internal-only and ``ComponentType`` made public — re-validated against ``pipel
 ``palette.usage``, ``palette.roles``, ``palette.reconcile``, and the ``harvest``
 package.)
 
-Value objects (``Color``, ``Rect``, ``Viewport``) are immutable. The **public result
-tree** reachable from :class:`AnalysisResult` is also immutable: every output model is
-``frozen=True`` and its sequence fields are ``tuple`` (not ``list``), so neither attribute
-reassignment nor in-place ``.append()`` works. ``dict`` fields stay regular dicts —
-``frozen`` blocks reassigning them, but their contents are intentionally not deep-frozen
-(deep-freezing needs exotic types and breaks JSON round-trip). Tuples serialize to JSON
-arrays and re-parse into tuples, so ``model_dump_json()`` / ``model_validate_json()``
-round-trips cleanly.
+Value objects (``Color``, ``Rect``, ``Viewport``) are immutable. The **public result tree**
+reachable from [`AnalysisResult`][colorsense.AnalysisResult] is also immutable: every output model
+is ``frozen=True`` and its sequence fields are ``tuple`` (not ``list``), so neither attribute
+reassignment nor in-place ``.append()`` works. ``dict`` fields stay regular dicts — ``frozen``
+blocks reassigning them, but their contents are intentionally not deep-frozen (deep-freezing needs
+exotic types and breaks JSON round-trip). Tuples serialize to JSON arrays and re-parse into tuples,
+so ``model_dump_json()`` / ``model_validate_json()`` round-trips cleanly.
 
 The **internal-only** assembly models (``Harvest``, ``HarvestedElement``,
 ``ScreenshotBin``, ``ClassifiedElement``, ``ColorCluster``) remain mutable: they are
 scratch structures the pipeline mutates while building the result and never escape to the
 caller. The frozen classification scratch types (``TokenRecord``, ``ClassifiedToken``,
 ``TokenOrigin``) are likewise internal: consumers see declared tokens only through the
-public :class:`DesignToken`. Along with the internal value type ``Rect``, they are
-deliberately excluded from ``__all__``. ``ComponentType`` is **public**: it keys the
-:attr:`UsageEntry.components` evidence in the result tree.
+public [`DesignToken`][colorsense.DesignToken]. Along with the internal value type ``Rect``,
+they are deliberately excluded from ``__all__``. ``ComponentType`` is **public**: it keys the
+[`UsageEntry`][colorsense.UsageEntry]``.components`` evidence in the result tree.
 
 The **public contract** types are enumerated in ``__all__`` below and re-exported from the
-top-level :mod:`colorsense` package, which is the canonical import path for consumers.
+top-level `colorsense` package, which is the canonical import path for consumers.
 ``colorsense.models`` is their documented home, but importing from the package root
 (``from colorsense import ...``) is preferred.
 """
@@ -91,7 +90,7 @@ class PaletteRole(StrEnum):
 class UsageCategory(StrEnum):
     """How a rendered color is used on the page.
 
-    The usage taxonomy keys the primary palette view (:class:`UsagePalette`):
+    The usage taxonomy keys the primary palette view ([`UsagePalette`][colorsense.UsagePalette]):
 
     * ``surface`` — backgrounds at every layer: page, header/nav/footer, hero, card,
       modal, input.
@@ -126,8 +125,8 @@ class TokenSemanticRole(StrEnum):
 class ComponentType(StrEnum):
     """Visual component a rendered element belongs to (source of a measured color).
 
-    Public: keys the :attr:`UsageEntry.components` evidence in the result tree, naming
-    which component types contributed a color to a usage category.
+    Public: keys the [`UsageEntry`][colorsense.UsageEntry]``.components`` evidence in the
+    result tree, naming which component types contributed a color to a usage category.
     """
 
     page_bg = "page_bg"
@@ -211,8 +210,8 @@ class Viewport(BaseModel):
 class TokenRecord(BaseModel):
     """Internal: a declared CSS custom property and its resolved color (if any).
 
-    Not part of the public contract — ``scope``/``media``/``alias_target`` are harvest
-    and classification scratch detail. The public projection is :class:`DesignToken`.
+    Not part of the public contract — ``scope``/``media``/``alias_target`` are harvest and
+    classification scratch detail. The public projection is [`DesignToken`][colorsense.DesignToken].
     """
 
     model_config = ConfigDict(frozen=True)
@@ -290,7 +289,7 @@ class Harvest(BaseModel):
 
 
 class TokenOrigin(StrEnum):
-    """Internal: which classification path produced a :class:`ClassifiedToken`.
+    """Internal: which classification path produced a `ClassifiedToken`.
 
     Mirrors the classifier precedence in ``classify.tokens`` (relational > name rule >
     scale > fallback, with alias inheritance). Reconciliation uses it to gate
@@ -309,8 +308,8 @@ class ClassifiedToken(BaseModel):
     """Internal: a token tagged with its semantic role and a prior over usage categories.
 
     Not part of the public contract — consumers see declared tokens only through
-    :class:`DesignToken`. ``weight`` and ``text_on_base`` are internal scoring inputs;
-    ``origin`` records the classification path for divergence gating.
+    [`DesignToken`][colorsense.DesignToken]. ``weight`` and ``text_on_base`` are internal scoring
+    inputs; ``origin`` records the classification path for divergence gating.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -364,10 +363,10 @@ class PaletteCandidate(BaseModel):
 class RoleResults(BaseModel):
     """Per-role ranked candidate lists.
 
-    ``mapping`` is guaranteed to contain every :class:`PaletteRole`; a role with no
-    detected candidates maps to an empty tuple. This invariant is enforced by an
-    after-validator that backfills any missing roles, so even ``RoleResults()`` and the
-    empty-input path expose all five keys.
+    ``mapping`` is guaranteed to contain every [`PaletteRole`][colorsense.PaletteRole]; a role with
+    no detected candidates maps to an empty tuple. This invariant is enforced by an after-validator
+    that backfills any missing roles, so even ``RoleResults()`` and the empty-input path expose all
+    five keys.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -376,7 +375,7 @@ class RoleResults(BaseModel):
 
     @model_validator(mode="after")
     def _backfill_roles(self) -> RoleResults:
-        """Ensure every :class:`PaletteRole` is present, mapping to ``()`` when absent."""
+        """Ensure every [`PaletteRole`][colorsense.PaletteRole] is present (``()`` when absent)."""
         # ``frozen=True`` blocks reassigning ``mapping`` itself, but the dict it points to
         # is a regular (non-deep-frozen) dict, so in-place backfill is sound.
         for role in PaletteRole:
@@ -406,8 +405,8 @@ class UsageEntry(BaseModel):
 class UsagePalette(BaseModel):
     """The usage-keyed palette view: what colors paint each usage category.
 
-    ``mapping`` is guaranteed to contain every :class:`UsageCategory`; a category with no
-    detected entries maps to an empty tuple. This invariant is enforced by an
+    ``mapping`` is guaranteed to contain every [`UsageCategory`][colorsense.UsageCategory]; a
+    category with no detected entries maps to an empty tuple. This invariant is enforced by an
     after-validator that backfills any missing categories, so even ``UsagePalette()`` and
     the empty-input path expose all four keys.
     """
@@ -418,7 +417,8 @@ class UsagePalette(BaseModel):
 
     @model_validator(mode="after")
     def _backfill_categories(self) -> UsagePalette:
-        """Ensure every :class:`UsageCategory` is present, mapping to ``()`` when absent."""
+        """Ensure every [`UsageCategory`][colorsense.UsageCategory] is present (``()`` if
+        absent)."""
         # ``frozen=True`` blocks reassigning ``mapping`` itself, but the dict it points to
         # is a regular (non-deep-frozen) dict, so in-place backfill is sound.
         for category in UsageCategory:
@@ -444,8 +444,8 @@ class DesignToken(BaseModel):
 class DivergenceItem(BaseModel):
     """A declared-but-unused or used-but-undeclared palette discrepancy.
 
-    Keyed by :class:`UsageCategory` — the usage view is where declared token intent is
-    reconciled against measured usage.
+    Keyed by [`UsageCategory`][colorsense.UsageCategory] — the usage view is where declared
+    token intent is reconciled against measured usage.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -505,7 +505,8 @@ class AnalysisResult(BaseModel):
     """The top-level typed result returned by ``analyze``.
 
     Per-theme analysis (the usage view, the derived 60/30/10 roles view, fit score,
-    divergence, and opt-in tokens) lives on each :class:`ThemePalette` in ``themes``.
+    divergence, and opt-in tokens) lives on each [`ThemePalette`][colorsense.ThemePalette] in
+    ``themes``.
 
     This aggregate is **immutable**: it is ``frozen=True`` and its sequence field
     (``third_party_colors``) is a tuple, so neither reassigning an attribute

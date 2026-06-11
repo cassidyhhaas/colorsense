@@ -1,13 +1,11 @@
 """Visible-DOM element harvesting with computed colors and structural flags.
 
-Walks the rendered DOM in-page, capturing for each element its computed
-``background-color`` / ``color`` / ``border-color`` (parsed to :class:`Color`), bounding rect,
-position, tag/role/id/class tokens, the input ``type`` attribute (``<input>`` only), and
-structural flags (iframe, cross-origin, shadow host, clickable, box shadow, direct text
-content, vendor match, visible, aria-hidden).
-Hidden, zero-area, or
-aria-hidden elements are excluded from the returned list (their flags are still computed
-on what is returned).
+Walks the rendered DOM in-page, capturing for each element its computed ``background-color`` /
+``color`` / ``border-color`` (parsed to [`Color`][colorsense.Color]), bounding rect, position,
+tag/role/id/class tokens, the input ``type`` attribute (``<input>`` only), and structural flags
+(iframe, cross-origin, shadow host, clickable, box shadow, direct text content, vendor match,
+visible, aria-hidden). Hidden, zero-area, or aria-hidden elements are excluded from the returned
+list (their flags are still computed on what is returned).
 
 The border color is reported only when the element actually paints a border
 (``border-top-width`` > 0): computed ``border-top-color`` resolves to a color for *every*

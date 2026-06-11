@@ -1,19 +1,19 @@
 """Playwright (async API) render session.
 
-:class:`RenderSession` is an async context manager that opens a page at a fixed
-:class:`~colorsense.models.Viewport` and color scheme — in its own headless Chromium, or
-inside an externally supplied :class:`~playwright.async_api.Browser` — navigates robustly
+`RenderSession` is an async context manager that opens a page at a fixed
+[`Viewport`][colorsense.Viewport] and color scheme — in its own headless Chromium, or
+inside an externally supplied `Browser` — navigates robustly
 to a URL (guarding ``networkidle`` so ``file://`` pages never hang), neutralizes
 transitions/animations, step-scrolls to trigger lazy content, and detects consent/overlay
 regions whose bounding rects can be masked out of the screenshot.
 
-:class:`SharedBrowser` is the lazy browser-lifecycle handle that lets multiple sessions
+`SharedBrowser` is the lazy browser-lifecycle handle that lets multiple sessions
 (e.g. the light and dark renders of one ``analyze()`` call) share a single Chromium
-launch: each theme still gets its own :class:`~playwright.async_api.BrowserContext` —
+launch: each theme still gets its own `BrowserContext` —
 contexts carry the color scheme, viewport, User-Agent, and egress route — so one browser
 process suffices.
 
-The Playwright :class:`~playwright.async_api.Page` is exposed as :attr:`RenderSession.page`
+The Playwright `Page` is exposed as `RenderSession.page`
 so the other harvest modules can run their own JS against the same live page. Built on the
 **async** Playwright API so it runs natively on an asyncio event loop (e.g. inside a
 FastAPI ``async def`` endpoint) and so sibling theme renders can overlap.
@@ -45,9 +45,10 @@ RequestFilter = Callable[[str], bool] | Callable[[str], Awaitable[bool]]
 Either a plain synchronous callable or an async one. A sync predicate is invoked inline on
 the event loop's request path, so it must not block (cheap string checks only); an async
 predicate is awaited, free to move slow work (e.g. DNS resolution) off the loop — the
-shipped :func:`colorsense.block_private_networks` guard is async for exactly that reason.
+shipped [`colorsense.block_private_networks`][colorsense.block_private_networks] guard is
+async for exactly that reason.
 Both seams that apply a filter (the browser route handler and the robots loader) evaluate
-it through :func:`evaluate_request_filter`, so raising — sync or async — always fails
+it through `evaluate_request_filter`, so raising — sync or async — always fails
 closed.
 """
 
@@ -65,7 +66,7 @@ async def evaluate_request_filter(request_filter: RequestFilter, url: str) -> bo
     a ``BaseException``, so cancelling the awaiting task mid-evaluation propagates out of
     this function rather than being coerced to ``False``. That is fail-closed too — the
     caller never receives a ``True`` it didn't earn, and the request never proceeds; see
-    :func:`_route_handler` for what that means on the browser route path.
+    `_route_handler` for what that means on the browser route path.
     """
     try:
         verdict = request_filter(url)
@@ -168,8 +169,8 @@ def normalize_browser_args(browser_args: Sequence[str]) -> tuple[str, ...]:
     themselves. Only obviously broken input is rejected, *before* any browser is involved:
 
     * a bare string (almost certainly a forgotten one-tuple: pass ``("--flag",)``, not
-      ``"--flag"``) raises :class:`TypeError`;
-    * any non-string entry raises :class:`TypeError`.
+      ``"--flag"``) raises `TypeError`;
+    * any non-string entry raises `TypeError`.
     """
     if isinstance(browser_args, str):
         raise TypeError(
@@ -191,13 +192,13 @@ def _route_handler(
 
     The predicate sees the request URL (the navigation itself and every sub-resource the
     rendered page asks for: scripts, images, XHR/``fetch``). ``False`` aborts the request.
-    Evaluation goes through :func:`evaluate_request_filter`, so sync and async predicates
+    Evaluation goes through `evaluate_request_filter`, so sync and async predicates
     are handled uniformly and a predicate that *raises* fails CLOSED — the request is
     aborted. Module-level so the abort/continue logic is unit testable without a browser.
 
     Cancellation corner: if the task awaiting the handler is cancelled mid-evaluation,
     ``CancelledError`` (a ``BaseException``) propagates past the fail-closed ``except``
-    in :func:`evaluate_request_filter` and out of the handler, so the route is neither
+    in `evaluate_request_filter` and out of the handler, so the route is neither
     continued nor aborted. That un-actioned route is still fail-closed — the request never
     proceeds — and the situation only arises at teardown/cancellation, when the Playwright
     ``Route`` may no longer be safely usable anyway, which is why the handler deliberately
@@ -214,14 +215,14 @@ def _route_handler(
 
 
 class SharedBrowser:
-    """Lazily-launched headless Chromium shared by multiple :class:`RenderSession`\\ s.
+    """Lazily-launched headless Chromium shared by multiple `RenderSession`\\ s.
 
-    Async context manager owning one Playwright + :class:`~playwright.async_api.Browser`
-    pair. Nothing is launched until the first :meth:`get` call, so a caller whose renders
+    Async context manager owning one Playwright + `Browser`
+    pair. Nothing is launched until the first `get` call, so a caller whose renders
     are all served from a cache (or driven by an injected fake harvester) never pays a
     browser launch. Teardown closes the browser and stops Playwright exactly once —
     teardown errors are suppressed so an original in-flight exception propagates cleanly —
-    and :meth:`get` refuses to relaunch after teardown.
+    and `get` refuses to relaunch after teardown.
 
     Usage::
 
@@ -239,7 +240,7 @@ class SharedBrowser:
         ``("--js-flags=--max-old-space-size=512",)`` caps each renderer process's V8 heap
         at 512 MB. Note this bounds the **JS heap only**, not total renderer memory —
         container/cgroup limits remain the enforceable bound (see ``SECURITY.md`` §2).
-        Non-string entries (or a bare string) raise :class:`TypeError` at construction.
+        Non-string entries (or a bare string) raise `TypeError` at construction.
     """
 
     def __init__(self, *, browser_args: Sequence[str] = ()) -> None:
@@ -271,12 +272,12 @@ class SharedBrowser:
         self._playwright = None
 
     async def get(self) -> Browser:
-        """Return the shared :class:`Browser`, launching it on first use.
+        """Return the shared `Browser`, launching it on first use.
 
         Launch failures propagate as Playwright errors (callers such as
-        :func:`~colorsense.harvest.harvest_page` wrap them into the public
-        :class:`~colorsense.harvest.RenderError`). After teardown this raises
-        :class:`RuntimeError` rather than silently relaunching a browser nobody closes.
+        `harvest_page` wrap them into the public
+        [`RenderError`][colorsense.RenderError]). After teardown this raises
+        `RuntimeError` rather than silently relaunching a browser nobody closes.
         """
         async with self._lock:
             if self._closed:
@@ -308,28 +309,28 @@ class RenderSession:
         The politeness layer passes its configured wire UA through here. ``None`` (the
         default) keeps Playwright's stock UA.
     request_filter:
-        When not ``None``, a :data:`RequestFilter` — a sync or async predicate over every
-        request URL the browser makes (the navigation and all sub-resources), installed as
-        a ``context.route`` interceptor: requests for which it returns ``False`` — or for
-        which it raises (fail closed) — are aborted. A sync predicate runs inline on the
-        event loop and must not block; an async one is awaited. ``None`` (the default)
-        installs no route at all, so the unfiltered path has zero interception overhead.
+        When not ``None``, a [`RequestFilter`][colorsense.RequestFilter] — a sync or async predicate
+        over every request URL the browser makes (the navigation and all sub-resources), installed
+        as a ``context.route`` interceptor: requests for which it returns ``False`` — or for which
+        it raises (fail closed) — are aborted. A sync predicate runs inline on the event loop and
+        must not block; an async one is awaited. ``None`` (the default) installs no route at all, so
+        the unfiltered path has zero interception overhead.
     browser:
-        When not ``None``, an externally owned :class:`~playwright.async_api.Browser` the
+        When not ``None``, an externally owned `Browser` the
         session opens its context inside instead of launching its own Chromium (the per-
         session knobs — color scheme, viewport, UA, egress route — all live on the
-        :class:`~playwright.async_api.BrowserContext`, so sessions sharing one browser stay
+        `BrowserContext`, so sessions sharing one browser stay
         fully isolated). The session then owns only its context: teardown closes the
         context but never the external browser, whose lifecycle stays with the caller
-        (see :class:`SharedBrowser`). ``None`` (the default) launches and tears down a
+        (see `SharedBrowser`). ``None`` (the default) launches and tears down a
         dedicated Playwright + Chromium pair as before.
     browser_args:
         Extra Chromium launch arguments for the session's **own** launch, appended to the
         library's launch arguments and passed verbatim (see
-        :class:`SharedBrowser` for the canonical V8-heap-cap use case and caveats). Launch
+        `SharedBrowser` for the canonical V8-heap-cap use case and caveats). Launch
         arguments only exist at launch time, so combining a non-empty ``browser_args`` with
         an external ``browser`` (already launched, by someone else) raises
-        :class:`ValueError` — put the args on the :class:`SharedBrowser` instead.
+        `ValueError` — put the args on the `SharedBrowser` instead.
     """
 
     def __init__(
@@ -444,8 +445,8 @@ class RenderSession:
         ----------
         nav_timeout_ms:
             Per-navigation timeout in milliseconds, passed explicitly to ``page.goto``.
-            Defaults to :data:`DEFAULT_NAV_TIMEOUT_MS`. Exceeding it raises a Playwright
-            ``TimeoutError`` (wrapped as :class:`~colorsense.harvest.RenderError` upstream).
+            Defaults to `DEFAULT_NAV_TIMEOUT_MS`. Exceeding it raises a Playwright
+            ``TimeoutError`` (wrapped as [`RenderError`][colorsense.RenderError] upstream).
         """
         page = self.page
         await page.goto(url, wait_until="load", timeout=nav_timeout_ms)

@@ -7,7 +7,7 @@ the Chrome DevTools Protocol (``CSS.forcePseudoState``), re-read the computed
 
 Why CDP instead of a real mouse hover
 -------------------------------------
-Driving Playwright's :meth:`~playwright.async_api.Locator.hover` per element is
+Driving Playwright's `hover` per element is
 catastrophically slow on real pages: each call runs actionability checks (scroll-into-view,
 stability, pointer-event eligibility), and hovering one element can open menus/overlays that
 then intercept pointer events on the *next* element, so its checks retry until the hover
@@ -49,7 +49,7 @@ async def probe_hover_states(
     """Probe hover/focus color changes for clickable elements.
 
     ``elements`` and ``selectors`` are positionally aligned (as returned by
-    :func:`colorsense.harvest.dom.harvest_elements`). Returns a new list with
+    `colorsense.harvest.dom.harvest_elements`). Returns a new list with
     ``has_hover_color_change`` / ``hover_bg`` updated on clickable elements that change
     background color under forced ``:hover``/``:focus``; other elements are returned
     unchanged.

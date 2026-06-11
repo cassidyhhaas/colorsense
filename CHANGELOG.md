@@ -150,6 +150,11 @@ measurement gaps the fixtures had masked; all are now encoded as offline fixture
   raise is swallowed fail-closed (requests from the other loop are aborted), so only
   direct callers see the error. Create a separate predicate per event loop for concurrent
   use.
+- Docstring cross-references converted from Sphinx reST roles (`:class:`, `:func:`, ...)
+  — which the docs site rendered as literal text — to mkdocstrings autorefs links for
+  public API objects and plain code for internal ones. Duplicated rationale across
+  comments/docstrings collapsed to one canonical home per topic. No behavior change;
+  analysis output is byte-identical.
 - The `examples/webservice/` reference implementation is restructured from a single
   `app.py` into an idiomatic mini FastAPI layout (`main.py`, `settings.py`, `policy.py`,
   `schemas.py`, `routes.py`; `url_guard.py` unchanged). No behavior or security-control

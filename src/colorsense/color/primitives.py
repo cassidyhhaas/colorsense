@@ -1,19 +1,19 @@
-"""Pure color-math primitives wrapping :mod:`coloraide`.
+"""Pure color-math primitives wrapping `coloraide`.
 
 All functions here are side-effect free (no I/O). They consume and produce the frozen
-:class:`colorsense.models.Color` contract. The OKLCH coordinates stored on ``Color`` are
-named ``lightness`` / ``chroma`` / ``hue`` and are always computed by converting the sRGB
-color to the ``oklch`` space via :mod:`coloraide`.
+[`colorsense.models.Color`][colorsense.Color] contract. The OKLCH coordinates stored on ``Color``
+are named ``lightness`` / ``chroma`` / ``hue`` and are always computed by converting the sRGB color
+to the ``oklch`` space via `coloraide`.
 
 Conventions
 -----------
-* ``hex`` on a returned :class:`Color` is the *opaque* normalized lowercase sRGB hex
+* ``hex`` on a returned [`Color`][colorsense.Color] is the *opaque* normalized lowercase sRGB hex
   string (``#rrggbb``); alpha is carried separately in ``Color.alpha`` and is **not**
   encoded into ``hex``. This keeps ``hex`` stable for clustering/equality while alpha
   remains available for compositing.
 * Achromatic colors yield ``hue = nan`` from coloraide; we normalize that to ``0.0`` so
   the contract never carries NaN.
-* Compositing (:func:`composite_over`) is performed in **gamma** sRGB (the CSS
+* Compositing (`composite_over`) is performed in **gamma** sRGB (the CSS
   "source-over" default), matching browser rendering.
 """
 
@@ -38,14 +38,14 @@ def _normalize_hue(hue: float) -> float:
 
 
 def _from_coloraide(ca: CAColor, *, clamp_srgb: bool = False) -> Color:
-    """Build the frozen :class:`Color` contract from a coloraide color.
+    """Build the frozen [`Color`][colorsense.Color] contract from a coloraide color.
 
     The input is brought into sRGB before extracting hex, and OKLCH coordinates are read
     from the ``oklch`` conversion of the (alpha-stripped) sRGB color.
 
     ``clamp_srgb`` selects how out-of-gamut sRGB coordinates are reduced into ``[0, 1]``:
 
-    * ``False`` (default): perceptual gamut-mapping via :meth:`coloraide.Color.fit`, which
+    * ``False`` (default): perceptual gamut-mapping via `coloraide.Color.fit`, which
       preserves hue/lightness while pulling chroma in — appropriate for colors that arrive
       from a wide-gamut/OKLCH computation (e.g. compositing, lightness nudges).
     * ``True``: a plain per-channel clamp of each sRGB coordinate to ``[0, 1]``, matching how
@@ -87,7 +87,7 @@ def _to_coloraide(c: Color) -> CAColor:
 
 
 def parse_css_color(value: str) -> Color | None:
-    """Parse a CSS color string into a :class:`Color`, or ``None`` if unparseable.
+    """Parse a CSS color string into a [`Color`][colorsense.Color], or ``None`` if unparseable.
 
     Accepts ``rgb()``/``rgba()``, hex (``#rgb``/``#rrggbb``/``#rrggbbaa``),
     ``hsl()``/``hsla()`` and named CSS colors. The keyword ``transparent`` parses to a
@@ -128,7 +128,7 @@ def delta_e(a: Color, b: Color) -> float:
 
     Identical colors return ``~0.0``; perceptually different colors return ``> 0``.
 
-    Computed directly from the OKLCH coordinates cached on :class:`Color` (no coloraide
+    Computed directly from the OKLCH coordinates cached on [`Color`][colorsense.Color] (no coloraide
     object construction): ``deltaEOK`` is Euclidean distance in OKLab, and OKLab is
     recovered from OKLCH as ``a = C*cos(h)``, ``b = C*sin(h)``. Achromatic colors store
     ``hue = 0.0`` with ``chroma ~ 0``, which is consistent under this formula. Alpha is
@@ -172,7 +172,7 @@ def to_hex(c: Color) -> str:
 
 
 def nudge_lightness(c: Color, toward: str, amount: float) -> Color:
-    """Return a new :class:`Color` with OKLCH lightness shifted by ``amount``.
+    """Return a new [`Color`][colorsense.Color] with OKLCH lightness shifted by ``amount``.
 
     ``toward`` is ``"light"`` (increase L) or ``"dark"`` (decrease L). The resulting
     lightness is clamped to the valid OKLCH range ``[0, 1]`` and hex / OKLCH are

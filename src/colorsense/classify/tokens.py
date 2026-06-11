@@ -2,10 +2,10 @@
 
 Classify declared design tokens (CSS custom properties) into semantic roles and
 produce, for each token, a prior distribution over the usage categories
-(:class:`~colorsense.models.UsageCategory`) — how the token's color is expected to be
+([`UsageCategory`][colorsense.UsageCategory]) — how the token's color is expected to be
 used when rendered.
 
-The classification precedence for a single :class:`TokenRecord` is:
+The classification precedence for a single `TokenRecord` is:
 
 1. **Relational** (``--on-primary`` / ``--card-foreground`` …): the token is a
    text/foreground color routed to the ``text_on`` channel.
@@ -18,12 +18,12 @@ A final **alias-inheritance** pass lets a token that resolved to ``ignore`` adop
 the role/weight of the token its ``alias_target`` points at (transitively, with
 cycle protection).
 
-Every classified token records its :class:`~colorsense.models.TokenOrigin` — which of
+Every classified token records its `TokenOrigin` — which of
 the paths above produced it (alias-inherited classifications carry ``alias``).
 Reconciliation uses the origin to gate declared-but-unused divergence to high-intent
 tokens only.
 
-The public entry point is :func:`classify_tokens`.
+The public entry point is `classify_tokens`.
 """
 
 from __future__ import annotations
@@ -109,7 +109,7 @@ def _resolve_alias_role(
     """Follow ``alias_target`` links until a non-``ignore`` classification is found.
 
     Returns the inherited classification with origin rewritten to
-    :attr:`TokenOrigin.alias` (the alias itself was not matched, its target was), or
+    `TokenOrigin.alias` (the alias itself was not matched, its target was), or
     ``None`` when the chain dead-ends (missing target, cycle, or all targets are
     ``ignore``).
     """
@@ -132,9 +132,9 @@ def _resolve_alias_role(
 def classify_tokens(tokens: list[TokenRecord], config: Config) -> list[ClassifiedToken]:
     """Classify ``tokens`` into semantic roles and usage-category priors.
 
-    Returns one :class:`ClassifiedToken` per input record (order preserved). ``status``
+    Returns one `ClassifiedToken` per input record (order preserved). ``status``
     tokens get an empty prior when ``status_excluded_from_palette`` is set — they still
-    surface to consumers as :class:`~colorsense.models.DesignToken` entries with
+    surface to consumers as [`DesignToken`][colorsense.DesignToken] entries with
     ``semantic_role=status`` when tokens are requested.
     """
     # Index by name; later declarations win for duplicate names.

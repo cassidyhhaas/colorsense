@@ -2,7 +2,7 @@
 
 Takes a full-page Playwright screenshot, masks out consent/overlay regions (so a cookie
 banner cannot pollute the palette), downscales, and quantizes pixels into
-:class:`~colorsense.models.ScreenshotBin` objects each carrying an ``area_fraction`` (the
+`ScreenshotBin` objects each carrying an ``area_fraction`` (the
 fraction of *sampled* pixels).
 
 Quantization is deterministic given a fixed fixture: Pillow's adaptive palette with a
@@ -65,7 +65,7 @@ _MAX_DECODE_PIXELS: int = 90_000_000
 class _OversizedCaptureError(Exception):
     """A captured screenshot's declared dimensions exceed the decode pixel cap.
 
-    Module-internal: :func:`colorsense.harvest.harvest_page` catches it and surfaces it as
+    Module-internal: `colorsense.harvest.harvest_page` catches it and surfaces it as
     a public ``RenderError``.
     """
 
@@ -92,7 +92,7 @@ class _DocumentSize(TypedDict):
 
 
 def _rgb_to_color(r: int, g: int, b: int) -> Color | None:
-    """Convert an 8-bit RGB triple to a :class:`Color`."""
+    """Convert an 8-bit RGB triple to a [`Color`][colorsense.Color]."""
     return parse_css_color(f"rgb({r}, {g}, {b})")
 
 
@@ -103,10 +103,10 @@ async def harvest_screenshot(
 ) -> list[ScreenshotBin]:
     """Capture, mask, and quantize a full-page screenshot into color bins.
 
-    ``consent_rects`` are CSS-pixel rects (from :class:`RenderSession`); they are scaled by
+    ``consent_rects`` are CSS-pixel rects (from `RenderSession`); they are scaled by
     ``device_scale_factor`` and zeroed out of the raw screenshot before quantizing.
 
-    Raises :class:`_OversizedCaptureError` if the captured image's declared dimensions
+    Raises `_OversizedCaptureError` if the captured image's declared dimensions
     exceed the decode pixel cap (surfaced by ``harvest_page`` as ``RenderError``).
     """
     # Bound capture dimensions: a pathologically tall or wide (e.g. attacker-controlled)

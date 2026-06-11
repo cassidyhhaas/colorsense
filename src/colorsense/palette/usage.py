@@ -1,17 +1,18 @@
 """Usage-keyed palette assembly: what colors paint each usage category.
 
-Builds the **measured** :class:`~colorsense.models.UsagePalette` from the color
-inventory: per :class:`~colorsense.models.UsageCategory` (surface / text / interactive /
-border), a probability-ranked list of :class:`~colorsense.models.UsageEntry` colors.
+Builds the **measured** [`UsagePalette`][colorsense.UsagePalette] from the color
+inventory: per [`UsageCategory`][colorsense.UsageCategory] (surface / text / interactive /
+border), a probability-ranked list of [`UsageEntry`][colorsense.UsageEntry] colors.
 This is the primary palette view — unlike the 60/30/10 roles view it preserves the
 design's actual structure (e.g. a neutral-layered design's gray text/border hierarchy
 appears here directly).
 
 Design notes
 ------------
-* The public entry point is :func:`build_usage`. It takes *only* the cluster list (no
-  :class:`Config`); every threshold is a documented, module-level **tunable** constant.
-* :data:`COMPONENT_USAGE` — the component-type → usage-category routing — is a fixed
+* The public entry point is `build_usage`. It takes *only* the cluster list (no
+  [`Config`][colorsense.Config]); every threshold is a documented, module-level **tunable**
+  constant.
+* `COMPONENT_USAGE` — the component-type → usage-category routing — is a fixed
   code-level convention, exactly like the inventory's component → color-channel routing
   (``palette/inventory.py``'s ``_channel_for``): it describes what the taxonomy *means*,
   not a tunable weight, so it lives in code rather than the YAML config.
@@ -20,7 +21,9 @@ Design notes
     - **surface**: prominence ∝ the cluster's screenshot ``area_weight``. Area is the
       authoritative signal for surfaces — vote counts would let repeated small elements
       outrank the page background. Only clusters with nonzero surface vote mass
-      participate (area alone does not prove a color is a surface).
+      participate (area alone does not prove a color is a surface); a zero-area surface
+      cluster (element-only, no screenshot-bin match) scores 0 and prunes naturally
+      unless it ends up the argmax fallback.
     - **text / interactive / border**: prominence ∝ ``log1p`` of the cluster's raw vote
       mass in that category. These paint negligible screenshot area; vote mass ranks
       them, but only **sub-linearly** — raw (linear) mass let element *count* drown
@@ -106,7 +109,7 @@ def _build_entries(
     """Normalize prominence scores into probabilities, prune, renormalize, and rank.
 
     ``scored`` is ``(cluster, prominence, per-component masses)`` per participating
-    cluster. Entries below :data:`MIN_SHARE` are pruned with the keep-argmax fallback;
+    cluster. Entries below `MIN_SHARE` are pruned with the keep-argmax fallback;
     output is sorted by ``(-probability, hex)``.
     """
     if not scored:
@@ -123,8 +126,8 @@ def _build_entries(
         kept = [(c, p, m) for c, p, m in probs if p >= MIN_SHARE]
         if not kept:
             # Pruning emptied the category: keep the single argmax at probability 1.0.
-            # Tie-break by larger probability, then by smaller hex for determinism.
-            best = max(probs, key=lambda item: (item[1], _neg_hex_key(item[0].color.hex)))
+            # Largest probability wins; ties broken by smallest hex for determinism.
+            best = min(probs, key=lambda item: (-item[1], item[0].color.hex))
             kept = [(best[0], 1.0, best[2])]
         else:
             kept_total = sum(p for _, p, _ in kept)
@@ -148,22 +151,16 @@ def _build_entries(
     return tuple(entries)
 
 
-def _neg_hex_key(hex_str: str) -> tuple[int, ...]:
-    """Key so that ``max`` on it selects the *smallest* hex string (stable tie-break)."""
-    return tuple(-ord(ch) for ch in hex_str)
-
-
 def build_usage(clusters: list[ColorCluster]) -> UsagePalette:
     """Build the **measured** usage palette from the color inventory.
 
-    For each usage category, the participating clusters (those with nonzero raw vote
-    mass routed to the category via :data:`COMPONENT_USAGE`) are scored by prominence —
-    screenshot area for ``surface``, ``log1p`` of in-category vote mass for the others
-    (see the module docstring for the rationale) — normalized to probabilities, pruned below
-    :data:`MIN_SHARE` (argmax kept if pruning empties the category), and ranked by
-    ``(-probability, hex)``. A category with no mass anywhere maps to ``()`` (the
-    :class:`UsagePalette` validator backfills it). An empty cluster list yields an
-    empty (all-``()``) palette.
+    For each usage category, the participating clusters (those with nonzero raw vote mass routed to
+    the category via `COMPONENT_USAGE`) are scored by prominence — screenshot area for ``surface``,
+    ``log1p`` of in-category vote mass for the others (see the module docstring for the rationale) —
+    normalized to probabilities, pruned below `MIN_SHARE` (argmax kept if pruning empties the
+    category), and ranked by ``(-probability, hex)``. A category with no mass anywhere maps to
+    ``()`` (the [`UsagePalette`][colorsense.UsagePalette] validator backfills it). An empty cluster
+    list yields an empty (all-``()``) palette.
     """
     per_category: dict[UsageCategory, list[tuple[ColorCluster, float, dict[ComponentType, float]]]]
     per_category = {category: [] for category in UsageCategory}
@@ -172,14 +169,10 @@ def build_usage(clusters: list[ColorCluster]) -> UsagePalette:
     for cluster in sorted(clusters, key=lambda c: (-c.area_weight, c.color.hex)):
         for category, masses in _category_masses(cluster).items():
             if category is UsageCategory.surface:
-                # Area is authoritative for surfaces; a zero-area surface cluster
-                # (element-only, no screenshot bin match) scores 0 and prunes naturally
-                # unless it ends up the argmax fallback.
+                # Area-proportional (see the module docstring's Design notes).
                 prominence = cluster.area_weight
             else:
-                # Sub-linear (log1p) in vote mass: monotonic, so ordering matches raw
-                # mass, but repeated same-component votes saturate instead of letting
-                # element count drown one-element evidence (see the module docstring).
+                # Sub-linear in vote mass (see the module docstring's Design notes).
                 prominence = math.log1p(sum(masses.values()))
             per_category[category].append((cluster, prominence, masses))
 

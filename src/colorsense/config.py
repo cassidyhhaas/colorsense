@@ -7,18 +7,22 @@ single source of truth for every value is the YAML file itself — this module
 *models* and *loads* it, it does not hard-code config values.
 
 The default configuration ships with the package as ``data/palette_config.yaml``
-and is loaded by :func:`load_default_config`; callers can supply their own copy
-via :func:`load_config`.
+and is loaded by [`load_default_config`][colorsense.load_default_config]; callers can
+supply their own copy via [`load_config`][colorsense.load_config].
 
 Public interface
 ----------------
-* :class:`Config` — top-level model + the four token helpers
-  (:meth:`Config.strip_namespace`, :meth:`Config.match_name_rule`,
-  :meth:`Config.detect_scale`, :meth:`Config.match_relational`).
-* :func:`load_default_config` — load the configuration bundled with the package.
-* :func:`load_config` — read, validate, and normalize a YAML file from a path.
-* :class:`ScaleInfo`, :class:`RelationalInfo` — small result models.
-* :class:`TokenVocabularyConfig`, :class:`ComponentClassifierConfig` — domain models.
+* [`Config`][colorsense.Config] — top-level model + the four token helpers
+  ([`Config.strip_namespace`][colorsense.Config.strip_namespace],
+  [`Config.match_name_rule`][colorsense.Config.match_name_rule],
+  [`Config.detect_scale`][colorsense.Config.detect_scale],
+  [`Config.match_relational`][colorsense.Config.match_relational]).
+* [`load_default_config`][colorsense.load_default_config] — load the configuration bundled
+  with the package.
+* [`load_config`][colorsense.load_config] — read, validate, and normalize a YAML file from a
+  path.
+* `ScaleInfo`, `RelationalInfo` — small result models.
+* `TokenVocabularyConfig`, `ComponentClassifierConfig` — domain models.
 """
 
 from __future__ import annotations
@@ -316,7 +320,7 @@ class ComponentClassifierConfig(BaseModel):
 
 
 class ScaleInfo(BaseModel):
-    """Result of :meth:`Config.detect_scale`."""
+    """Result of [`Config.detect_scale`][colorsense.Config.detect_scale]."""
 
     model_config = ConfigDict(frozen=True)
 
@@ -327,7 +331,7 @@ class ScaleInfo(BaseModel):
 
 
 class RelationalInfo(BaseModel):
-    """Result of :meth:`Config.match_relational`."""
+    """Result of [`Config.match_relational`][colorsense.Config.match_relational]."""
 
     model_config = ConfigDict(frozen=True)
 
@@ -519,9 +523,9 @@ def load_default_config() -> Config:
     """Load the palette configuration bundled with the installed package.
 
     Resolves ``data/palette_config.yaml`` from the package itself (via
-    :mod:`importlib.resources`), so it works regardless of the current working
+    `importlib.resources`), so it works regardless of the current working
     directory and whether the package is installed editable, as a wheel, or
-    zipped. This is what :func:`colorsense.analyze` uses when no ``config_path``
+    zipped. This is what [`colorsense.analyze`][colorsense.analyze] uses when no ``config_path``
     is given.
     """
     raw_text = resources.files(_DATA_PACKAGE).joinpath(_BUNDLED_CONFIG).read_text(encoding="utf-8")
@@ -532,8 +536,8 @@ def load_config(path: str | Path) -> Config:
     """Read, validate, and normalize the palette config YAML at ``path``.
 
     For the configuration shipped with the package, prefer
-    :func:`load_default_config`. Raises a clear :class:`pydantic.ValidationError`
-    (or a wrapping :class:`ValueError`) on malformed YAML or schema violations —
+    [`load_default_config`][colorsense.load_default_config]. Raises a clear
+    `pydantic.ValidationError` (or a wrapping `ValueError`) on malformed YAML or schema violations —
     never a bare ``KeyError``.
     """
     config_path = Path(path)
@@ -545,7 +549,7 @@ def load_config(path: str | Path) -> Config:
 
 
 def _build_config(raw_text: str, source: str) -> Config:
-    """Parse and validate raw YAML text into a :class:`Config`.
+    """Parse and validate raw YAML text into a [`Config`][colorsense.Config].
 
     ``source`` is a human-readable label for the origin of ``raw_text`` used in
     error messages (a file path or a bundled-resource marker).
