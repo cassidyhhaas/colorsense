@@ -174,6 +174,18 @@ def _pool_category(
     """STEPS 2-3 — build the color universe for ``category``, pool, prune, renormalize."""
     usage_entries = usage.mapping.get(category, ())
 
+    # EMPTY-CATEGORY GATE: a category with no measured usage candidates yields an empty
+    # posterior — token-only colors are NOT injected. With zero measurement, every
+    # token-only color gets the same ``EPS**(1-alpha)`` usage factor, so the posterior
+    # collapses to ``intent**alpha`` — a near-uniform spread where everything survives
+    # pruning (the live-probe failure: 16 token-only "borders" with no rendered border
+    # anywhere). Honest emptiness beats intent-only noise; declared intent for the
+    # category still surfaces through the divergence report. When measurement EXISTS,
+    # token-only colors stay in the universe: pooling against real usage mass crushes
+    # them naturally unless intent is strong enough to clear MIN_POSTERIOR_PROB.
+    if not usage_entries:
+        return []
+
     # Color universe entries: (measured_entry_or_None, representative color, p_usage,
     # p_intent). The measured entry supplies area + components on a match.
     measured_by_idx: list[UsageEntry | None] = []

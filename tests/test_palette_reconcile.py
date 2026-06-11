@@ -314,9 +314,9 @@ def test_near_identical_tokens_aggregate_into_one_intent_group() -> None:
     ]
     posterior, divergence = reconcile(usage, tokens, alpha=0.4)
 
-    # One group -> exactly one token-only entry for surface, not two.
-    surface = posterior.mapping[UsageCategory.surface]
-    assert len(surface) == 1
+    # Surface has no measured usage: the empty-category gate keeps it empty (no
+    # token-only injection); the aggregated group surfaces via divergence instead.
+    assert posterior.mapping[UsageCategory.surface] == ()
 
     # One group -> exactly one declared-but-unused entry; rep_name is the heavier token.
     unused = [d for d in divergence if "unused" in d.note]
@@ -327,7 +327,8 @@ def test_near_identical_tokens_aggregate_into_one_intent_group() -> None:
 
 def test_colors_outside_delta_e_threshold_stay_separate() -> None:
     # #2563eb vs #10b981 are far outside DELTA_E_MATCH: two intent groups, two separate
-    # token-only entries, two separate divergence entries.
+    # divergence entries. The unmeasured surface category itself stays empty (the
+    # empty-category gate) rather than carrying token-only entries.
     usage = UsagePalette(mapping={UsageCategory.interactive: (_entry("#e11d48", 1.0),)})
     tokens = [
         _token("--blue", "#2563eb", {UsageCategory.surface: 1.0}),
@@ -335,8 +336,7 @@ def test_colors_outside_delta_e_threshold_stay_separate() -> None:
     ]
     posterior, divergence = reconcile(usage, tokens, alpha=0.4)
 
-    surface_hexes = {e.color.hex for e in posterior.mapping[UsageCategory.surface]}
-    assert surface_hexes == {_color("#2563eb").hex, _color("#10b981").hex}
+    assert posterior.mapping[UsageCategory.surface] == ()
     unused_hexes = {d.color.hex for d in divergence if "unused" in d.note}
     assert unused_hexes == {_color("#2563eb").hex, _color("#10b981").hex}
 
@@ -403,6 +403,48 @@ def test_token_only_color_survives_at_default_alpha() -> None:
     assert _prob_for(posterior, UsageCategory.interactive, "#2563eb") > _prob_for(
         posterior, UsageCategory.interactive, token_only
     )
+
+
+def test_empty_category_yields_empty_posterior_not_token_flood() -> None:
+    # THE empty-category gate: a category with ZERO measured usage candidates must come
+    # back empty — token-only intent is NOT injected. (The live-probe regression: with
+    # no measured borders, 16 token-only colors all got the same eps usage factor,
+    # survived pruning near-uniformly, and flooded usage.border with empty-components
+    # noise.) The declared intent still surfaces through divergence.
+    usage = UsagePalette(mapping={UsageCategory.surface: (_entry("#ffffff", 1.0),)})
+    tokens = [
+        _token(f"--border-{i}", hexv, {UsageCategory.border: 1.0})
+        for i, hexv in enumerate(["#ff8182", "#a830e8", "#7ae9ff", "#c7e580"])
+    ]
+    posterior, divergence = reconcile(usage, tokens, alpha=0.4)
+
+    assert posterior.mapping[UsageCategory.border] == ()
+    # Honest emptiness, but not silence: every declared border color raises divergence.
+    unused = {d.color.hex for d in divergence if "unused" in d.note}
+    assert unused == {_color(h).hex for h in ("#ff8182", "#a830e8", "#7ae9ff", "#c7e580")}
+
+
+def test_token_only_colors_still_pool_when_category_is_measured() -> None:
+    # The flip side of the gate: when the category HAS measured candidates, token-only
+    # colors stay in the universe — pooling against real usage mass crushes them below
+    # MIN_POSTERIOR_PROB when usage evidence is strong (no entry, no flood), while the
+    # measured entries keep non-empty components.
+    usage = UsagePalette(
+        mapping={
+            UsageCategory.border: (
+                _entry("#d1d9e0", 0.9, components={ComponentType.border: 1.0}),
+                _entry("#59636e", 0.1, components={ComponentType.border: 1.0}),
+            )
+        }
+    )
+    tokens = [_token("--border-exotic", "#ff8182", {UsageCategory.border: 1.0})]
+    posterior, _ = reconcile(usage, tokens, alpha=0.4)
+
+    entries = posterior.mapping[UsageCategory.border]
+    hexes = {e.color.hex for e in entries}
+    assert _color("#ff8182").hex not in hexes  # crushed by pooling, no special-casing
+    assert hexes == {_color("#d1d9e0").hex, _color("#59636e").hex}
+    assert all(e.components for e in entries)
 
 
 def test_used_but_undeclared_threshold_boundary() -> None:
