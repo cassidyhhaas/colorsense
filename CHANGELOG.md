@@ -98,7 +98,9 @@ measurement gaps the fixtures had masked; all are now encoded as offline fixture
   and the `input[submit|button]` interactivity predicate match only button-like input
   types (`submit`/`button`/`image`/`reset`). Search/text inputs — and text inputs styled
   with `cursor: pointer` — no longer receive spurious `cta_bg` votes that leaked their
-  backgrounds into the `interactive` usage category.
+  backgrounds into the `interactive` usage category. Aligning the harvest with that set,
+  `<input type="image">` (a graphical submit button) is now also harvested as
+  `clickable`.
 
 ### Added
 
