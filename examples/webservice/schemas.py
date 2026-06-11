@@ -16,46 +16,61 @@ class AnalyzeRequest(BaseModel):
     url: str = Field(max_length=2083)
 
 
-class CandidateOut(BaseModel):
-    """One palette candidate, trimmed to what API consumers paint with."""
+class EntryOut(BaseModel):
+    """One usage entry (or role candidate), trimmed to what API consumers paint with."""
 
     hex: str
     probability: float
     area: float
 
 
-class AnalyzeResponse(BaseModel):
-    """Trimmed response: per-theme role candidates plus the overall fit score.
+class ThemeOut(BaseModel):
+    """One analyzed theme: the usage view first, then the derived 60/30/10 roles view.
 
-    ``themes`` maps theme name -> role name -> ranked candidates (best first; empty list
-    when the role was not detected).
+    ``usage`` maps usage category (surface/text/interactive/border) -> ranked entries;
+    ``roles`` maps role name -> ranked candidates (best first; empty list when nothing
+    was detected). ``fit_score`` describes how 60/30/10-like the design is.
     """
 
-    url: str
+    usage: dict[str, list[EntryOut]]
+    roles: dict[str, list[EntryOut]]
     fit_score: float
-    themes: dict[str, dict[str, list[CandidateOut]]]
+
+
+class AnalyzeResponse(BaseModel):
+    """Trimmed response: per-theme usage view plus the derived roles view."""
+
+    url: str
+    themes: dict[str, ThemeOut]
 
 
 def shape_response(result: AnalysisResult) -> AnalyzeResponse:
-    """Trim ``result.model_dump()`` to the response shape.
+    """Trim the typed result to the response shape.
 
-    The full dump carries tokens, divergence, evidence trails, and OKLCH coordinates —
+    The full result carries divergence, component evidence, and OKLCH coordinates —
     valuable to library consumers, noise to a palette API. Keep hex/probability/area per
-    candidate and the fit score.
+    entry, for both the usage view (primary) and the roles view (derived), plus the
+    per-theme fit score. Both UsageEntry and PaletteCandidate expose
+    color/probability/area, so one trimming shape covers them.
     """
-    dump = result.model_dump(mode="json")
-    themes: dict[str, dict[str, list[CandidateOut]]] = {
-        theme: {
-            role: [
-                CandidateOut(
-                    hex=candidate["color"]["hex"],
-                    probability=candidate["probability"],
-                    area=candidate["area"],
-                )
-                for candidate in candidates
-            ]
-            for role, candidates in palette["roles"]["mapping"].items()
-        }
-        for theme, palette in dump["themes"].items()
+    themes = {
+        theme.value: ThemeOut(
+            usage={
+                category.value: [
+                    EntryOut(hex=e.color.hex, probability=e.probability, area=e.area)
+                    for e in entries
+                ]
+                for category, entries in palette.usage.mapping.items()
+            },
+            roles={
+                role.value: [
+                    EntryOut(hex=c.color.hex, probability=c.probability, area=c.area)
+                    for c in candidates
+                ]
+                for role, candidates in palette.roles.mapping.items()
+            },
+            fit_score=palette.fit_score,
+        )
+        for theme, palette in result.themes.items()
     }
-    return AnalyzeResponse(url=dump["url"], fit_score=dump["fit_score"], themes=themes)
+    return AnalyzeResponse(url=result.url, themes=themes)
