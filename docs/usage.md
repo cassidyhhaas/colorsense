@@ -20,6 +20,7 @@ result = asyncio.run(
         config_path="my_palette_config.yaml",           # see the advanced guide
         max_total_seconds=60.0,                         # overall deadline; default: none
         browser_args=("--js-flags=--max-old-space-size=512",),  # extra Chromium flags
+        include_tokens=True,                            # opt into the declared-token list
     )
 )
 ```
@@ -37,8 +38,9 @@ second theme roughly doubles the render cost. Pass `themes=LIGHT_AND_DARK` (equi
 `prefers-color-scheme` (near-identical light/dark renders) collapse to a single reported
 theme; `result.metadata` records when that happened.
 
-The first theme in the tuple is "primary" and supplies the top-level `tokens`,
-`divergence`, and `fit_score` fields.
+The first theme in the tuple is "primary": when light/dark renders are near-identical, it
+is the one kept. Everything derived per theme (`usage`, `roles`, `fit_score`,
+`divergence`, `tokens`) lives on that theme's `ThemePalette` in `result.themes`.
 
 ### Overall deadline
 
@@ -96,13 +98,15 @@ stdout carries data only; warnings and errors go to stderr.
 | `--browser-arg TEXT` | Extra Chromium launch argument, passed verbatim (`browser_args`); repeatable. E.g. `--browser-arg='--js-flags=--max-old-space-size=512'` caps each renderer's V8 heap (JS heap only; see [SECURITY.md](../SECURITY.md) §2). |
 | `--min-interval FLOAT` | Seconds between same-host fetches (default `1.0`). |
 | `--user-agent TEXT` | Wire User-Agent. Default: a CLI-identifying UA (`colorsense-cli/<version> (+repo URL)`); pass your own to identify *your* application. |
+| `--tokens` | Include the declared design tokens per theme (`include_tokens=True`); the human output prints name, hex, and semantic role. |
 | `--block-private-networks` | Install `block_private_networks()` as the policy's egress `request_filter`. |
 | `--no-robots` | Disable the `robots.txt` check (and its `Crawl-delay` honoring). An explicit, accountable choice — only for sites you own or are authorized to crawl (see [SECURITY.md](../SECURITY.md) §3); the CLI warns on stderr when used. |
 | `--json` | Emit the full `AnalysisResult` as JSON. stdout is always exactly one valid JSON document: one object for a single URL (`null` if it failed), an array of the successful results for multiple URLs (`[]` if all failed). |
 | `--version` | Print the installed version and exit. |
 
-The default (no `--json`) output prints, per theme, each role's best candidate — hex,
-probability, area — plus the overall fit score, in the spirit of
+The default (no `--json`) output prints, per theme, the usage view first — each
+category's entries with hex, probability, and area — then the roles summary with the fit
+score, any divergence, and (under `--tokens`) the declared tokens, in the spirit of
 [`examples/quickstart.py`](../examples/quickstart.py).
 
 ## The result
@@ -112,41 +116,68 @@ round-trips. The fields most consumers use:
 
 ### `themes`
 
-The payload: each rendered `Theme` mapped to its reconciled palette. Walk
-`palette.roles.mapping[role]` — the mapping always contains every `PaletteRole`
-(`primary`, `secondary`, `accent`, `neutral_light`, `neutral_dark`), with an empty tuple
-when no candidate was detected. Each candidate carries:
+The payload: each rendered `Theme` mapped to a `ThemePalette` carrying everything derived
+for that theme.
+
+#### `usage` — the primary view
+
+What colors paint each usage category, reconciled against the site's declared design
+tokens. Walk `palette.usage.mapping[category]` — the mapping always contains every
+`UsageCategory` (`surface`, `text`, `interactive`, `border`), with an empty tuple when
+nothing was detected. Each `UsageEntry` carries:
 
 - **`color`** — a `Color`: an sRGB `hex` string plus cached **OKLCH** coordinates
   (`lightness`, `chroma`, `hue`) of the composited color, and the source `alpha`. `hex` is
   what you paint with; the OKLCH coordinates make it easy to derive your own theme-matched
   colors — sort by perceptual lightness, build accessible tints/shades, or compute
   contrast — without re-parsing the hex.
-- **`probability`** — confidence this color fills the role; candidates within a role rank
-  by it, so `candidates[0]` is the best pick.
-- **`area`** — the fraction of page area the color covers, i.e. its 60/30/10 dominance.
+- **`probability`** — the color's prominence within its category (entries of one category
+  sum to ~1); entries rank by it, so `entries[0]` is the best pick.
+- **`area`** — the raw fraction of page (screenshot) area the color covers, an auditable
+  signal alongside the probability.
+- **`components`** — normalized evidence: which `ComponentType`s contributed the color to
+  this category (e.g. `{card_bg: 0.7, modal_bg: 0.3}`).
 
-### `fit_score`
+```python
+from colorsense import UsageCategory
 
-How well the measured palette matches the canonical 60/30/10 split, in `[0, 1]`. A quick
-quality signal for the analysis as a whole.
+for entry in result.themes[theme].usage.mapping[UsageCategory.interactive]:
+    print(entry.color.hex, entry.probability, entry.components)
+```
 
-### `status_colors`
+#### `roles` / `fit_score` — the derived 60/30/10 view
 
-Success/error/warning colors detected and deliberately **kept out** of the palette, so a
-red error banner doesn't masquerade as a brand accent.
+A measured-only 60/30/10 interpretation of the same colors (it is *not* reconciled
+against tokens). `palette.roles.mapping` always contains every `PaletteRole` (`primary`,
+`secondary`, `accent`, `neutral_light`, `neutral_dark`); each `PaletteCandidate` carries
+`color`, `probability`, and `area`. `palette.fit_score` (in `[0, 1]`) describes how
+closely the design matches the canonical 60/30/10 split — a descriptive property of the
+design, not a quality score for the analysis.
 
-### `tokens` / `divergence`
+#### `divergence`
 
-The declared design tokens (CSS custom properties) with inferred semantic roles, and
-declared-vs-rendered discrepancies. See the
-[advanced guide](advanced.md#design-token-auditing).
+Declared-vs-rendered discrepancies, keyed by `UsageCategory`: high-intent tokens
+**declared but unused** in the render, and prominent rendered colors **used but
+undeclared**. See the [advanced guide](advanced.md#design-token-auditing).
+
+#### `tokens` (opt-in)
+
+The declared design tokens (CSS custom properties), as `DesignToken` (name, resolved
+color, inferred semantic role) — only when `analyze(..., include_tokens=True)`. The field
+distinguishes **`None`** (tokens were not requested — the default) from **`()`** (tokens
+were requested but the page declares none). Status tokens (success/error/warning) are kept
+out of the palette views but appear here with `semantic_role=status`.
+
+### `third_party_colors`
+
+Colors dominated by third-party widgets (chat launchers, consent banners, …), kept out of
+the usage and roles views and surfaced separately.
 
 ### `metadata`
 
-A typed `RunMetadata`: which themes were requested versus actually analyzed, whether the
-run collapsed to a single theme, and the fetch policy in effect. Useful for logging and for
-detecting the single-theme collapse.
+A typed `RunMetadata`: which themes were requested versus actually analyzed
+(`len(metadata.themes_analyzed) == 1` detects the single-theme collapse) and the fetch
+policy in effect. Useful for logging.
 
 ## Errors
 

@@ -8,18 +8,19 @@ Extract the rendered color palette of any website as a structured, typed Python 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/cassidyhhaas/colorsense/blob/main/LICENSE)
 
 colorsense renders a page in a headless browser, harvests its design tokens and computed
-element colors, and classifies them into a 60/30/10 palette — primary, secondary, accent,
-and neutrals, each with ranked, scored candidates. The result is a frozen Pydantic model,
-ready for downstream consumers (including AI models) that need to understand a site's
-color identity.
+element colors, and classifies them by **usage** — what colors paint the page's surfaces,
+text, interactive elements, and borders — with ranked, scored entries per category, plus a
+derived 60/30/10 roles view (primary/secondary/accent/neutrals). The result is a frozen
+Pydantic model, ready for downstream consumers (including AI models) that need to
+understand a site's color identity.
 
 ```python
 import asyncio
-from colorsense import PaletteRole, Theme, analyze
+from colorsense import Theme, UsageCategory, analyze
 
 result = asyncio.run(analyze("https://example.com"))
-primary = result.themes[Theme.light].roles.mapping[PaletteRole.primary]
-print(primary[0].color.hex)  # ranked candidates; empty tuple when none detected
+surfaces = result.themes[Theme.light].usage.mapping[UsageCategory.surface]
+print(surfaces[0].color.hex)  # ranked entries; empty tuple when none detected
 ```
 
 ## Installation
@@ -39,20 +40,23 @@ after installing (on Linux, also `playwright install-deps chromium` for the OS l
 
 ```python
 import asyncio
-from colorsense import analyze, PaletteRole
+from colorsense import analyze
 
 result = asyncio.run(analyze("https://example.com"))
 
 for theme, palette in result.themes.items():
-    candidates = palette.roles.mapping[PaletteRole.primary]
-    if candidates:  # every role is present; empty tuple when none detected
-        best = candidates[0]
-        print(theme, best.color.hex, best.probability)
+    for category, entries in palette.usage.mapping.items():
+        if entries:  # every category is present; empty tuple when none detected
+            best = entries[0]
+            print(theme, category, best.color.hex, best.probability)
 ```
 
-Each role — `primary`, `secondary`, `accent`, `neutral_light`, `neutral_dark` — maps to a
-probability-ranked tuple of candidates; take `[0]` for the best pick. Inside an async
-application (e.g. a FastAPI endpoint), just `result = await analyze(url)`.
+The **usage view** is the primary output: each category — `surface`, `text`,
+`interactive`, `border` — maps to a probability-ranked tuple of entries; take `[0]` for
+the best pick. `palette.roles` is a derived 60/30/10 interpretation (`primary`,
+`secondary`, `accent`, `neutral_light`, `neutral_dark`) with a `fit_score` describing how
+60/30/10-like the design is. Inside an async application (e.g. a FastAPI endpoint), just
+`result = await analyze(url)`.
 
 See the [usage guide](https://github.com/cassidyhhaas/colorsense/blob/main/docs/usage.md) for the full result schema, options, and fetch policy.
 
@@ -71,8 +75,12 @@ The default output is a human-readable palette summary; `--json` emits the full
 
 ## Features
 
-- **60/30/10 palette classification** — five roles, each with ranked candidates carrying a
-  confidence (`probability`) and page-area dominance (`area`).
+- **Usage-keyed palette** — what colors paint surfaces, text, interactive elements, and
+  borders, each entry carrying a confidence (`probability`), page-area dominance (`area`),
+  and the component types it came from (`components`). Preserves structure that a
+  60/30/10 taxonomy loses (e.g. a neutral design's gray text/border hierarchy).
+- **Derived 60/30/10 roles view** — five roles with ranked candidates, plus a `fit_score`
+  describing how 60/30/10-like the design is.
 - **Typed, serializable results** — `analyze` returns a frozen Pydantic `AnalysisResult`;
   `result.model_dump_json()` round-trips.
 - **OKLCH out of the box** — every `Color` carries an sRGB `hex` plus cached OKLCH
@@ -80,10 +88,13 @@ The default output is a human-readable palette summary; `--json` emits the full
   re-parsing hex strings.
 - **Light and dark themes** — opt into dark mode rendering; near-identical light/dark
   renders collapse to a single reported theme.
-- **Declared vs. rendered reconciliation** — reports the site's CSS custom properties and
-  discrepancies between what is declared and what is actually used.
-- **Status-color filtering** — success/error/warning colors are detected and kept out of
-  the palette, so an error banner never masquerades as a brand accent.
+- **Declared vs. rendered reconciliation** — declared design-token intent is pooled into
+  the usage view, with per-theme `divergence` reporting high-intent tokens declared but
+  unused and prominent colors used but undeclared. Opt into the token list itself with
+  `analyze(url, include_tokens=True)`.
+- **Status-color filtering** — success/error/warning tokens are detected and kept out of
+  the palette views, so an error banner never masquerades as a brand accent (they surface
+  in the opt-in token list with `semantic_role=status`).
 - **Polite, controllable fetching** — configurable User-Agent, `robots.txt` gate with
   `Crawl-delay` support, per-host rate limiting, render caching, and a per-request egress
   filter that gates every browser request and the policy's own `robots.txt` fetch.
@@ -99,8 +110,8 @@ The default output is a human-readable palette summary; `--json` emits the full
 
 Most palette tools quantize the pixels of an image or screenshot and return dominant
 colors with no semantics. colorsense renders the live page, reads computed styles and
-declared design tokens, and classifies colors into 60/30/10 roles with confidence scores —
-you get "this is the brand accent", not "this orange is common". If you just need dominant
+declared design tokens, and classifies colors by how they are used, with confidence
+scores — you get "this is the CTA/link color", not "this orange is common". If you just need dominant
 colors from an image, an image-quantization tool is simpler and the right choice.
 
 ## Security

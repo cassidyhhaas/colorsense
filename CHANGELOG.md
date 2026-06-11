@@ -7,6 +7,53 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Breaking — usage-keyed result contract
+
+The public result is re-keyed around **usage** (what colors paint surfaces / text /
+interactive elements / borders); the 60/30/10 roles taxonomy becomes a derived, per-theme
+view. On neutral-layered designs (e.g. a GitHub repo page) the old shape lost the design's
+actual structure — the gray text/border hierarchy appeared nowhere and the "secondary"
+slot collected noise. The library has no consumers yet; breaking now is deliberate.
+
+Migration table (old → new):
+
+| Old | New |
+| --- | --- |
+| `ThemePalette.roles` (reconciled) | `ThemePalette.usage` — the primary, reconciled view: `UsagePalette` mapping each `UsageCategory` (`surface`/`text`/`interactive`/`border`) to ranked `UsageEntry`s (`color`, `probability`, `area`, `components`). `ThemePalette.roles` remains, but as a **measured-only** derived 60/30/10 view, no longer reconciled against tokens. |
+| `AnalysisResult.fit_score` | `ThemePalette.fit_score` (per theme; descriptive "how 60/30/10-like", not a quality score) |
+| `AnalysisResult.divergence` | `ThemePalette.divergence` (per theme) |
+| `DivergenceItem.role: PaletteRole` | `DivergenceItem.category: UsageCategory` |
+| `AnalysisResult.tokens: tuple[ClassifiedToken, ...]` | `ThemePalette.tokens: tuple[DesignToken, ...] \| None` — **opt-in** via `analyze(..., include_tokens=True)`; `None` = not requested, `()` = requested but none declared. `DesignToken` carries `name`, resolved `color`, `semantic_role`. |
+| `AnalysisResult.status_colors` | Removed. Status tokens stay excluded from the palette views and surface in the opt-in token list with `semantic_role=status`. |
+| `PaletteCandidate.evidence` | Removed (internal scoring-term names are not contract). `color`/`probability`/`area` remain. |
+| `RunMetadata.single_theme` | Removed; use `len(metadata.themes_analyzed) == 1`. |
+| `ClassifiedToken`, `TokenRecord` (public exports) | Internal-only; removed from the public API. The public token projection is `DesignToken`. |
+| — | New public exports: `UsageCategory`, `UsageEntry`, `UsagePalette`, `DesignToken`, `ComponentType` (keys `UsageEntry.components`). |
+
+Other changes riding the redesign:
+
+- **Divergence noise fix:** declared-but-unused items are now gated to *high-intent*
+  tokens (classified by an explicit name rule or relational pattern). Unused shades of
+  numbered color scales, alias followers, and fallbacks no longer fire — on token-heavy
+  sites the old report was 100% noise (54/54 items on github.com).
+- `analyze()` gains keyword-only `include_tokens: bool = False`; the CLI gains a matching
+  `--tokens` flag. The flag gates only output assembly — classification and
+  reconciliation always run, so all other fields are identical either way.
+- The CLI's human-readable output (unstable by design) now leads with the usage view per
+  theme, then the roles summary + fit score, divergence, and (with `--tokens`) the token
+  list.
+- Config YAML: `role_to_palette_prior` is renamed **`role_to_usage_prior`** and its
+  distributions are now over the four usage categories; custom config files must be
+  updated. The token classifier's neutral light/dark special-case is gone (the usage
+  taxonomy has no light/dark neutral split).
+- Inventory channel routing: `link` component mass now routes to the element's **text**
+  color (a link paints its typography, not its usually-transparent background), and
+  fully-transparent (`alpha == 0`) channel colors no longer donate vote mass (previously
+  they piled votes onto a phantom `#000000` zero-area cluster).
+- Component classifier calibration: the `input` semantic rule's `border` vote is raised
+  2.0 → 2.5 so input borders survive softmax pruning (at 2.0 the usage view's border
+  category was structurally empty on input-bearing pages).
+
 ### Added
 
 - **`request_filter` seams accept async predicates.** `PolitenessPolicy`, `harvest_page`,
