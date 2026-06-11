@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-colorsense renders a website in headless Chromium (Playwright), harvests its design tokens and computed element colors, and classifies them into a 60/30/10 palette (primary/secondary/accent/neutrals) returned as a frozen Pydantic `AnalysisResult`. Python 3.12+, src layout, `uv`-managed.
+colorsense renders a website in headless Chromium (Playwright), harvests its design tokens and computed element colors, and classifies them by usage — what colors paint surfaces, text, interactive elements, and borders — plus a derived 60/30/10 roles view, returned as a frozen Pydantic `AnalysisResult`. Python 3.12+, src layout, `uv`-managed.
 
 ## Commands
 
@@ -30,8 +30,8 @@ Golden snapshots: `tests/test_integration_sites.py` pins analysis output. If a c
 `analyze()` in `src/colorsense/pipeline.py` is the single async entry point wiring the stages, per requested theme (light by default; dark opt-in via `themes=LIGHT_AND_DARK`; near-identical renders collapse to one theme):
 
 1. **harvest/** — everything that touches a live page. `render.py` (`RenderSession`/`SharedBrowser`) drives Playwright; `dom.py` walks visible elements with computed colors; `tokens.py` enumerates declared CSS custom properties via CSSOM; `states.py` probes hover/focus color changes via CDP; `screenshot.py` quantizes a masked full-page screenshot into area-weighted bins.
-2. **classify/** — `tokens.py` maps declared tokens to semantic roles + palette priors (precedence: relational → name rule → scale detection); `components.py` scores DOM elements into component types. All weights/vocabulary come from the config YAML, nothing hard-coded.
-3. **palette/** — `inventory.py` fuses screenshot area-truth with element semantics into `ColorCluster`s; `roles.py` assigns 60/30/10 roles with probabilities; `reconcile.py` pools measured usage against declared token intent (log-linear) and reports divergences.
+2. **classify/** — `tokens.py` maps declared tokens to semantic roles + usage priors (precedence: relational → name rule → scale detection); `components.py` scores DOM elements into component types. All weights/vocabulary come from the config YAML, nothing hard-coded.
+3. **palette/** — `inventory.py` fuses screenshot area-truth with element semantics into `ColorCluster`s; `usage.py` builds the primary usage-keyed view (probability-ranked entries per usage category, measured evidence only); `reconcile.py` pools that measured usage against declared token intent (log-linear) and reports divergences; `roles.py` derives the measured-only 60/30/10 roles view with its `fit_score`.
 4. **net/** — `politeness.py` (`PolitenessPolicy`) is the *only* place networking policy lives: robots.txt gate, per-host rate limit, render cache, scheme gate (`file://` is opt-in), and the `request_filter` egress hook. `guard.py` ships `block_private_networks()`, the SSRF egress filter applied to every browser request and the robots fetch itself.
 
 Key boundary: **networking lives entirely behind `PolitenessPolicy`/`harvest_page`; everything downstream is pure given a `Harvest`**, which is why the pipeline/classify/palette layers are testable without a network or browser. Per-theme CPU work runs in `asyncio.to_thread`.
