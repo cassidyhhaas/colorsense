@@ -119,7 +119,7 @@ RobotsLoader = Callable[[str, str, RequestFilter | None], Awaitable[str | None]]
 """Robots seam: ``(robots_url, user_agent, request_filter) -> text | None``.
 
 The UA is sent on the wire. ``request_filter`` is the policy's egress predicate — sync or async (see
-[`colorsense.harvest.RequestFilter`][colorsense.RequestFilter]) — or ``None``: a loader must apply
+[`RequestFilter`][colorsense.RequestFilter]) — or ``None``: a loader must apply
 it to the robots URL itself *and* to every redirect hop it follows, returning ``None`` (no rules)
 instead of fetching a rejected destination — the robots GET is server-side ``httpx``, not the
 browser, so it would otherwise bypass the browser-route filter entirely (SSRF via a robots
