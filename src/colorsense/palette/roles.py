@@ -1,9 +1,12 @@
-"""Palette role assignment (60/30/10 taxonomy).
+"""Palette role assignment (60/30/10 taxonomy) — a derived, measured-only view.
 
 Assigns each :class:`~colorsense.models.ColorCluster` to the five palette roles
-(:class:`~colorsense.models.PaletteRole`) with a per-role probability distribution and an
-evidence trail, then computes a ``fit_score`` measuring how well the measured palette
-matches the canonical 60/30/10 split.
+(:class:`~colorsense.models.PaletteRole`) with a per-role probability distribution, then
+computes a ``fit_score`` measuring how well the measured palette matches the canonical
+60/30/10 split. This view is a **derived 60/30/10 interpretation of measured usage**:
+the primary palette view is the usage-keyed one (``palette/usage.py``), and the roles
+view is **no longer reconciled against declared tokens** — it is reported exactly as
+measured.
 
 Design notes
 ------------
@@ -152,7 +155,6 @@ def _softmax(scores: list[float], temperature: float) -> list[float]:
 def _build_candidates(
     feats: list[_Features],
     scores: list[float],
-    evidences: list[dict[str, float]],
 ) -> list[PaletteCandidate]:
     """Softmax ``scores`` over clusters, prune, renormalize, and rank candidates.
 
@@ -160,10 +162,8 @@ def _build_candidates(
     """
     probs = _softmax(scores, SOFTMAX_T)
 
-    kept: list[tuple[_Features, float, dict[str, float]]] = [
-        (f, p, ev)
-        for f, p, ev in zip(feats, probs, evidences, strict=True)
-        if p >= MIN_CANDIDATE_PROB
+    kept: list[tuple[_Features, float]] = [
+        (f, p) for f, p in zip(feats, probs, strict=True) if p >= MIN_CANDIDATE_PROB
     ]
     if not kept:
         # Pruning emptied the role: keep the single argmax at probability 1.0. Tie-break
@@ -172,19 +172,18 @@ def _build_candidates(
             range(len(probs)),
             key=lambda i: (probs[i], feats[i].color.hex),
         )
-        kept = [(feats[best_idx], 1.0, evidences[best_idx])]
+        kept = [(feats[best_idx], 1.0)]
     else:
-        total = sum(p for _, p, _ in kept)
-        kept = [(f, p / total, ev) for f, p, ev in kept]
+        total = sum(p for _, p in kept)
+        kept = [(f, p / total) for f, p in kept]
 
     candidates = [
         PaletteCandidate(
             color=f.color,
             probability=p,
             area=f.cluster.area_weight,
-            evidence=ev,
         )
-        for f, p, ev in kept
+        for f, p in kept
     ]
     candidates.sort(key=lambda c: (-c.probability, c.color.hex))
     return candidates
@@ -241,18 +240,10 @@ def assign_roles(clusters: list[ColorCluster]) -> tuple[RoleResults, float]:
 
     # --- Step 2: primary scoring + provisional primary anchor. ---
     primary_scores: list[float] = []
-    primary_ev: list[dict[str, float]] = []
     for f in feats:
         comp_primary = f.comp_assoc[PaletteRole.primary]
         score = W_AREA * f.area + W_NEUTRAL * f.neutrality + W_COMP_PRIMARY * comp_primary
         primary_scores.append(score)
-        primary_ev.append(
-            {
-                "area": f.area,
-                "neutrality": f.neutrality,
-                "component_assoc": comp_primary,
-            }
-        )
 
     # Provisional primary = argmax primary_score; tie-break by larger area, then hex.
     primary_idx = max(
@@ -263,13 +254,9 @@ def assign_roles(clusters: list[ColorCluster]) -> tuple[RoleResults, float]:
 
     # --- Step 3: score the remaining roles (primary anchor now known). ---
     accent_scores: list[float] = []
-    accent_ev: list[dict[str, float]] = []
     secondary_scores: list[float] = []
-    secondary_ev: list[dict[str, float]] = []
     nlight_scores: list[float] = []
-    nlight_ev: list[dict[str, float]] = []
     ndark_scores: list[float] = []
-    ndark_ev: list[dict[str, float]] = []
 
     for f in feats:
         chroma_norm = f.chroma / chroma_ref
@@ -290,54 +277,25 @@ def assign_roles(clusters: list[ColorCluster]) -> tuple[RoleResults, float]:
             + W_AREA_ACCENT * f.area
         )
         accent_scores.append(a_score)
-        accent_ev.append(
-            {
-                "chroma": chroma_norm,
-                "contrast_to_primary": contrast_norm,
-                "component_assoc": comp_accent,
-                "area": f.area,
-            }
-        )
 
         # Secondary: high-area structural surfaces (the "card exception").
         s_score = W_AREA_SEC * f.area + W_COMP_SEC * comp_sec + W_STRUCT * struct
         secondary_scores.append(s_score)
-        secondary_ev.append(
-            {
-                "area": f.area,
-                "component_assoc": comp_sec,
-                "structural": struct,
-            }
-        )
 
         # Neutral light / dark.
         nl_score = f.neutrality * f.lightness * (NEUT_AREA_W + f.area)
         nlight_scores.append(nl_score)
-        nlight_ev.append(
-            {
-                "neutrality": f.neutrality,
-                "lightness": f.lightness,
-                "area": f.area,
-            }
-        )
 
         nd_score = f.neutrality * (1.0 - f.lightness) * (NEUT_AREA_W + f.area)
         ndark_scores.append(nd_score)
-        ndark_ev.append(
-            {
-                "neutrality": f.neutrality,
-                "lightness": f.lightness,
-                "area": f.area,
-            }
-        )
 
     # --- Step 4: per-role softmax -> prune -> renormalize -> rank. ---
     mapping: dict[PaletteRole, tuple[PaletteCandidate, ...]] = {
-        PaletteRole.primary: tuple(_build_candidates(feats, primary_scores, primary_ev)),
-        PaletteRole.secondary: tuple(_build_candidates(feats, secondary_scores, secondary_ev)),
-        PaletteRole.accent: tuple(_build_candidates(feats, accent_scores, accent_ev)),
-        PaletteRole.neutral_light: tuple(_build_candidates(feats, nlight_scores, nlight_ev)),
-        PaletteRole.neutral_dark: tuple(_build_candidates(feats, ndark_scores, ndark_ev)),
+        PaletteRole.primary: tuple(_build_candidates(feats, primary_scores)),
+        PaletteRole.secondary: tuple(_build_candidates(feats, secondary_scores)),
+        PaletteRole.accent: tuple(_build_candidates(feats, accent_scores)),
+        PaletteRole.neutral_light: tuple(_build_candidates(feats, nlight_scores)),
+        PaletteRole.neutral_dark: tuple(_build_candidates(feats, ndark_scores)),
     }
 
     # --- Step 5: fit_score. ---

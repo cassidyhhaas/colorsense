@@ -134,18 +134,6 @@ def test_empty_clusters() -> None:
     assert fit == 0.0
 
 
-def test_evidence_trail_populated() -> None:
-    clusters = [
-        _cluster("#f3f4f6", 0.60, {ComponentType.page_bg: 1.0}),
-        _cluster("#e11d48", 0.10, {ComponentType.cta_bg: 1.0}),
-    ]
-    results, _ = assign_roles(clusters)
-    accent_top = results.mapping[PaletteRole.accent][0]
-    assert "chroma" in accent_top.evidence
-    assert "contrast_to_primary" in accent_top.evidence
-    assert "component_assoc" in accent_top.evidence
-
-
 def test_assign_roles_is_input_order_independent() -> None:
     """Every permutation of the cluster list yields the identical role assignment.
 

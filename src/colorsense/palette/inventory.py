@@ -11,10 +11,14 @@ objects:
   :class:`~colorsense.models.ClassifiedElement` carries a ``component_dist`` over
   :class:`~colorsense.models.ComponentType`. The distribution is split per color
   channel and attributed to the nearest screenshot-bin color of the *matching*
-  measured color: ``*_text`` components route to ``element.text``,
-  :attr:`~colorsense.models.ComponentType.border` to ``element.border``, and
-  everything else to ``element.bg``. This channel routing is a fixed code-level
-  convention (see :func:`_channel_for`).
+  measured color: ``*_text`` components and ``link`` route to ``element.text``
+  (a link paints its typography), :attr:`~colorsense.models.ComponentType.border`
+  to ``element.border``, and everything else to ``element.bg``. This channel
+  routing is a fixed code-level convention (see :func:`_channel_for`). A channel
+  whose measured color is **fully transparent** (``alpha == 0``) paints nothing
+  and donates no mass — without this gate, every transparent-background element
+  (links, paragraphs, wrappers) piles its votes onto a phantom ``#000000``
+  zero-area cluster.
 
 Perceptual distance is measured exclusively with
 :func:`colorsense.color.primitives.delta_e` (OKLab ``deltaEOK``), whose units are small;
@@ -41,28 +45,44 @@ from colorsense.models import (
 
 __all__ = ["build_inventory"]
 
-# Maximum OKLab deltaEOK distance at which a classified element's channel color
-# (bg / text / border) is considered "the same painted surface" as a screenshot
-# bin and so donates that channel's component mass to the bin's entry. deltaEOK
-# units are small.
-DELTA_E_MATCH: float = 0.10
+# Maximum OKLab deltaEOK distance at which a classified element's BG channel color is
+# considered "the same painted surface" as an existing entry (typically a screenshot
+# bin) and so donates its component mass to it. deltaEOK units are small. Backgrounds
+# match loosely (0.10): screenshot quantization + anti-aliasing smear large surfaces,
+# so a generous join radius is what ties element bgs back to their area-truth bins.
+DELTA_E_MATCH_BG: float = 0.10
+
+# Maximum distance for the TEXT and BORDER channels — deliberately tighter (0.05, the
+# cluster radius below). Text/border colors are exact computed values, not quantized
+# pixels, and dark colors sit perceptually close in OKLab: at 0.10 a near-black body
+# text (#1f2328) gets absorbed into an adjacent dark surface bin (#002a36) instead of
+# forming its own zero-area entry, erasing the text hierarchy from the usage view.
+DELTA_E_MATCH_TEXT_BORDER: float = 0.05
 
 # Maximum OKLab deltaEOK distance at which two entries are merged into a single
-# perceptual cluster. Kept <= DELTA_E_MATCH so that only truly near-identical
+# perceptual cluster. Kept <= the match radii so that only truly near-identical
 # colors collapse together.
 DELTA_E_CLUSTER: float = 0.05
+
+# Per-channel join radius: bg loose, text/border tight (see the constants above).
+_MATCH_BY_CHANNEL: dict[str, float] = {
+    "bg": DELTA_E_MATCH_BG,
+    "text": DELTA_E_MATCH_TEXT_BORDER,
+    "border": DELTA_E_MATCH_TEXT_BORDER,
+}
 
 
 def _channel_for(component: ComponentType) -> str:
     """Return the color channel a component's vote mass routes to.
 
     The routing convention is fixed in code: components whose value ends with
-    ``_text`` are painted by the element's ``color`` (its ``text`` channel),
-    :attr:`~colorsense.models.ComponentType.border` by its ``border-color``,
-    and everything else (including ``link``, ``badge``, ``third_party`` and
-    ``button_secondary``) by its ``background-color``.
+    ``_text`` — plus ``link``, whose painted color is its typography color, not
+    its (usually transparent) background — are painted by the element's
+    ``color`` (its ``text`` channel), :attr:`~colorsense.models.ComponentType.border`
+    by its ``border-color``, and everything else (including ``badge``,
+    ``third_party`` and ``button_secondary``) by its ``background-color``.
     """
-    if component.value.endswith("_text"):
+    if component.value.endswith("_text") or component is ComponentType.link:
         return "text"
     if component is ComponentType.border:
         return "border"
@@ -113,8 +133,10 @@ def build_inventory(harvest: Harvest, classified: list[ClassifiedElement]) -> li
        fixed (bg, text, border) order. For each channel whose measured color is
        non-``None`` and whose sub-distribution is non-empty, find the nearest
        entry by :func:`~colorsense.color.primitives.delta_e`. If that nearest
-       entry is within :data:`DELTA_E_MATCH`, add the channel's mass (each
-       element weighted equally, raw) into the entry's mix. Otherwise create a
+       entry is within the channel's join radius (:data:`DELTA_E_MATCH_BG` for
+       bg, the tighter :data:`DELTA_E_MATCH_TEXT_BORDER` for text/border), add
+       the channel's mass (each element weighted equally, raw) into the entry's
+       mix. Otherwise create a
        new entry from the channel's color with ``area_weight = 0.0`` so its
        semantics are not lost. New entries are appended in element order then
        channel order, which is deterministic.
@@ -122,8 +144,9 @@ def build_inventory(harvest: Harvest, classified: list[ClassifiedElement]) -> li
        emit one :class:`~colorsense.models.ColorCluster`: representative color =
        member with the largest area weight (ties / all-zero broken by ``hex``);
        ``area_weight`` = sum of member weights; ``member_count`` = group size;
-       ``component_mix`` = summed member mixes normalized to sum ~1.0 (empty stays
-       empty).
+       ``component_mass`` = the raw summed member mixes (un-normalized vote mass —
+       the usage view needs cross-cluster magnitude); ``component_mix`` = the same
+       sums normalized to ~1.0 (empty stays empty).
 
     Returns clusters sorted by ``area_weight`` descending, ties broken by ``hex``.
     """
@@ -149,11 +172,14 @@ def build_inventory(harvest: Harvest, classified: list[ClassifiedElement]) -> li
             ("border", ce.element.border),
         ):
             sub_dist = sub_dists[channel]
-            if color is None or not sub_dist:
+            # A fully-transparent channel color (alpha == 0, e.g. the default
+            # ``background-color: transparent``) paints nothing: attributing its
+            # mass would invent a phantom #000000 cluster.
+            if color is None or color.alpha == 0.0 or not sub_dist:
                 continue
 
             best_idx: int | None = None
-            best_dist = DELTA_E_MATCH
+            best_dist = _MATCH_BY_CHANNEL[channel]
             for idx, entry in enumerate(entries):
                 d = delta_e(color, entry.color)
                 if d <= best_dist:
@@ -209,6 +235,7 @@ def build_inventory(harvest: Harvest, classified: list[ClassifiedElement]) -> li
                 area_weight=total_area,
                 member_count=len(group),
                 component_mix=mix,
+                component_mass=dict(summed),
             )
         )
 

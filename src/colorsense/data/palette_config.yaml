@@ -170,21 +170,24 @@ token_vocabulary:
       radix:    [9, 10]      # 1..12
     scale_present_confidence_boost: 1.3
 
-  # --- Semantic token role -> prior distribution over 60/30/10 palette roles. -
-  # *** This is the most consequential table. *** Distributions need not sum to
-  # 1 exactly; loader normalizes. `_text` / `_on` channels are not 60/30/10
-  # roles — they are reported on the classified token, not used in palette ranking.
-  role_to_palette_prior:
-    brand_primary:   {accent: 0.55, secondary: 0.35, primary: 0.10}
-    brand_secondary: {secondary: 0.60, accent: 0.25, primary: 0.15}
-    brand_accent:    {accent: 0.85, secondary: 0.15}
-    interactive:     {accent: 0.90, secondary: 0.10}
-    surface_base:    {primary: 0.85, secondary: 0.15}
-    surface_raised:  {secondary: 0.70, primary: 0.20, neutral_light: 0.10}
-    text_body:       {primary: 0.70, neutral_dark: 0.30}
-    neutral:         {neutral_light: 0.50, neutral_dark: 0.50}  # measured L reassigns
-    border:          {neutral_dark: 0.40, neutral_light: 0.30, secondary: 0.30}
-    text_on:         {channel: text_on}     # reported on token, not palette-ranked
+  # --- Semantic token role -> prior distribution over usage categories. -------
+  # *** This is the most consequential table. *** Each row is the prior on HOW a
+  # token's color is used when rendered: surface (backgrounds at any layer),
+  # text (typography), interactive (links/CTAs/buttons/badges), border
+  # (borders/dividers). Distributions need not sum to 1 exactly; loader
+  # normalizes. `_on` / status / ignore channels are not usage categories —
+  # they are reported on the classified token, not used in usage ranking.
+  role_to_usage_prior:
+    brand_primary:   {interactive: 0.5, surface: 0.4, text: 0.1}
+    brand_secondary: {surface: 0.5, interactive: 0.3, border: 0.2}
+    brand_accent:    {interactive: 0.9, surface: 0.1}
+    interactive:     {interactive: 1.0}
+    surface_base:    {surface: 1.0}
+    surface_raised:  {surface: 1.0}
+    text_body:       {text: 1.0}
+    neutral:         {surface: 0.4, text: 0.35, border: 0.25}
+    border:          {border: 1.0}
+    text_on:         {channel: text_on}     # reported on token, not usage-ranked
     status:          {channel: status}      # excluded from palette, reported separately
     ignore:          {channel: ignore}      # dropped
 
@@ -196,8 +199,8 @@ component_classifier:
 
   # Final component label of an element. Color-channel routing is a fixed
   # code-level convention (see palette/inventory.py): components named
-  # <component>_text are fed by the element's text color, `border` by its
-  # border color, and everything else by its background color.
+  # <component>_text and `link` are fed by the element's text color, `border`
+  # by its border color, and everything else by its background color.
   component_types:
     [page_bg, page_text, header_bg, header_text, nav_bg, nav_text,
      footer_bg, footer_text, hero_bg, hero_text, card_bg, card_text,
@@ -222,11 +225,16 @@ component_classifier:
     - {match: "a",                 votes: {link: 4.5}}
     - {match: "button",            votes: {cta_bg: 3.5}}
     - {match: "role=button",       votes: {cta_bg: 3.0}}
+    # input[submit] matches only inputs whose type attribute is button-like
+    # (submit/button/image/reset); plain text/search inputs get no cta_bg vote.
     - {match: "input[submit]",     votes: {cta_bg: 3.5}}
     - {match: "dialog",            votes: {modal_bg: 4.0}}
     - {match: "role=dialog",       votes: {modal_bg: 3.5}}
     - {match: "aside",             votes: {nav_bg: 2.5}}
-    - {match: "input",             votes: {input_bg: 3.0, border: 2.0}}
+    # The input border vote moved to the border_presence family below: it now applies
+    # only when the input actually paints a border (instead of diluting borderless
+    # inputs' softmax with a vote the inventory would drop anyway).
+    - {match: "input",             votes: {input_bg: 3.0}}
 
   # --- Feature family 2: geometry / position. --------------------------------
   geometry:
@@ -309,6 +317,47 @@ component_classifier:
     - {when: "has_hover_color_change",  votes: {cta_bg: 1.5}}   # strong accent signal
     - {when: "has_focus_ring",          votes: {cta_bg: 0.5}}
 
+  # --- Feature family 4b: border presence. ------------------------------------
+  # Applied to any element whose harvested `border` is non-None — the harvester
+  # width-gates it, so non-None means the element genuinely paints a border. Without
+  # this family only the <input> semantic rule ever voted `border`, so pages without
+  # classified inputs measured ZERO border mass (the live-probe failure: github.com's
+  # #d1d9e0 borders absent while token-only noise flooded the category).
+  #
+  # Calibration (softmax_temperature 0.5, min_component_prob 0.05), votes border: 2.5:
+  #   * bordered card (class "card" -> card_bg 3.0):
+  #       e^(3.0/0.5)=403.4 vs e^(2.5/0.5)=148.4 -> border prob 0.27, survives.
+  #   * bordered text input (input_bg 3.0; input[submit] no longer matches non-button
+  #     inputs, so no cta_bg 3.5):
+  #       e^(3.0/0.5)=403.4 vs e^(2.5/0.5)=148.4 -> border prob 0.27, survives.
+  #   * bordered submit input (input_bg 3.0; cta_bg 7.0 = input[submit] 3.5 +
+  #     clickable 1.5 + input[submit|button] 2.0):
+  #       e^14=1.2e6 vs e^6=403.4 vs e^5=148.4 -> border prob ~1e-4, pruned —
+  #       button-like inputs stay interactive, not borders.
+  #   * bordered CTA (button tag 3.5 + class/btn/clickable votes, cta_bg >= 9):
+  #       border prob < 1e-3, pruned — bordered CTAs stay interactive, not borders.
+  border_presence:
+    votes: {border: 2.5}
+
+  # --- Feature family 4c: text presence. --------------------------------------
+  # Applied to any NON-clickable element with `has_text` (>=1 direct child text node
+  # with non-whitespace content; descendant text doesn't count). Without it only
+  # body/main/article/header-ish semantic rules voted *_text, so typography in plain
+  # <p>/<span>/<td> content was never measured (the live-probe failure: github.com's
+  # muted #59636e absent from usage.text). Clickable elements are deliberately
+  # excluded: their typography is interactive by definition and already routed via
+  # the `a`/link rules — letting them vote page_text would leak link colors into the
+  # text category and dilute the interactive channel.
+  #
+  # Calibration (softmax_temperature 0.5, min_component_prob 0.05), votes page_text: 2.0:
+  #   * bare <p>/<span> with text (no other votes): page_text prob 1.0.
+  #   * text-bearing card (class "card" -> card_bg 3.0):
+  #       e^6=403.4 vs e^4=54.6 -> page_text prob 0.12, survives without displacing
+  #       card_bg. 2.0 stays below every semantic *_text vote (body 4.0, main 3.0),
+  #       so semantic rules still dominate where they apply.
+  text_presence:
+    votes: {page_text: 2.0}
+
   # --- Feature family 5: repetition (the card detector). ---------------------
   repetition:
     min_siblings: 3
@@ -335,6 +384,9 @@ component_classifier:
     aria_hidden:                {factor: 0.0,  applies_to: all}
     zero_area_or_hidden:        {factor: 0.0,  applies_to: all}
     consent_masked_region:      {factor: 0.0,  applies_to: all}
+  # `border` is included since the border_presence family fires on ANY bordered
+  # element — without damping, a bordered third-party widget would feed its border
+  # color into the page's border palette.
   brand_components:
     [header_bg, header_text, hero_bg, hero_text, cta_bg, cta_text, link,
-     card_bg, card_text, page_bg, page_text]
+     card_bg, card_text, page_bg, page_text, border]

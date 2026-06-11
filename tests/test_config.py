@@ -11,6 +11,7 @@ from colorsense.config import (
     ChannelPrior,
     Config,
     DistributionPrior,
+    PresenceRule,
     RelationalInfo,
     ScaleInfo,
     load_config,
@@ -32,7 +33,7 @@ def test_load_returns_typed_config(config: Config) -> None:
 
 
 def test_distribution_rows_normalized_and_channels_recognized(config: Config) -> None:
-    priors = config.token_vocabulary.role_to_palette_prior
+    priors = config.token_vocabulary.role_to_usage_prior
 
     channel_roles = {
         TokenSemanticRole.text_on,
@@ -135,6 +136,34 @@ def test_layout_noise_class_tokens_present(config: Config) -> None:
     container = next((r for r in rules if r.match == "container"), None)
     assert container is not None
     assert container.votes.get("page_bg") == pytest.approx(0.5)
+
+
+def test_presence_feature_families_modeled(config: Config) -> None:
+    """border_presence / text_presence load as typed PresenceRule rows.
+
+    The vote targets are pinned (the classifier routes them structurally); the
+    weights themselves are YAML-tunable and only checked for positivity.
+    """
+    cc = config.component_classifier
+    assert isinstance(cc.border_presence, PresenceRule)
+    assert isinstance(cc.text_presence, PresenceRule)
+    assert cc.border_presence.votes.get("border", 0.0) > 0.0
+    assert cc.text_presence.votes.get("page_text", 0.0) > 0.0
+
+
+def test_presence_feature_families_required(tmp_path: Path) -> None:
+    """A config missing the presence families fails validation loudly."""
+    import yaml
+
+    raw = yaml.safe_load(
+        (Path(__file__).parents[1] / "src/colorsense/data/palette_config.yaml").read_text()
+    )
+    del raw["component_classifier"]["border_presence"]
+    bad = tmp_path / "no_presence.yaml"
+    bad.write_text(yaml.safe_dump(raw), encoding="utf-8")
+    with pytest.raises(ValidationError) as excinfo:
+        load_config(bad)
+    assert "border_presence" in str(excinfo.value)
 
 
 def test_default_config_loads_from_package() -> None:

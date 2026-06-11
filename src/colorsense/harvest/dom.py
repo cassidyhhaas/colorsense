@@ -2,8 +2,10 @@
 
 Walks the rendered DOM in-page, capturing for each element its computed
 ``background-color`` / ``color`` / ``border-color`` (parsed to :class:`Color`), bounding rect,
-position, tag/role/id/class tokens, and structural flags (iframe, cross-origin, shadow
-host, clickable, box shadow, vendor match, visible, aria-hidden). Hidden, zero-area, or
+position, tag/role/id/class tokens, the input ``type`` attribute (``<input>`` only), and
+structural flags (iframe, cross-origin, shadow host, clickable, box shadow, direct text
+content, vendor match, visible, aria-hidden).
+Hidden, zero-area, or
 aria-hidden elements are excluded from the returned list (their flags are still computed
 on what is returned).
 
@@ -40,7 +42,9 @@ class _RawElement(TypedDict):
     bg: str
     text: str
     border: str
+    input_type: str | None
     has_box_shadow: bool
+    has_text: bool
     is_iframe: bool
     cross_origin: bool
     shadow_host: bool
@@ -113,7 +117,7 @@ _COLLECT_DOM_JS: str = r"""
         const cursorPointer = style.cursor === 'pointer';
         const inputType = (el.getAttribute('type') || '').toLowerCase();
         const isSubmit = tag === 'input'
-            && ['submit', 'button', 'reset'].includes(inputType);
+            && ['submit', 'button', 'reset', 'image'].includes(inputType);
         const clickable = tag === 'a' || tag === 'button' || role === 'button'
             || el.hasAttribute('onclick') || isSubmit || cursorPointer;
 
@@ -124,6 +128,17 @@ _COLLECT_DOM_JS: str = r"""
         const borderWidth = parseFloat(style.borderTopWidth) || 0;
         const borderColor = borderWidth > 0 ? style.borderTopColor : '';
         const hasBoxShadow = style.boxShadow !== 'none';
+
+        // True iff the element has at least one DIRECT child text node with
+        // non-whitespace content. Descendant text deliberately does not count:
+        // otherwise every ancestor wrapper of any text would carry the flag.
+        let hasText = false;
+        for (const child of el.childNodes) {
+            if (child.nodeType === 3 && child.nodeValue.trim() !== '') {
+                hasText = true;
+                break;
+            }
+        }
 
         const vendorBlob = (
             (el.id || '') + ' ' + classList.join(' ') + ' ' + (el.getAttribute('src') || '')
@@ -140,7 +155,11 @@ _COLLECT_DOM_JS: str = r"""
             bg: style.backgroundColor,
             text: style.color,
             border: borderColor,
+            // Only meaningful on <input>: null for other tags and for inputs with
+            // no/empty type attribute (the HTML default type is "text").
+            input_type: (tag === 'input' && inputType !== '') ? inputType : null,
             has_box_shadow: hasBoxShadow,
+            has_text: hasText,
             is_iframe: isIframe,
             cross_origin: crossOrigin,
             shadow_host: shadowHost,
@@ -186,7 +205,9 @@ async def harvest_elements(
                 bg=parse_css_color(raw["bg"]),
                 text=parse_css_color(raw["text"]),
                 border=parse_css_color(raw["border"]),
+                input_type=raw["input_type"],
                 has_box_shadow=raw["has_box_shadow"],
+                has_text=raw["has_text"],
                 is_iframe=raw["is_iframe"],
                 cross_origin=raw["cross_origin"],
                 shadow_host=raw["shadow_host"],

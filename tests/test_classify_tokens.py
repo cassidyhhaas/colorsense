@@ -10,9 +10,10 @@ from colorsense.config import load_default_config
 from colorsense.models import (
     ClassifiedToken,
     Color,
-    PaletteRole,
+    TokenOrigin,
     TokenRecord,
     TokenSemanticRole,
+    UsageCategory,
 )
 
 CONFIG = load_default_config()
@@ -42,110 +43,127 @@ def _by_name(classified: list[ClassifiedToken], name: str) -> ClassifiedToken:
     return matches[0]
 
 
-def _argmax_role(prior: dict[PaletteRole, float]) -> PaletteRole:
-    """Return the palette role with the largest probability mass."""
-    assert prior, "palette_prior is empty"
-    return max(prior, key=lambda role: prior[role])
+def _argmax_category(prior: dict[UsageCategory, float]) -> UsageCategory:
+    """Return the usage category with the largest probability mass."""
+    assert prior, "usage_prior is empty"
+    return max(prior, key=lambda category: prior[category])
 
 
-def test_color_primary_is_accent_dominant() -> None:
-    """--color-primary strips to 'primary' -> brand_primary -> accent-dominant."""
-    classified, _status = classify_tokens([_record("--color-primary")], CONFIG)
+def test_color_primary_is_interactive_dominant() -> None:
+    """--color-primary strips to 'primary' -> brand_primary -> interactive-dominant."""
+    classified = classify_tokens([_record("--color-primary")], CONFIG)
     token = _by_name(classified, "--color-primary")
     assert token.semantic_role is TokenSemanticRole.brand_primary
-    assert _argmax_role(token.palette_prior) is PaletteRole.accent
+    assert token.origin is TokenOrigin.name_rule
+    assert _argmax_category(token.usage_prior) is UsageCategory.interactive
 
 
-def test_light_gray_scale_is_neutral_light() -> None:
-    """A LIGHT resolved gray scale token splits to neutral_light dominance."""
-    light = parse_css_color("#f3f4f6")
-    assert light is not None
-    assert light.lightness >= 0.5
-    classified, _status = classify_tokens(
-        [_record("--gray-100", "#f3f4f6", resolved=light)], CONFIG
-    )
-    token = _by_name(classified, "--gray-100")
-    assert token.semantic_role is TokenSemanticRole.neutral
-    assert _argmax_role(token.palette_prior) is PaletteRole.neutral_light
+def test_gray_scale_gets_plain_neutral_prior() -> None:
+    """A gray scale token is neutral with the plain YAML prior (no lightness special-case).
 
-
-def test_dark_gray_scale_is_neutral_dark() -> None:
-    """A DARK resolved gray scale token splits to neutral_dark dominance."""
-    dark = parse_css_color("#111827")
-    assert dark is not None
-    assert dark.lightness < 0.5
-    classified, _status = classify_tokens([_record("--gray-900", "#111827", resolved=dark)], CONFIG)
-    token = _by_name(classified, "--gray-900")
-    assert token.semantic_role is TokenSemanticRole.neutral
-    assert _argmax_role(token.palette_prior) is PaletteRole.neutral_dark
-
-
-def test_neutral_light_dark_ordering() -> None:
-    """The light gray must be lighter than the dark gray (sanity on inputs)."""
+    The neutral prior spans surface/text/border — the usage view has no light/dark
+    neutral split, so the resolved lightness no longer reroutes the prior.
+    """
     light = parse_css_color("#f3f4f6")
     dark = parse_css_color("#111827")
     assert light is not None and dark is not None
-    assert light.lightness > dark.lightness
+    classified = classify_tokens(
+        [
+            _record("--gray-100", "#f3f4f6", resolved=light),
+            _record("--gray-900", "#111827", resolved=dark),
+        ],
+        CONFIG,
+    )
+    for name in ("--gray-100", "--gray-900"):
+        token = _by_name(classified, name)
+        assert token.semantic_role is TokenSemanticRole.neutral
+        # "gray" is a name rule, which outranks scale detection in the precedence.
+        assert token.origin is TokenOrigin.name_rule
+        assert set(token.usage_prior) == {
+            UsageCategory.surface,
+            UsageCategory.text,
+            UsageCategory.border,
+        }
+        assert _argmax_category(token.usage_prior) is UsageCategory.surface
+    # Light and dark resolve to the SAME prior now: no measured-lightness rerouting.
+    assert (
+        _by_name(classified, "--gray-100").usage_prior
+        == _by_name(classified, "--gray-900").usage_prior
+    )
 
 
-def test_destructive_is_status_and_excluded() -> None:
-    """--destructive -> status: empty prior, color routed to status list."""
+def test_destructive_is_status_with_empty_prior() -> None:
+    """--destructive -> status: empty prior (status_excluded_from_palette)."""
     red = parse_css_color("#ef4444")
     assert red is not None
-    classified, status_colors = classify_tokens(
-        [_record("--destructive", "#ef4444", resolved=red)], CONFIG
-    )
+    classified = classify_tokens([_record("--destructive", "#ef4444", resolved=red)], CONFIG)
     token = _by_name(classified, "--destructive")
     assert token.semantic_role is TokenSemanticRole.status
-    assert token.palette_prior == {}
-    assert red in status_colors
+    assert token.usage_prior == {}
+    # Still classified (not dropped): it surfaces to consumers via DesignToken.
+    assert token.record.resolved == red
 
 
-def test_status_with_no_resolved_color_skipped() -> None:
-    """A status token without a resolved color contributes nothing to the list."""
-    classified, status_colors = classify_tokens([_record("--error")], CONFIG)
-    token = _by_name(classified, "--error")
-    assert token.semantic_role is TokenSemanticRole.status
-    assert status_colors == []
-
-
-def test_alias_inherits_brand_accent() -> None:
+def test_alias_inherits_brand_accent_with_alias_origin() -> None:
     """A token that self-classifies as ignore inherits its alias target's role.
 
     The aliasing token must NOT match a name rule on its own (otherwise that rule
     wins per the spec precedence), so we use an opaque name that self-classifies to
-    ignore; it then inherits brand_accent from --accent and an accent-dominant prior.
+    ignore; it then inherits brand_accent from --accent and an interactive-dominant
+    prior — but carries origin ``alias`` (the alias itself was never matched).
     """
     # Sanity: the aliasing name self-classifies to ignore on its own.
-    solo, _ = classify_tokens([_record("--zxqw")], CONFIG)
+    solo = classify_tokens([_record("--zxqw")], CONFIG)
     assert solo[0].semantic_role is TokenSemanticRole.ignore
 
     tokens = [
         _record("--accent"),
         _record("--zxqw", "var(--accent)", alias_target="--accent"),
     ]
-    classified, _status = classify_tokens(tokens, CONFIG)
+    classified = classify_tokens(tokens, CONFIG)
     aliased = _by_name(classified, "--zxqw")
     assert aliased.semantic_role is TokenSemanticRole.brand_accent
-    assert _argmax_role(aliased.palette_prior) is PaletteRole.accent
+    assert aliased.origin is TokenOrigin.alias
+    assert _argmax_category(aliased.usage_prior) is UsageCategory.interactive
+    # The target itself keeps its own (name_rule) origin.
+    assert _by_name(classified, "--accent").origin is TokenOrigin.name_rule
 
 
 def test_relational_text_on_carries_base_role() -> None:
-    """--on-primary routes to text_on with empty prior and a base role."""
-    classified, _status = classify_tokens([_record("--on-primary")], CONFIG)
+    """--on-primary routes to text_on with empty prior, a base role, relational origin."""
+    classified = classify_tokens([_record("--on-primary")], CONFIG)
     token = _by_name(classified, "--on-primary")
     assert token.semantic_role is TokenSemanticRole.text_on
-    assert token.palette_prior == {}
+    assert token.origin is TokenOrigin.relational
+    assert token.usage_prior == {}
     assert token.text_on_base is TokenSemanticRole.brand_primary
 
 
-def test_unmatched_token_is_ignored() -> None:
+def test_chromatic_scale_origin_is_scale() -> None:
+    """--blue-500 -> brand_accent via the scale detector, origin ``scale``."""
+    classified = classify_tokens([_record("--blue-500")], CONFIG)
+    token = _by_name(classified, "--blue-500")
+    assert token.semantic_role is TokenSemanticRole.brand_accent
+    assert token.origin is TokenOrigin.scale
+    assert _argmax_category(token.usage_prior) is UsageCategory.interactive
+
+
+def test_neutral_scale_family_origin_is_scale() -> None:
+    """--sand-100: a neutral scale family with no name rule -> neutral via scale."""
+    classified = classify_tokens([_record("--sand-100")], CONFIG)
+    token = _by_name(classified, "--sand-100")
+    assert token.semantic_role is TokenSemanticRole.neutral
+    assert token.origin is TokenOrigin.scale
+
+
+def test_unmatched_token_is_ignored_with_fallback_origin() -> None:
     """A name with no rule/scale/relational match falls back to ignore."""
-    classified, _status = classify_tokens([_record("--zxqw")], CONFIG)
+    classified = classify_tokens([_record("--zxqw")], CONFIG)
     token = _by_name(classified, "--zxqw")
     assert token.semantic_role is TokenSemanticRole.ignore
+    assert token.origin is TokenOrigin.fallback
     assert token.weight == 0.0
-    assert token.palette_prior == {}
+    assert token.usage_prior == {}
 
 
 def test_alias_cycle_does_not_hang() -> None:
@@ -154,13 +172,32 @@ def test_alias_cycle_does_not_hang() -> None:
         _record("--a", alias_target="--b"),
         _record("--b", alias_target="--a"),
     ]
-    classified, _status = classify_tokens(tokens, CONFIG)
+    classified = classify_tokens(tokens, CONFIG)
     assert _by_name(classified, "--a").semantic_role is TokenSemanticRole.ignore
     assert _by_name(classified, "--b").semantic_role is TokenSemanticRole.ignore
+    # The chain dead-ended: the classification stays the fallback, origin included.
+    assert _by_name(classified, "--a").origin is TokenOrigin.fallback
+
+
+def test_usage_prior_table_sanity() -> None:
+    """Spot-check the role -> usage prior table through real classifications."""
+    classified = classify_tokens(
+        [
+            _record("--background"),  # surface_base
+            _record("--text"),  # text_body
+            _record("--border"),  # border
+            _record("--link"),  # interactive
+        ],
+        CONFIG,
+    )
+    assert _by_name(classified, "--background").usage_prior == {UsageCategory.surface: 1.0}
+    assert _by_name(classified, "--text").usage_prior == {UsageCategory.text: 1.0}
+    assert _by_name(classified, "--border").usage_prior == {UsageCategory.border: 1.0}
+    assert _by_name(classified, "--link").usage_prior == {UsageCategory.interactive: 1.0}
 
 
 def test_all_nonempty_priors_sum_to_one() -> None:
-    """Every non-empty palette_prior must sum to ~1.0 (abs tol 1e-6)."""
+    """Every non-empty usage_prior must sum to ~1.0 (abs tol 1e-6)."""
     light = parse_css_color("#f3f4f6")
     dark = parse_css_color("#111827")
     red = parse_css_color("#ef4444")
@@ -181,10 +218,10 @@ def test_all_nonempty_priors_sum_to_one() -> None:
         _record("--on-primary"),
         _record("--zxqw"),
     ]
-    classified, _status = classify_tokens(tokens, CONFIG)
+    classified = classify_tokens(tokens, CONFIG)
     for token in classified:
-        if token.palette_prior:
-            total = math.fsum(token.palette_prior.values())
+        if token.usage_prior:
+            total = math.fsum(token.usage_prior.values())
             assert math.isclose(total, 1.0, abs_tol=1e-6), (
                 f"{token.record.name} prior sums to {total}"
             )

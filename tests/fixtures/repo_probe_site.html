@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>repo-probe — live-probe regression fixture</title>
+<style>
+  /* Encodes, offline, every measurement-layer gap a live probe of
+     github.com/anthropics/claude-code exposed (2026-06):
+
+     1. near-black body text (#1f2328) ADJACENT to a dark code-block surface
+        (#0d1117, 0.078 deltaEOK away): must form a distinct usage.text entry,
+        not merge into the surface bin (per-channel inventory join radii);
+     2. muted gray (#59636e) carried only by PLAIN <span>s — no semantic-rule
+        element: only the text_presence feature family can measure it;
+     3. borders on cards/dividers with NO <input> anywhere: only the
+        border_presence feature family can measure them;
+     4. a green CTA styled like GitHub Primer's react button (class
+        `prc-Button-ButtonBase-*`, matched via the `button` class-token rule)
+        that must appear in usage.interactive. NOTE: 5 links are too few to
+        reproduce the live drowning that motivated log1p vote-mass damping —
+        that profile (~200 link votes vs one CTA) is pinned by the unit test
+        test_single_cta_survives_against_many_links in test_palette_usage.py;
+     5. declared-but-never-rendered exotic border tokens (the token-flood
+        regression): they must NOT surface as empty-components usage entries.
+        NOTE: all four categories measure non-zero here, so this asserts the
+        no-empty-components invariant; the empty-category reconcile gate
+        itself is pinned by unit tests in test_palette_reconcile.py.
+
+     Exactly TWO .card siblings — deliberately below the repetition detector's
+     min_siblings (3), so the cards' border vote is not crushed by repetition
+     card_bg votes. No dark-mode block -> single theme. */
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  :root {
+    --fgColor-default: #1f2328;
+    --fgColor-muted: #59636e;
+    --borderColor-default: #d1d9e0;
+    --borderColor-danger-muted: #ff8182;
+    --borderColor-done-muted: #a830e8;
+    --borderColor-accent-muted: #7ae9ff;
+  }
+  body { background: #ffffff; color: #1f2328; font-family: sans-serif; width: 1280px; }
+  pre.snippet-well {
+    background: #0d1117;
+    color: #e6edf3;
+    width: 1280px;
+    height: 220px;
+    margin: 0;
+  }
+  .muted { color: #59636e; }
+  .card {
+    background: #f6f8fa;
+    color: #1f2328;
+    border: 1px solid #d1d9e0;
+    width: 420px;
+    height: 180px;
+    display: inline-block;
+  }
+  .divider { border-top: 1px solid #d1d9e0; width: 1100px; height: 1px; }
+  a { color: #0969da; }
+  /* Large enough that its screenshot bin stays close to the pure green (a small
+     button's bin averages with anti-aliased white edges and washes out). */
+  .prc-Button-ButtonBase-x9k2f {
+    background: #1f883d;
+    color: #ffffff;
+    width: 320px;
+    height: 64px;
+    cursor: pointer;
+    border: 0;
+  }
+</style>
+</head>
+<body>
+  <h1>octo/probe-fixture</h1>
+  <p>A paragraph of plain near-black body copy measured only by text presence.</p>
+  <p>Another paragraph, so the dark body text accumulates honest vote mass.</p>
+  <span class="muted">Updated 3 days ago</span>
+  <span class="muted">MIT license</span>
+  <span class="muted">1.2k stars</span>
+  <button class="prc-Button-ButtonBase-x9k2f">Code</button>
+  <p>
+    <a href="#code">Code</a>
+    <a href="#issues">Issues</a>
+    <a href="#pulls">Pull requests</a>
+    <a href="#actions">Actions</a>
+    <a href="#wiki">Wiki</a>
+  </p>
+  <div class="divider"></div>
+  <pre class="snippet-well">npm install -g @anthropic-ai/claude-code</pre>
+  <div class="card">
+    <h2>README</h2>
+    <span class="muted">Install with pip, then run the analyzer.</span>
+  </div>
+  <div class="card">
+    <h2>Releases</h2>
+    <span class="muted">v0.3.0 — usage-keyed palette view.</span>
+  </div>
+</body>
+</html>

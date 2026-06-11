@@ -1,11 +1,7 @@
 {
   "fit_score": 0.8617,
-  "has_divergence": true,
+  "has_divergence": false,
   "single_theme": false,
-  "status_colors": [
-    "#16a34a",
-    "#dc2626"
-  ],
   "theme_structure": {
     "dark": {
       "populated_roles": [
@@ -15,12 +11,40 @@
         "primary",
         "secondary"
       ],
+      "populated_usage": [
+        "interactive",
+        "surface",
+        "text"
+      ],
       "top_role_colors": {
-        "accent": "#f59e0b",
-        "neutral_dark": "#111828",
-        "neutral_light": "#64748b",
-        "primary": "#111828",
-        "secondary": "#2563ea"
+        "accent": [
+          "#7c3aed"
+        ],
+        "neutral_dark": [
+          "#111828"
+        ],
+        "neutral_light": [
+          "#ffffff",
+          "#e5e7eb"
+        ],
+        "primary": [
+          "#111828"
+        ],
+        "secondary": [
+          "#2563ea"
+        ]
+      },
+      "top_usage_colors": {
+        "interactive": [
+          "#f59e0b"
+        ],
+        "surface": [
+          "#111828"
+        ],
+        "text": [
+          "#ffffff",
+          "#e5e7eb"
+        ]
       }
     },
     "light": {
@@ -31,12 +55,39 @@
         "primary",
         "secondary"
       ],
+      "populated_usage": [
+        "interactive",
+        "surface",
+        "text"
+      ],
       "top_role_colors": {
-        "accent": "#5943ce",
-        "neutral_dark": "#0f172a",
-        "neutral_light": "#ffffff",
-        "primary": "#ffffff",
-        "secondary": "#2563ea"
+        "accent": [
+          "#5943ce"
+        ],
+        "neutral_dark": [
+          "#0f172a",
+          "#64748b"
+        ],
+        "neutral_light": [
+          "#ffffff"
+        ],
+        "primary": [
+          "#ffffff"
+        ],
+        "secondary": [
+          "#2563ea"
+        ]
+      },
+      "top_usage_colors": {
+        "interactive": [
+          "#f59e0b"
+        ],
+        "surface": [
+          "#ffffff"
+        ],
+        "text": [
+          "#0f172a"
+        ]
       }
     }
   },

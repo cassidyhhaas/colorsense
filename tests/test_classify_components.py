@@ -6,8 +6,13 @@ import math
 
 import pytest
 
-from colorsense.classify.components import _finalize_distribution, classify_components
-from colorsense.config import load_default_config
+from colorsense.classify.components import (
+    _finalize_distribution,
+    _matches_interactivity,
+    _matches_semantic_tag,
+    classify_components,
+)
+from colorsense.config import VoteRule, WhenRule, load_default_config
 from colorsense.models import (
     Color,
     ComponentType,
@@ -37,7 +42,9 @@ def _element(
     bg: Color | None = None,
     text: Color | None = None,
     border: Color | None = None,
+    input_type: str | None = None,
     has_box_shadow: bool = False,
+    has_text: bool = False,
     is_iframe: bool = False,
     cross_origin: bool = False,
     shadow_host: bool = False,
@@ -59,7 +66,9 @@ def _element(
         bg=bg,
         text=text,
         border=border,
+        input_type=input_type,
         has_box_shadow=has_box_shadow,
+        has_text=has_text,
         is_iframe=is_iframe,
         cross_origin=cross_origin,
         shadow_host=shadow_host,
@@ -344,11 +353,96 @@ def test_role_banner_is_header_bg() -> None:
 
 
 def test_input_submit_semantic_rule() -> None:
-    """An <input> matches both input[submit] (cta_bg) and the bare input rule."""
-    submit = _element(tag="input", rect=Rect(x=100.0, y=300.0, width=300.0, height=60.0))
+    """An <input type=submit> is cta_bg-dominant.
+
+    cta_bg collects input[submit] 3.5 + clickable 1.5 + input[submit|button] 2.0 = 7.0,
+    crushing the bare-input input_bg 3.0 below the prune floor — a submit button is a
+    CTA, not an input-background source.
+    """
+    submit = _element(
+        tag="input",
+        input_type="submit",
+        clickable=True,
+        rect=Rect(x=100.0, y=300.0, width=400.0, height=60.0),
+    )
     [result] = classify_components([submit], CONFIG, VIEWPORT)
-    assert _argmax(result.component_dist) is ComponentType.cta_bg
-    assert ComponentType.input_bg in result.component_dist
+    assert result.component_dist == {ComponentType.cta_bg: 1.0}
+
+
+@pytest.mark.parametrize("input_type", ["text", "search", "email", "checkbox", None])
+def test_non_button_input_gets_no_cta_votes(input_type: str | None) -> None:
+    """A text-like (or untyped) input receives NO cta_bg votes from any family.
+
+    Regression: input[submit] used to match EVERY <input>, so search/text inputs
+    carried a spurious cta_bg 3.5 vote. A missing type attribute is NOT submit —
+    the HTML default type is "text".
+    """
+    box = _element(
+        tag="input",
+        input_type=input_type,
+        rect=Rect(x=100.0, y=300.0, width=300.0, height=60.0),
+    )
+    [result] = classify_components([box], CONFIG, VIEWPORT)
+    assert result.component_dist == {ComponentType.input_bg: 1.0}
+
+
+def test_clickable_text_input_gets_no_input_submit_button_vote() -> None:
+    """A cursor:pointer text input must not pick up the input[submit|button] vote.
+
+    The generic clickable votes (cta_bg 1.5, link 1.0) still apply but are crushed
+    by input_bg 3.0 and pruned; with the spurious semantic 3.5 + interactivity 2.0
+    votes restored, cta_bg would dominate instead.
+    """
+    # Rect kept above small_area so the small-clickable geometry rule stays out of frame.
+    box = _element(
+        tag="input",
+        input_type="text",
+        clickable=True,
+        rect=Rect(x=100.0, y=300.0, width=400.0, height=60.0),
+    )
+    [result] = classify_components([box], CONFIG, VIEWPORT)
+    assert result.component_dist == {ComponentType.input_bg: 1.0}
+    assert ComponentType.cta_bg not in result.component_dist
+
+
+# Pin the button-like membership for BOTH input predicates: the shared frozenset is
+# submit/button/image/reset (all four paint as real buttons — the classifier scores
+# visual roles, not form semantics); everything else, including None, is excluded.
+_SEMANTIC_RULE = VoteRule(match="input[submit]", votes={"cta_bg": 3.5})
+_INTERACTIVITY_RULE = WhenRule(when="input[submit|button]", votes={"cta_bg": 2.0})
+
+
+@pytest.mark.parametrize(
+    ("input_type", "buttonlike"),
+    [
+        ("submit", True),
+        ("button", True),
+        ("image", True),
+        ("reset", True),
+        ("text", False),
+        ("search", False),
+        (None, False),
+    ],
+)
+def test_buttonlike_input_type_membership(input_type: str | None, buttonlike: bool) -> None:
+    """Each type's membership decision holds for both input predicates."""
+    el = _element(tag="input", input_type=input_type, clickable=True)
+    assert _matches_semantic_tag(_SEMANTIC_RULE, el) is buttonlike
+    assert _matches_interactivity(_INTERACTIVITY_RULE, el) is buttonlike
+
+
+def test_input_submit_predicates_require_input_tag() -> None:
+    """Neither input predicate matches a non-input even with a button-like type.
+
+    <button> still satisfies the interactivity predicate via its own clickable gate.
+    """
+    div = _element(tag="div", input_type=None, clickable=True)
+    assert _matches_semantic_tag(_SEMANTIC_RULE, div) is False
+    assert _matches_interactivity(_INTERACTIVITY_RULE, div) is False
+    button = _element(tag="button", clickable=True)
+    assert _matches_interactivity(_INTERACTIVITY_RULE, button) is True
+    unclickable_button = _element(tag="button", clickable=False)
+    assert _matches_interactivity(_INTERACTIVITY_RULE, unclickable_button) is False
 
 
 def test_hover_color_change_votes_cta() -> None:
@@ -417,6 +511,113 @@ def test_finalize_distribution_prune_fallback_keeps_single_argmax() -> None:
     assert max(exps.values()) / total < cc.min_component_prob
 
     assert _finalize_distribution(accum, CONFIG) == {ComponentType.cta_bg: 1.0}
+
+
+# ---------------------------------------------------------------------------
+# Border-presence and text-presence feature families.
+# ---------------------------------------------------------------------------
+
+
+def test_border_presence_votes_border_on_bordered_card() -> None:
+    """A bordered (non-input) card carries a surviving border component.
+
+    The regression this family fixes: only the <input> semantic rule ever voted
+    border, so pages without classified inputs measured zero border mass.
+    """
+    card = _element(tag="div", class_tokens=["card"], border=_color("#d1d9e0"))
+    [result] = classify_components([card], CONFIG, VIEWPORT)
+    assert _argmax(result.component_dist) is ComponentType.card_bg
+    # YAML calibration: card_bg 3.0 vs border 2.5 -> border prob ~0.27, survives.
+    assert result.component_dist.get(ComponentType.border, 0.0) > 0.05
+
+
+def test_borderless_element_gets_no_border_vote() -> None:
+    card = _element(tag="div", class_tokens=["card"], border=None)
+    [result] = classify_components([card], CONFIG, VIEWPORT)
+    assert ComponentType.border not in result.component_dist
+
+
+def test_bordered_text_input_keeps_border_component() -> None:
+    """The input border vote moved into border_presence; a bordered text input
+    carries surviving border mass alongside its input_bg vote (and, post the
+    input[submit] fix, no cta_bg at all)."""
+    box = _element(tag="input", input_type="text", border=_color("#d1d9e0"))
+    [result] = classify_components([box], CONFIG, VIEWPORT)
+    assert _argmax(result.component_dist) is ComponentType.input_bg
+    # YAML calibration: input_bg 3.0 vs border 2.5 -> border prob ~0.27, survives.
+    assert result.component_dist.get(ComponentType.border, 0.0) > 0.05
+    assert ComponentType.cta_bg not in result.component_dist
+
+
+def test_bordered_submit_input_stays_cta_dominated() -> None:
+    """A bordered submit input keeps cta_bg dominant; its border mass prunes
+    (YAML calibration: cta_bg 7.0 crushes the 2.5 border vote post-softmax)."""
+    submit = _element(tag="input", input_type="submit", clickable=True, border=_color("#d1d9e0"))
+    [result] = classify_components([submit], CONFIG, VIEWPORT)
+    assert _argmax(result.component_dist) is ComponentType.cta_bg
+    assert ComponentType.border not in result.component_dist
+
+
+def test_bordered_cta_stays_cta_dominated() -> None:
+    """A bordered primary button keeps cta_bg dominant; its border mass prunes.
+
+    Guard on the family interaction: border_presence must not turn CTAs into
+    border sources (cta votes ~>= 9 crush the 2.5 border vote post-softmax).
+    """
+    cta = _element(
+        tag="button",
+        class_tokens=["btn-primary"],
+        clickable=True,
+        border=_color("#1f883d"),
+    )
+    [result] = classify_components([cta], CONFIG, VIEWPORT)
+    assert _argmax(result.component_dist) is ComponentType.cta_bg
+    assert ComponentType.border not in result.component_dist
+
+
+def test_repeated_transparent_bg_text_spans_are_not_repetition_cards() -> None:
+    """Repeated text spans with the default transparent bg get NO repetition votes.
+
+    ``distinct_bg_from_parent`` requires a bg that actually paints (alpha > 0): an
+    ``alpha == 0`` computed ``background-color: transparent`` is not a background.
+    Regression: repeated ``.muted`` metadata spans classified as repetition "cards",
+    and the card_bg votes crushed their text_presence vote below the prune floor —
+    un-measuring the muted text color the family exists to measure.
+    """
+    transparent = Color(hex="#000000", lightness=0.0, chroma=0.0, hue=0.0, alpha=0.0)
+    spans = [
+        _element(tag="span", class_tokens=["muted"], bg=transparent, has_text=True)
+        for _ in range(4)
+    ]
+    results = classify_components(spans, CONFIG, VIEWPORT)
+    for result in results:
+        assert result.component_dist == {ComponentType.page_text: 1.0}
+
+
+def test_text_presence_votes_page_text_on_plain_text_element() -> None:
+    """A bare <p>/<span> with direct text — matched by NO semantic rule — votes
+    page_text, so body-copy and muted-gray typography is finally measured."""
+    p = _element(tag="p", has_text=True)
+    [result] = classify_components([p], CONFIG, VIEWPORT)
+    assert result.component_dist == {ComponentType.page_text: 1.0}
+
+
+def test_text_presence_suppressed_on_clickable_elements() -> None:
+    """A link with text gets NO page_text vote: clickable typography is interactive
+    by definition and already routed via the link rules (see the YAML comment)."""
+    link = _element(tag="a", clickable=True, has_text=True)
+    [result] = classify_components([link], CONFIG, VIEWPORT)
+    assert ComponentType.page_text not in result.component_dist
+    assert _argmax(result.component_dist) is ComponentType.link
+
+
+def test_text_presence_does_not_displace_semantic_card_bg() -> None:
+    """Calibration guard: page_text 2.0 on a text-bearing card survives but stays
+    below the card's semantic card_bg vote (3.0)."""
+    card = _element(tag="div", class_tokens=["card"], has_text=True)
+    [result] = classify_components([card], CONFIG, VIEWPORT)
+    assert _argmax(result.component_dist) is ComponentType.card_bg
+    assert 0.05 <= result.component_dist[ComponentType.page_text] < 0.5
 
 
 def test_no_viewport_uses_default() -> None:

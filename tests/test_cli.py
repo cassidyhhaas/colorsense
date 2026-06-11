@@ -19,6 +19,7 @@ from colorsense import (
     LIGHT_AND_DARK,
     AnalysisResult,
     Color,
+    DesignToken,
     PaletteCandidate,
     PaletteRole,
     PolitenessPolicy,
@@ -26,6 +27,10 @@ from colorsense import (
     RoleResults,
     Theme,
     ThemePalette,
+    TokenSemanticRole,
+    UsageCategory,
+    UsageEntry,
+    UsagePalette,
     Viewport,
 )
 from colorsense import cli as cli_module
@@ -47,11 +52,18 @@ def make_runner() -> CliRunner:
 runner = make_runner()
 
 
-def fake_result(url: str) -> AnalysisResult:
-    candidate = PaletteCandidate(
-        color=Color(hex="#336699", lightness=0.5, chroma=0.1, hue=250.0),
-        probability=0.9,
-        area=0.6,
+def fake_result(url: str, *, include_tokens: bool = False) -> AnalysisResult:
+    blue = Color(hex="#336699", lightness=0.5, chroma=0.1, hue=250.0)
+    candidate = PaletteCandidate(color=blue, probability=0.9, area=0.6)
+    usage = UsagePalette(
+        mapping={
+            UsageCategory.surface: (UsageEntry(color=blue, probability=0.9, area=0.6),),
+        }
+    )
+    tokens = (
+        (DesignToken(name="--brand", color=blue, semantic_role=TokenSemanticRole.brand_primary),)
+        if include_tokens
+        else None
     )
     return AnalysisResult(
         url=url,
@@ -59,10 +71,12 @@ def fake_result(url: str) -> AnalysisResult:
         themes={
             Theme.light: ThemePalette(
                 theme=Theme.light,
+                usage=usage,
                 roles=RoleResults(mapping={PaletteRole.primary: (candidate,)}),
+                fit_score=0.8,
+                tokens=tokens,
             )
         },
-        fit_score=0.8,
     )
 
 
@@ -79,23 +93,51 @@ class AnalyzeStub:
         self.kwargs.append(dict(kwargs))
         if url in self.errors:
             raise self.errors[url]
-        return fake_result(url)
+        return fake_result(url, include_tokens=bool(kwargs.get("include_tokens")))
 
 
 def install_stub(monkeypatch: pytest.MonkeyPatch, stub: AnalyzeStub) -> None:
     monkeypatch.setattr(cli_module, "analyze", stub)
 
 
-def test_human_output_lists_roles_and_fit_score(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_human_output_leads_with_usage_then_roles(monkeypatch: pytest.MonkeyPatch) -> None:
     install_stub(monkeypatch, AnalyzeStub())
     result = runner.invoke(cli_module.app, ["https://example.com"])
     assert result.exit_code == 0
+    # The usage view comes first, then the roles summary with the fit score.
+    assert "usage:" in result.stdout
+    assert "surface" in result.stdout
+    assert result.stdout.index("usage:") < result.stdout.index("roles")
     assert "fit score 0.80" in result.stdout
     assert "#336699" in result.stdout
     assert "primary" in result.stdout
     assert "probability=0.90" in result.stdout
-    # Undetected roles are still listed (the mapping always carries every role).
+    # Undetected roles/categories are still listed (the mappings carry every key).
     assert "accent" in result.stdout
+    assert "interactive" in result.stdout
+    # Tokens were not requested: no tokens section.
+    assert "tokens:" not in result.stdout
+
+
+def test_tokens_flag_wires_include_tokens_and_prints(monkeypatch: pytest.MonkeyPatch) -> None:
+    stub = AnalyzeStub()
+    install_stub(monkeypatch, stub)
+    result = runner.invoke(cli_module.app, ["https://example.com", "--tokens"])
+    assert result.exit_code == 0
+    (kwargs,) = stub.kwargs
+    assert kwargs["include_tokens"] is True
+    assert "tokens:" in result.stdout
+    assert "--brand" in result.stdout
+    assert "brand_primary" in result.stdout
+
+
+def test_include_tokens_defaults_false(monkeypatch: pytest.MonkeyPatch) -> None:
+    stub = AnalyzeStub()
+    install_stub(monkeypatch, stub)
+    result = runner.invoke(cli_module.app, ["https://example.com"])
+    assert result.exit_code == 0
+    (kwargs,) = stub.kwargs
+    assert kwargs["include_tokens"] is False
 
 
 def test_human_output_prints_every_url(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -115,8 +157,11 @@ def test_json_single_url_is_one_parseable_document(monkeypatch: pytest.MonkeyPat
     assert result.exit_code == 0
     body = json.loads(result.stdout)  # the whole stream must be one JSON document
     assert body["url"] == "https://example.com"
-    assert body["fit_score"] == 0.8
-    primary = body["themes"]["light"]["roles"]["mapping"]["primary"]
+    theme = body["themes"]["light"]
+    assert theme["fit_score"] == 0.8
+    surface = theme["usage"]["mapping"]["surface"]
+    assert surface[0]["color"]["hex"] == "#336699"
+    primary = theme["roles"]["mapping"]["primary"]
     assert primary[0]["color"]["hex"] == "#336699"
 
 

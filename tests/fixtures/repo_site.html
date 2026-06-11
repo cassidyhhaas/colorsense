@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>repo-page — neutral-layered fixture</title>
+<style>
+  /* A GitHub-repo-page-like, neutral-layered design: white page background under
+     layered light-gray surfaces (header, nav, cards), a gray TEXT scale (dark body
+     text + muted secondary text), gray borders/dividers, blue links, and green CTA
+     buttons. The 60/30/10 taxonomy loses this gray hierarchy entirely — the usage
+     view must capture it. No dark-mode block -> single theme. */
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body { background: #ffffff; color: #1f2328; font-family: sans-serif; }
+
+  .site-header {
+    background: #f6f8fa;
+    color: #1f2328;
+    border-bottom: 1px solid #d1d9e0;
+    width: 1280px;
+    height: 64px;
+  }
+  nav.repo-nav {
+    background: #f6f8fa;
+    border-bottom: 1px solid #d1d9e0;
+    width: 1280px;
+    height: 48px;
+  }
+  .card {
+    background: #f6f8fa;
+    color: #1f2328;
+    border: 1px solid #d1d9e0;
+    width: 380px;
+    height: 200px;
+    display: inline-block;
+  }
+  .muted { color: #59636e; }
+  input.search {
+    background: #ffffff;
+    color: #1f2328;
+    border: 1px solid #d1d9e0;
+    width: 320px;
+    height: 32px;
+  }
+  a { color: #0969da; }
+  .btn-primary {
+    background: #1f883d;
+    color: #ffffff;
+    border: 1px solid #1f883d;
+    width: 160px;
+    height: 40px;
+    cursor: pointer;
+  }
+  .divider { border-top: 1px solid #d1d9e0; width: 1100px; height: 1px; }
+</style>
+</head>
+<body>
+  <header class="site-header">
+    <h1>octo/colorsense</h1>
+    <input class="search" type="search" placeholder="Go to file">
+  </header>
+  <nav class="repo-nav">
+    <a href="#code">Code</a>
+    <a href="#issues">Issues</a>
+    <a href="#pulls">Pull requests</a>
+  </nav>
+  <main>
+    <p>A library that renders a website and classifies its palette.</p>
+    <article class="muted">Updated 3 days ago &middot; MIT license &middot; 1.2k stars</article>
+    <button class="btn-primary">Code</button>
+    <div class="divider"></div>
+    <div class="card">
+      <h2>README</h2>
+      <article class="muted">Install with pip, then run the analyzer.</article>
+      <a href="#docs">Read the docs</a>
+    </div>
+    <div class="card">
+      <h2>Releases</h2>
+      <article class="muted">v0.3.0 — usage-keyed palette view.</article>
+      <a href="#releases">All releases</a>
+    </div>
+    <div class="card">
+      <h2>Contributors</h2>
+      <article class="muted">12 people have contributed.</article>
+      <a href="#people">See everyone</a>
+    </div>
+  </main>
+</body>
+</html>

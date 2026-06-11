@@ -34,23 +34,26 @@ POLICY = PolitenessPolicy(
 
 
 def print_palette(result: AnalysisResult) -> None:
-    """Print the best candidate per role for every analyzed theme, plus the fit score."""
-    # fit_score in [0, 1]: how closely the page matches the canonical 60/30/10 split —
-    # a quick quality signal for the analysis as a whole.
-    print(f"{result.url}  (fit score {result.fit_score:.2f})")
+    """Print the usage view (the primary view) per theme, then the derived roles view."""
+    print(result.url)
     for theme, palette in result.themes.items():
         print(f"  [{theme}]")
-        # roles.mapping always contains every PaletteRole; an empty tuple means the role
-        # was not detected. Candidates are ranked by probability — [0] is the best pick.
-        for role, candidates in palette.roles.mapping.items():
-            if not candidates:
-                print(f"    {role:<14}(none detected)")
+        # The usage view is the primary output: what colors paint each usage category.
+        # usage.mapping always contains every UsageCategory; an empty tuple means nothing
+        # was detected for it. Entries are ranked by probability — [0] is the best pick.
+        for category, entries in palette.usage.mapping.items():
+            if not entries:
+                print(f"    {category:<13}(none detected)")
                 continue
-            best = candidates[0]
-            print(
-                f"    {role:<14}{best.color.hex}"
-                f"  probability={best.probability:.2f}  area={best.area:.2f}"
-            )
+            top = ", ".join(f"{e.color.hex} ({e.probability:.2f})" for e in entries[:3])
+            print(f"    {category:<13}{top}")
+        # The roles view is a derived 60/30/10 interpretation; fit_score in [0, 1] says
+        # how 60/30/10-like the design is (descriptive, not a quality score).
+        print(f"    60/30/10 fit {palette.fit_score:.2f}; best per role:")
+        for role, candidates in palette.roles.mapping.items():
+            if candidates:
+                best = candidates[0]
+                print(f"      {role:<14}{best.color.hex}  probability={best.probability:.2f}")
 
 
 async def main(urls: tuple[str, ...]) -> None:

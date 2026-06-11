@@ -110,6 +110,49 @@ async def test_border_only_reported_when_painted(fixtures_dir: Path, config: Con
     assert primary.has_box_shadow is False
 
 
+async def test_has_text_set_for_direct_text_only(fixtures_dir: Path, config: Config) -> None:
+    """``has_text`` is true iff the element has a DIRECT non-whitespace child text node.
+
+    Descendant text must not count — ``<body>`` contains text-bearing children but only
+    whitespace text nodes of its own, so it carries ``has_text=False`` while the leaf
+    elements carry ``True``.
+    """
+    harvest = await _harvest(fixtures_dir / "tokens.html", config)
+
+    primary = next(el for el in harvest.elements if "primary-box" in el.class_tokens)
+    assert primary.has_text is True  # <div class="primary-box">Primary</div>
+    btn = next(el for el in harvest.elements if "btn" in el.class_tokens)
+    assert btn.has_text is True
+
+    body = next(el for el in harvest.elements if el.tag == "body")
+    assert body.has_text is False  # only whitespace text nodes between children
+    html = next(el for el in harvest.elements if el.tag == "html")
+    assert html.has_text is False
+
+
+async def test_input_type_harvested(fixtures_dir: Path, config: Config) -> None:
+    """``input_type`` carries the lowercased ``type`` attribute for inputs only.
+
+    ``None`` means "not an input, or no ``type`` attribute declared" — the untyped
+    input deliberately reports ``None`` rather than the HTML default ``text``.
+    The fixture declares ``type="TEXT"`` uppercase to pin the lowercasing.
+    """
+    harvest = await _harvest(fixtures_dir / "inputs.html", config)
+    by_id = {el.id: el for el in harvest.elements if el.id is not None}
+
+    assert by_id["submit-btn"].input_type == "submit"
+    assert by_id["search-box"].input_type == "text"
+    assert by_id["untyped-box"].input_type is None
+    assert by_id["real-btn"].input_type is None  # non-input elements never carry a type
+
+    # clickable stays gated: the submit input is clickable, a plain text input is not,
+    # and a cursor:pointer text input is clickable yet still reports its real type.
+    assert by_id["submit-btn"].clickable is True
+    assert by_id["search-box"].clickable is False
+    assert by_id["pointer-box"].clickable is True
+    assert by_id["pointer-box"].input_type == "text"
+
+
 async def test_vendor_match_detected(fixtures_dir: Path, config: Config) -> None:
     harvest = await _harvest(fixtures_dir / "tokens.html", config)
     intercom = next(el for el in harvest.elements if "intercom-launcher" in el.class_tokens)

@@ -7,9 +7,11 @@ configuration YAML); nothing is hard-coded here.
 
 Scoring pipeline (per element):
 
-1. Accumulate additive votes across six feature families — semantic tags,
-   geometry, class/id tokens, interactivity, repetition (the card detector),
-   and origin/third-party.
+1. Accumulate additive votes across eight feature families — semantic tags,
+   geometry, class/id tokens, interactivity, border presence (the element
+   genuinely paints a border), text presence (a non-clickable element with
+   direct text content), repetition (the card detector), and
+   origin/third-party.
 2. Apply multiplicative suppressors (``aria_hidden`` / hidden-or-zero-area zero
    everything; ``third_party_present`` damps the configured brand components on
    third-party widgets).
@@ -47,6 +49,14 @@ _DEFAULT_VIEWPORT = Viewport(width=1280, height=800, device_scale_factor=1.0)
 # channel_routing sentinels that are NOT ComponentType values.
 _NON_COMPONENT_VOTE_KEYS = frozenset({"ignore"})
 
+# <input> type attributes that render as a real button (button chrome, button-styled
+# background): these — and only these — make an input button-like for both the
+# `input[submit]` semantic rule and the `input[submit|button]` interactivity predicate.
+# "reset" and "image" are included deliberately: both paint as buttons, and this
+# classifier scores visual roles, not form semantics. A missing/None type is NOT
+# button-like — the HTML default type is "text".
+_BUTTONLIKE_INPUT_TYPES = frozenset({"submit", "button", "image", "reset"})
+
 
 def _add_votes(
     accum: dict[ComponentType, float],
@@ -68,12 +78,17 @@ def _add_votes(
 
 
 def _matches_semantic_tag(rule: VoteRule, element: HarvestedElement) -> bool:
-    """Return whether a semantic-tag rule matches the element's tag/role/input."""
+    """Return whether a semantic-tag rule matches the element's tag/role/input type.
+
+    ``input[submit]`` matches only inputs whose harvested ``type`` attribute is
+    button-like (see :data:`_BUTTONLIKE_INPUT_TYPES`). Regression guard: it used to
+    match EVERY ``<input>``, giving search/text inputs a spurious cta_bg vote.
+    """
     match = rule.match
     if match.startswith("role="):
         return element.role == match[len("role=") :]
     if match == "input[submit]":
-        return element.tag == "input"
+        return element.tag == "input" and element.input_type in _BUTTONLIKE_INPUT_TYPES
     # Bare tag name.
     return element.tag == match
 
@@ -84,7 +99,12 @@ def _matches_interactivity(rule: WhenRule, element: HarvestedElement) -> bool:
     if when == "clickable":
         return element.clickable
     if when == "input[submit|button]":
-        return element.tag in {"input", "button"} and element.clickable
+        # Inputs are gated on the harvested type attribute, not `clickable`: a text
+        # input styled with cursor:pointer (or carrying onclick) is still a text
+        # input, not a button. <button> keeps the clickable gate.
+        if element.tag == "input":
+            return element.input_type in _BUTTONLIKE_INPUT_TYPES
+        return element.tag == "button" and element.clickable
     if when == "has_hover_color_change":
         return element.has_hover_color_change
     if when == "has_focus_ring":
@@ -160,10 +180,18 @@ def _repetition_member_indices(
             return True
         # ``border`` is now width-gated at harvest time, so non-None means the element
         # genuinely paints a border. ``distinct_bg_from_parent`` remains approximated as
-        # "has any background" (no parent info at this layer).
+        # "paints any background" (no parent info at this layer) — which requires a
+        # non-transparent color: the default ``background-color: transparent`` computes
+        # to an ``alpha == 0`` Color, and treating it as a background made every run of
+        # repeated text spans (e.g. ``.muted`` metadata) a false-positive "card" whose
+        # repetition votes crushed their text-presence votes.
         if "border" in requires_any and element.border is not None:
             return True
-        return "distinct_bg_from_parent" in requires_any and element.bg is not None
+        return (
+            "distinct_bg_from_parent" in requires_any
+            and element.bg is not None
+            and element.bg.alpha > 0.0
+        )
 
     # Bucket element indices by (tag, class-token).
     buckets: dict[tuple[str, str], list[int]] = {}
@@ -278,6 +306,17 @@ def classify_components(
         for when_rule in cc.interactivity:
             if _matches_interactivity(when_rule, element):
                 _add_votes(accum, when_rule.votes)
+
+        # 4b. Border presence: the harvester width-gates ``border``, so non-None
+        # means the element genuinely paints one (see the YAML calibration comment).
+        if element.border is not None:
+            _add_votes(accum, cc.border_presence.votes)
+
+        # 4c. Text presence: direct (non-descendant) text content on a NON-clickable
+        # element. Clickable elements are excluded — their typography is interactive
+        # by definition and already routed via the link rules (see the YAML comment).
+        if element.has_text and not element.clickable:
+            _add_votes(accum, cc.text_presence.votes)
 
         # 5. Repetition (the card detector).
         if index in repetition_members:

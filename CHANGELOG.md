@@ -7,6 +7,109 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Breaking — usage-keyed result contract
+
+The public result is re-keyed around **usage** (what colors paint surfaces / text /
+interactive elements / borders); the 60/30/10 roles taxonomy becomes a derived, per-theme
+view. On neutral-layered designs (e.g. a GitHub repo page) the old shape lost the design's
+actual structure — the gray text/border hierarchy appeared nowhere and the "secondary"
+slot collected noise. The library has no consumers yet; breaking now is deliberate.
+
+Migration table (old → new):
+
+| Old | New |
+| --- | --- |
+| `ThemePalette.roles` (reconciled) | `ThemePalette.usage` — the primary, reconciled view: `UsagePalette` mapping each `UsageCategory` (`surface`/`text`/`interactive`/`border`) to ranked `UsageEntry`s (`color`, `probability`, `area`, `components`). `ThemePalette.roles` remains, but as a **measured-only** derived 60/30/10 view, no longer reconciled against tokens. |
+| `AnalysisResult.fit_score` | `ThemePalette.fit_score` (per theme; descriptive "how 60/30/10-like", not a quality score) |
+| `AnalysisResult.divergence` | `ThemePalette.divergence` (per theme) |
+| `DivergenceItem.role: PaletteRole` | `DivergenceItem.category: UsageCategory` |
+| `AnalysisResult.tokens: tuple[ClassifiedToken, ...]` | `ThemePalette.tokens: tuple[DesignToken, ...] \| None` — **opt-in** via `analyze(..., include_tokens=True)`; `None` = not requested, `()` = requested but none declared. `DesignToken` carries `name`, resolved `color`, `semantic_role`. |
+| `AnalysisResult.status_colors` | Removed. Status tokens stay excluded from the palette views and surface in the opt-in token list with `semantic_role=status`. |
+| `PaletteCandidate.evidence` | Removed (internal scoring-term names are not contract). `color`/`probability`/`area` remain. |
+| `RunMetadata.single_theme` | Removed; use `len(metadata.themes_analyzed) == 1`. |
+| `ClassifiedToken`, `TokenRecord` (public exports) | Internal-only; removed from the public API. The public token projection is `DesignToken`. |
+| — | New public exports: `UsageCategory`, `UsageEntry`, `UsagePalette`, `DesignToken`, `ComponentType` (keys `UsageEntry.components`). |
+
+Other changes riding the redesign:
+
+- **Divergence noise fix:** declared-but-unused items are now gated to *high-intent*
+  tokens (classified by an explicit name rule or relational pattern). Unused shades of
+  numbered color scales, alias followers, and fallbacks no longer fire — on token-heavy
+  sites the old report was 100% noise (54/54 items on github.com).
+- `analyze()` gains keyword-only `include_tokens: bool = False`; the CLI gains a matching
+  `--tokens` flag. The flag gates only output assembly — classification and
+  reconciliation always run, so all other fields are identical either way.
+- The CLI's human-readable output (unstable by design) now leads with the usage view per
+  theme, then the roles summary + fit score, divergence, and (with `--tokens`) the token
+  list.
+- Config YAML: `role_to_palette_prior` is renamed **`role_to_usage_prior`** and its
+  distributions are now over the four usage categories; custom config files must be
+  updated. The token classifier's neutral light/dark special-case is gone (the usage
+  taxonomy has no light/dark neutral split).
+- Inventory channel routing: `link` component mass now routes to the element's **text**
+  color (a link paints its typography, not its usually-transparent background), and
+  fully-transparent (`alpha == 0`) channel colors no longer donate vote mass (previously
+  they piled votes onto a phantom `#000000` zero-area cluster).
+- Component classifier calibration: the `input` semantic rule's `border` vote is raised
+  2.0 → 2.5 so input borders survive softmax pruning (at 2.0 the usage view's border
+  category was structurally empty on input-bearing pages). (Superseded in the same
+  release by the `border_presence` family below, which generalizes the vote to every
+  element that actually paints a border.)
+
+### Fixed — measurement-layer gaps (live-probe follow-up)
+
+A live acceptance probe of the usage-keyed redesign against github.com exposed
+measurement gaps the fixtures had masked; all are now encoded as offline fixture tests
+(`tests/fixtures/repo_probe_site.html`):
+
+- **Empty-category gate in reconciliation**: a usage category with zero *measured*
+  candidates now yields an empty posterior instead of a near-uniform flood of token-only
+  colors (github.com's `usage.border` was 16 never-rendered theme tokens, every entry
+  with empty `components`). Honest emptiness beats intent-only noise; declared intent for
+  an unmeasured category can still surface through `divergence` (when its color has no
+  perceptual match among measured usage), and token-only colors still pool normally
+  whenever the category has real measurement.
+- **`border_presence` feature family** (config YAML): any element whose harvested border
+  is genuinely painted (width-gated) now votes `border`. Previously only the `<input>`
+  semantic rule voted `border`, so pages without classified inputs measured zero border
+  mass. The `input` rule's own border vote moved into this family, and `border` joined
+  the third-party-damped `brand_components` so vendor widgets don't feed the border
+  palette.
+- **`text_presence` feature family** (config YAML) + `HarvestedElement.has_text`:
+  non-clickable elements with direct (non-descendant) text content now vote `page_text`,
+  so plain `<p>`/`<span>` typography is measured (github.com's muted `#59636e` was absent
+  from `usage.text`). Clickable elements are excluded — their typography is interactive
+  and already routed via the link rules. Relatedly, the repetition detector's
+  `distinct_bg_from_parent` proxy no longer counts fully-transparent (`alpha == 0`)
+  backgrounds, which had turned repeated text spans into false-positive "cards" whose
+  votes crushed the new text votes.
+- **Per-channel inventory join radii**: element text/border colors now match existing
+  entries at the tight cluster radius (0.05 deltaEOK) instead of the loose background
+  radius (0.10), so a near-black body text (`#1f2328`) forms its own usage entry instead
+  of being absorbed into an adjacent dark surface bin.
+- **Log-damped vote-mass prominence** in the usage view: text/interactive/border entries
+  are ranked by `log1p(vote mass)` rather than raw mass. Ordering is unchanged
+  (monotonic), but element *count* no longer drowns high-confidence single-element
+  evidence — github.com's lone green CTA (`#1f883d`) survives against ~200 link votes
+  instead of pruning below the share floor.
+- **Measured-vs-declared match radius in reconciliation**: a measured usage entry now
+  matches a declared token color within the inventory's background join radius (0.10
+  deltaEOK) instead of the tight 0.08 used for grouping declared colors with each other.
+  A measured entry's representative is a screenshot-quantizer bin whenever the cluster
+  matched one, and an element joins a bin up to 0.10 away — at 0.08 a pixel-perfect
+  rendered token could fail its own intent match purely from quantizer blending
+  (platform-dependent anti-aliasing), flipping posterior winners across OSes and emitting
+  false "declared unused in render" / "used but undeclared" divergence pairs.
+- **`input[submit]` no longer matches every `<input>`**: the harvester now captures the
+  input's lowercased `type` attribute (new internal `HarvestedElement.input_type` field;
+  `None` for non-inputs and untyped inputs), and both the `input[submit]` semantic rule
+  and the `input[submit|button]` interactivity predicate match only button-like input
+  types (`submit`/`button`/`image`/`reset`). Search/text inputs — and text inputs styled
+  with `cursor: pointer` — no longer receive spurious `cta_bg` votes that leaked their
+  backgrounds into the `interactive` usage category. Aligning the harvest with that set,
+  `<input type="image">` (a graphical submit button) is now also harvested as
+  `clickable`.
+
 ### Added
 
 - **`request_filter` seams accept async predicates.** `PolitenessPolicy`, `harvest_page`,
