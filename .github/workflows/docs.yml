@@ -18,10 +18,11 @@ on:
 permissions:
   contents: read
 
-# Only one Pages deployment at a time; let an in-flight production deploy
-# finish (don't cancel) so main always converges to the latest build.
+# Per-ref grouping so PR check builds never queue behind (or get superseded by)
+# unrelated runs; on main this still serializes deploys, and an in-flight
+# production deploy is never cancelled, so main converges to the latest build.
 concurrency:
-  group: docs-deploy
+  group: docs-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
