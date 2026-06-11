@@ -60,6 +60,12 @@ async def evaluate_request_filter(request_filter: RequestFilter, url: str) -> bo
     from the call or from the await — yields ``False``, so a buggy filter can never
     silently wave traffic through. Module-level (and browser-free) so both seams that
     enforce a filter share one behavior and it stays unit-testable.
+
+    Cancellation is the one deliberate exception to "never raises": ``CancelledError`` is
+    a ``BaseException``, so cancelling the awaiting task mid-evaluation propagates out of
+    this function rather than being coerced to ``False``. That is fail-closed too — the
+    caller never receives a ``True`` it didn't earn, and the request never proceeds; see
+    :func:`_route_handler` for what that means on the browser route path.
     """
     try:
         verdict = request_filter(url)
@@ -188,6 +194,14 @@ def _route_handler(
     Evaluation goes through :func:`evaluate_request_filter`, so sync and async predicates
     are handled uniformly and a predicate that *raises* fails CLOSED — the request is
     aborted. Module-level so the abort/continue logic is unit testable without a browser.
+
+    Cancellation corner: if the task awaiting the handler is cancelled mid-evaluation,
+    ``CancelledError`` (a ``BaseException``) propagates past the fail-closed ``except``
+    in :func:`evaluate_request_filter` and out of the handler, so the route is neither
+    continued nor aborted. That un-actioned route is still fail-closed — the request never
+    proceeds — and the situation only arises at teardown/cancellation, when the Playwright
+    ``Route`` may no longer be safely usable anyway, which is why the handler deliberately
+    does NOT catch the cancellation to abort the route.
     """
 
     async def handle(route: Route) -> None:

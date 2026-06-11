@@ -25,7 +25,12 @@ Honest limits — read before relying on this filter alone:
   slow nameserver costs a worker thread plus latency for that host's requests only — never
   a loop stall. Per-host verdicts are TTL+LRU cached, and concurrent misses for one host
   coalesce into a single lookup, so a page fanning out requests to a novel hostname cannot
-  exhaust the thread pool with duplicate resolutions.
+  exhaust the thread pool with duplicate resolutions. The coalescing futures are
+  loop-bound, so each predicate serves one event loop *at a time*: sequential reuse
+  across loops (e.g. back-to-back ``asyncio.run`` calls) is supported — the predicate
+  re-binds to the new loop when idle and keeps its verdict cache — but *concurrent* use
+  from multiple event loops raises ``RuntimeError`` (detected best-effort); create a
+  separate predicate per loop for that.
 """
 
 from __future__ import annotations
@@ -98,7 +103,17 @@ def _is_public_address(ip: IPAddress) -> bool:
 
 
 class _PrivateNetworkBlocker:
-    """The predicate :func:`block_private_networks` returns; see the factory docstring."""
+    """The predicate :func:`block_private_networks` returns; see the factory docstring.
+
+    **Single-event-loop-at-a-time contract:** the single-flight machinery hands out
+    ``asyncio.Future``\\ s created on the loop the predicate runs under, and futures are
+    loop-bound, so one instance must only be awaited from one loop at a time. Sequential
+    reuse across loops (e.g. back-to-back ``asyncio.run`` calls) is supported: when no
+    resolution is in flight the predicate re-binds to the new loop, keeping its plain-data
+    verdict cache. *Concurrent* use from multiple loops raises :class:`RuntimeError`
+    (best-effort detection; the ``request_filter`` seam treats the raise as fail-closed).
+    Create a separate predicate per loop for concurrent use.
+    """
 
     def __init__(
         self,
@@ -123,12 +138,21 @@ class _PrivateNetworkBlocker:
         # In-flight resolution coalescing (single-flight): concurrent misses for the same
         # host await one shared Future instead of each dispatching a worker-thread lookup —
         # otherwise a page fanning N requests at one slow novel hostname pins N executor
-        # threads on the same getaddrinfo. Entries are always popped in a ``finally``, so a
-        # guard reused across sequential ``asyncio.run`` calls never sees a stale-loop
-        # Future.
+        # threads on the same getaddrinfo. Futures are loop-bound, so the predicate serves
+        # one loop at a time (_check_loop_affinity): it re-binds to a new loop only when
+        # this dict is empty, and a non-empty dict on a different loop means concurrent
+        # cross-loop use — refused.
         self._inflight: dict[str, asyncio.Future[bool]] = {}
+        # The event loop currently served, pinned on first use and re-pinned when the
+        # predicate is reused from another loop while idle (sequential asyncio.run
+        # handoff). Concurrent cross-loop misuse is enforced (not just documented) so it
+        # surfaces as a diagnosable RuntimeError — which the request_filter seam fails
+        # closed on — instead of a confusing "Future attached to a different loop" deep in
+        # the single-flight path.
+        self._loop: asyncio.AbstractEventLoop | None = None
 
     async def __call__(self, url: str) -> bool:
+        self._check_loop_affinity()
         try:
             parts = urlsplit(url)
             host = parts.hostname
@@ -147,6 +171,38 @@ class _PrivateNetworkBlocker:
         if self._allowed_hosts is not None and host not in self._allowed_hosts:
             return False
         return await self._host_is_public(host)
+
+    def _check_loop_affinity(self) -> None:
+        """Serve one event loop at a time: re-bind when idle, reject concurrent misuse.
+
+        The single-flight Futures in ``self._inflight`` are bound to one event loop, so
+        *concurrent* cross-loop use would corrupt them or hang waiters — that case raises.
+        *Sequential* reuse across loops (back-to-back ``asyncio.run`` calls) is fine and
+        supported: the ``finally`` cleanup in ``_host_is_public`` guarantees
+        ``self._inflight`` is empty between runs, and the TTL+LRU verdict cache is plain
+        data, so the predicate simply re-binds to the new loop and keeps its warm cache.
+
+        Detection is **best-effort**: concurrent multi-thread/multi-loop use was never
+        supported, and this check reads unsynchronized state, so it catches the common
+        misuse rather than guaranteeing detection. Raising here is fail-closed at the
+        ``request_filter`` seam (``evaluate_request_filter`` turns it into ``False``, so
+        misuse there shows up as requests from the other loop being aborted); the error
+        itself is only visible to direct callers.
+        """
+        loop = asyncio.get_running_loop()
+        if self._loop is None or self._loop is loop:
+            self._loop = loop
+        elif not self._inflight:
+            # Sequential handoff: the previous loop left no resolution in flight, so
+            # nothing loop-bound survives. Adopt the new loop, keep the verdict cache.
+            self._loop = loop
+        else:
+            raise RuntimeError(
+                "block_private_networks(): this predicate is already serving another "
+                "event loop with resolutions in flight; concurrent use from multiple "
+                "event loops is unsupported (its single-flight futures are loop-bound) — "
+                "create a separate predicate per event loop"
+            )
 
     async def _host_is_public(self, host: str) -> bool:
         now = self._clock()
@@ -254,6 +310,15 @@ def block_private_networks(
     host coalesce into a single lookup, and verdicts land in a per-hostname TTL+LRU cache
     (negative verdicts cached too) — so a slow resolver costs a worker thread plus latency
     for that host only, never a loop stall.
+
+    **Single-event-loop-at-a-time contract:** the coalescing machinery uses loop-bound
+    ``asyncio.Future``\\ s, so each returned predicate must only be used from one event
+    loop at a time. Reusing one predicate *sequentially* across loops (e.g. back-to-back
+    ``asyncio.run`` calls) is supported — when idle it re-binds to the new loop and keeps
+    its verdict cache. *Concurrent* use from multiple event loops raises
+    :class:`RuntimeError` (detected best-effort). Direct callers see that error; through
+    ``request_filter`` it fails closed instead, so misuse there manifests as requests from
+    the other loop being aborted. Create a separate predicate per loop for concurrent use.
 
     Parameters
     ----------
