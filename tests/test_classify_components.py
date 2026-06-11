@@ -38,6 +38,7 @@ def _element(
     text: Color | None = None,
     border: Color | None = None,
     has_box_shadow: bool = False,
+    has_text: bool = False,
     is_iframe: bool = False,
     cross_origin: bool = False,
     shadow_host: bool = False,
@@ -60,6 +61,7 @@ def _element(
         text=text,
         border=border,
         has_box_shadow=has_box_shadow,
+        has_text=has_text,
         is_iframe=is_iframe,
         cross_origin=cross_origin,
         shadow_host=shadow_host,
@@ -417,6 +419,101 @@ def test_finalize_distribution_prune_fallback_keeps_single_argmax() -> None:
     assert max(exps.values()) / total < cc.min_component_prob
 
     assert _finalize_distribution(accum, CONFIG) == {ComponentType.cta_bg: 1.0}
+
+
+# ---------------------------------------------------------------------------
+# Border-presence and text-presence feature families.
+# ---------------------------------------------------------------------------
+
+
+def test_border_presence_votes_border_on_bordered_card() -> None:
+    """A bordered (non-input) card carries a surviving border component.
+
+    The regression this family fixes: only the <input> semantic rule ever voted
+    border, so pages without classified inputs measured zero border mass.
+    """
+    card = _element(tag="div", class_tokens=["card"], border=_color("#d1d9e0"))
+    [result] = classify_components([card], CONFIG, VIEWPORT)
+    assert _argmax(result.component_dist) is ComponentType.card_bg
+    # YAML calibration: card_bg 3.0 vs border 2.5 -> border prob ~0.27, survives.
+    assert result.component_dist.get(ComponentType.border, 0.0) > 0.05
+
+
+def test_borderless_element_gets_no_border_vote() -> None:
+    card = _element(tag="div", class_tokens=["card"], border=None)
+    [result] = classify_components([card], CONFIG, VIEWPORT)
+    assert ComponentType.border not in result.component_dist
+
+
+def test_bordered_input_keeps_border_component() -> None:
+    """The input border vote moved into border_presence; a bordered input still
+    carries surviving border mass alongside its input_bg/cta_bg votes."""
+    submit = _element(tag="input", border=_color("#d1d9e0"))
+    [result] = classify_components([submit], CONFIG, VIEWPORT)
+    assert _argmax(result.component_dist) is ComponentType.cta_bg
+    assert result.component_dist.get(ComponentType.border, 0.0) > 0.05
+
+
+def test_bordered_cta_stays_cta_dominated() -> None:
+    """A bordered primary button keeps cta_bg dominant; its border mass prunes.
+
+    Guard on the family interaction: border_presence must not turn CTAs into
+    border sources (cta votes ~>= 9 crush the 2.5 border vote post-softmax).
+    """
+    cta = _element(
+        tag="button",
+        class_tokens=["btn-primary"],
+        clickable=True,
+        border=_color("#1f883d"),
+    )
+    [result] = classify_components([cta], CONFIG, VIEWPORT)
+    assert _argmax(result.component_dist) is ComponentType.cta_bg
+    assert ComponentType.border not in result.component_dist
+
+
+def test_repeated_transparent_bg_text_spans_are_not_repetition_cards() -> None:
+    """Repeated text spans with the default transparent bg get NO repetition votes.
+
+    ``distinct_bg_from_parent`` requires a bg that actually paints (alpha > 0): an
+    ``alpha == 0`` computed ``background-color: transparent`` is not a background.
+    Regression: repeated ``.muted`` metadata spans classified as repetition "cards",
+    and the card_bg votes crushed their text_presence vote below the prune floor —
+    un-measuring the muted text color the family exists to measure.
+    """
+    transparent = Color(hex="#000000", lightness=0.0, chroma=0.0, hue=0.0, alpha=0.0)
+    spans = [
+        _element(tag="span", class_tokens=["muted"], bg=transparent, has_text=True)
+        for _ in range(4)
+    ]
+    results = classify_components(spans, CONFIG, VIEWPORT)
+    for result in results:
+        assert result.component_dist == {ComponentType.page_text: 1.0}
+
+
+def test_text_presence_votes_page_text_on_plain_text_element() -> None:
+    """A bare <p>/<span> with direct text — matched by NO semantic rule — votes
+    page_text, so body-copy and muted-gray typography is finally measured."""
+    p = _element(tag="p", has_text=True)
+    [result] = classify_components([p], CONFIG, VIEWPORT)
+    assert result.component_dist == {ComponentType.page_text: 1.0}
+
+
+def test_text_presence_suppressed_on_clickable_elements() -> None:
+    """A link with text gets NO page_text vote: clickable typography is interactive
+    by definition and already routed via the link rules (see the YAML comment)."""
+    link = _element(tag="a", clickable=True, has_text=True)
+    [result] = classify_components([link], CONFIG, VIEWPORT)
+    assert ComponentType.page_text not in result.component_dist
+    assert _argmax(result.component_dist) is ComponentType.link
+
+
+def test_text_presence_does_not_displace_semantic_card_bg() -> None:
+    """Calibration guard: page_text 2.0 on a text-bearing card survives but stays
+    below the card's semantic card_bg vote (3.0)."""
+    card = _element(tag="div", class_tokens=["card"], has_text=True)
+    [result] = classify_components([card], CONFIG, VIEWPORT)
+    assert _argmax(result.component_dist) is ComponentType.card_bg
+    assert 0.05 <= result.component_dist[ComponentType.page_text] < 0.5
 
 
 def test_no_viewport_uses_default() -> None:

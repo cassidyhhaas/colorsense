@@ -223,6 +223,19 @@ class WhenRule(BaseModel):
     votes: dict[str, float]
 
 
+class PresenceRule(BaseModel):
+    """A presence-gated feature family: ``{votes: {component: weight}}``.
+
+    Applied when a structural fact holds for an element (e.g. it paints a border, or it
+    has direct text content) — there is no ``match``/``when`` string because the gating
+    predicate is the feature family itself (fixed in ``classify.components``).
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    votes: dict[str, float]
+
+
 class GeometryThresholds(BaseModel):
     """Geometry thresholds (fractions of the viewport, or pixels)."""
 
@@ -289,6 +302,8 @@ class ComponentClassifierConfig(BaseModel):
     geometry: GeometryConfig
     class_tokens: tuple[VoteRule, ...]
     interactivity: tuple[WhenRule, ...]
+    border_presence: PresenceRule
+    text_presence: PresenceRule
     repetition: RepetitionConfig
     third_party: ThirdPartyConfig
     suppressors: dict[str, Suppressor]

@@ -7,9 +7,11 @@ configuration YAML); nothing is hard-coded here.
 
 Scoring pipeline (per element):
 
-1. Accumulate additive votes across six feature families — semantic tags,
-   geometry, class/id tokens, interactivity, repetition (the card detector),
-   and origin/third-party.
+1. Accumulate additive votes across eight feature families — semantic tags,
+   geometry, class/id tokens, interactivity, border presence (the element
+   genuinely paints a border), text presence (a non-clickable element with
+   direct text content), repetition (the card detector), and
+   origin/third-party.
 2. Apply multiplicative suppressors (``aria_hidden`` / hidden-or-zero-area zero
    everything; ``third_party_present`` damps the configured brand components on
    third-party widgets).
@@ -160,10 +162,18 @@ def _repetition_member_indices(
             return True
         # ``border`` is now width-gated at harvest time, so non-None means the element
         # genuinely paints a border. ``distinct_bg_from_parent`` remains approximated as
-        # "has any background" (no parent info at this layer).
+        # "paints any background" (no parent info at this layer) — which requires a
+        # non-transparent color: the default ``background-color: transparent`` computes
+        # to an ``alpha == 0`` Color, and treating it as a background made every run of
+        # repeated text spans (e.g. ``.muted`` metadata) a false-positive "card" whose
+        # repetition votes crushed their text-presence votes.
         if "border" in requires_any and element.border is not None:
             return True
-        return "distinct_bg_from_parent" in requires_any and element.bg is not None
+        return (
+            "distinct_bg_from_parent" in requires_any
+            and element.bg is not None
+            and element.bg.alpha > 0.0
+        )
 
     # Bucket element indices by (tag, class-token).
     buckets: dict[tuple[str, str], list[int]] = {}
@@ -278,6 +288,17 @@ def classify_components(
         for when_rule in cc.interactivity:
             if _matches_interactivity(when_rule, element):
                 _add_votes(accum, when_rule.votes)
+
+        # 4b. Border presence: the harvester width-gates ``border``, so non-None
+        # means the element genuinely paints one (see the YAML calibration comment).
+        if element.border is not None:
+            _add_votes(accum, cc.border_presence.votes)
+
+        # 4c. Text presence: direct (non-descendant) text content on a NON-clickable
+        # element. Clickable elements are excluded — their typography is interactive
+        # by definition and already routed via the link rules (see the YAML comment).
+        if element.has_text and not element.clickable:
+            _add_votes(accum, cc.text_presence.votes)
 
         # 5. Repetition (the card detector).
         if index in repetition_members:

@@ -229,11 +229,10 @@ component_classifier:
     - {match: "dialog",            votes: {modal_bg: 4.0}}
     - {match: "role=dialog",       votes: {modal_bg: 3.5}}
     - {match: "aside",             votes: {nav_bg: 2.5}}
-    # border 2.5 (not 2.0): every <input> also matches the input[submit] cta rule,
-    # and at 2.0 the border vote falls just below min_component_prob after softmax —
-    # which would leave the usage view's border category structurally empty on
-    # input-bearing pages.
-    - {match: "input",             votes: {input_bg: 3.0, border: 2.5}}
+    # The input border vote moved to the border_presence family below: it now applies
+    # only when the input actually paints a border (instead of diluting borderless
+    # inputs' softmax with a vote the inventory would drop anyway).
+    - {match: "input",             votes: {input_bg: 3.0}}
 
   # --- Feature family 2: geometry / position. --------------------------------
   geometry:
@@ -316,6 +315,43 @@ component_classifier:
     - {when: "has_hover_color_change",  votes: {cta_bg: 1.5}}   # strong accent signal
     - {when: "has_focus_ring",          votes: {cta_bg: 0.5}}
 
+  # --- Feature family 4b: border presence. ------------------------------------
+  # Applied to any element whose harvested `border` is non-None — the harvester
+  # width-gates it, so non-None means the element genuinely paints a border. Without
+  # this family only the <input> semantic rule ever voted `border`, so pages without
+  # classified inputs measured ZERO border mass (the live-probe failure: github.com's
+  # #d1d9e0 borders absent while token-only noise flooded the category).
+  #
+  # Calibration (softmax_temperature 0.5, min_component_prob 0.05), votes border: 2.5:
+  #   * bordered card (class "card" -> card_bg 3.0):
+  #       e^(3.0/0.5)=403.4 vs e^(2.5/0.5)=148.4 -> border prob 0.27, survives.
+  #   * bordered input (input_bg 3.0 + implicit input[submit] cta_bg 3.5):
+  #       e^6=403.4, e^7=1096.6, e^5=148.4 -> border prob 0.09, survives — identical
+  #       to the previous in-rule `border: 2.5` vote, now width-gated.
+  #   * bordered CTA (button tag 3.5 + class/btn/clickable votes, cta_bg >= 9):
+  #       border prob < 1e-3, pruned — bordered CTAs stay interactive, not borders.
+  border_presence:
+    votes: {border: 2.5}
+
+  # --- Feature family 4c: text presence. --------------------------------------
+  # Applied to any NON-clickable element with `has_text` (>=1 direct child text node
+  # with non-whitespace content; descendant text doesn't count). Without it only
+  # body/main/article/header-ish semantic rules voted *_text, so typography in plain
+  # <p>/<span>/<td> content was never measured (the live-probe failure: github.com's
+  # muted #59636e absent from usage.text). Clickable elements are deliberately
+  # excluded: their typography is interactive by definition and already routed via
+  # the `a`/link rules — letting them vote page_text would leak link colors into the
+  # text category and dilute the interactive channel.
+  #
+  # Calibration (softmax_temperature 0.5, min_component_prob 0.05), votes page_text: 2.0:
+  #   * bare <p>/<span> with text (no other votes): page_text prob 1.0.
+  #   * text-bearing card (class "card" -> card_bg 3.0):
+  #       e^6=403.4 vs e^4=54.6 -> page_text prob 0.12, survives without displacing
+  #       card_bg. 2.0 stays below every semantic *_text vote (body 4.0, main 3.0),
+  #       so semantic rules still dominate where they apply.
+  text_presence:
+    votes: {page_text: 2.0}
+
   # --- Feature family 5: repetition (the card detector). ---------------------
   repetition:
     min_siblings: 3
@@ -342,6 +378,9 @@ component_classifier:
     aria_hidden:                {factor: 0.0,  applies_to: all}
     zero_area_or_hidden:        {factor: 0.0,  applies_to: all}
     consent_masked_region:      {factor: 0.0,  applies_to: all}
+  # `border` is included since the border_presence family fires on ANY bordered
+  # element — without damping, a bordered third-party widget would feed its border
+  # color into the page's border palette.
   brand_components:
     [header_bg, header_text, hero_bg, hero_text, cta_bg, cta_text, link,
-     card_bg, card_text, page_bg, page_text]
+     card_bg, card_text, page_bg, page_text, border]
