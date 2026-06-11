@@ -382,16 +382,45 @@ async def test_same_tick_leader_and_follower_cancellation_honors_the_follower() 
     release.set()
 
 
-def test_predicate_is_bound_to_the_event_loop_it_first_ran_on() -> None:
-    # The single-flight futures are loop-bound, so the documented contract is one
-    # predicate per event loop: the first call pins the loop, and using the same predicate
-    # from a different loop (here: a second asyncio.run) raises a diagnosable RuntimeError
-    # instead of corrupting shared state. Through evaluate_request_filter the raise fails
-    # closed.
+def test_sequential_reuse_across_loops_supported_and_keeps_verdict_cache() -> None:
+    # One loop at a time, not one loop forever: the sequential asyncio.run pattern (house
+    # style — cf. PolitenessPolicy._render_slots) keeps working. Between runs no
+    # resolution is in flight, so the predicate re-binds to the new loop and carries its
+    # plain-data verdict cache across.
     resolver = RecordingResolver({"example.com": [PUBLIC_V4]})
     guard = block_private_networks(resolver=resolver)
     assert asyncio.run(guard("https://example.com/")) is True
-    with pytest.raises(RuntimeError, match="separate predicate per event loop"):
-        asyncio.run(guard("https://example.com/again"))
-    # The misuse never reached resolution machinery on the second loop.
+    assert asyncio.run(guard("https://example.com/again")) is True
+    # Exactly one resolution: the second run was served from the carried-over cache.
     assert resolver.calls == ["example.com"]
+
+
+async def test_concurrent_use_from_a_second_loop_raises() -> None:
+    # Genuine concurrent cross-loop use — the case that would corrupt the loop-bound
+    # single-flight futures or hang waiters: while a leader resolution is parked in the
+    # worker thread (inflight entry registered on THIS loop), a call from a different
+    # loop must raise a diagnosable RuntimeError instead of touching shared state.
+    release = threading.Event()
+    calls: list[str] = []
+
+    def resolver(host: str) -> list[IPAddress]:
+        calls.append(host)
+        release.wait(timeout=10.0)
+        return [PUBLIC_V4]
+
+    guard = block_private_networks(resolver=resolver)
+    leader = asyncio.create_task(guard("https://slow.example/"))
+    try:
+        # Leader is parked in the worker thread, inflight entry registered.
+        await wait_until(lambda: bool(calls), "the leader parks in the worker thread")
+
+        def call_from_another_loop() -> bool:
+            return asyncio.run(guard("https://example.com/"))
+
+        with pytest.raises(RuntimeError, match="separate predicate per event loop"):
+            await asyncio.to_thread(call_from_another_loop)
+    finally:
+        release.set()  # always unblock the worker thread, even if the assertion fails
+    assert await leader is True  # the refused call left the leader's loop state intact
+    # The cross-loop call never reached the resolution machinery.
+    assert calls == ["slow.example"]
