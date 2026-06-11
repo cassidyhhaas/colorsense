@@ -125,8 +125,8 @@ def _build_entries(
         kept = [(c, p, m) for c, p, m in probs if p >= MIN_SHARE]
         if not kept:
             # Pruning emptied the category: keep the single argmax at probability 1.0.
-            # Tie-break by larger probability, then by smaller hex for determinism.
-            best = max(probs, key=lambda item: (item[1], _neg_hex_key(item[0].color.hex)))
+            # Largest probability wins; ties broken by smallest hex for determinism.
+            best = min(probs, key=lambda item: (-item[1], item[0].color.hex))
             kept = [(best[0], 1.0, best[2])]
         else:
             kept_total = sum(p for _, p, _ in kept)
@@ -148,11 +148,6 @@ def _build_entries(
         )
     entries.sort(key=lambda e: (-e.probability, e.color.hex))
     return tuple(entries)
-
-
-def _neg_hex_key(hex_str: str) -> tuple[int, ...]:
-    """Key so that ``max`` on it selects the *smallest* hex string (stable tie-break)."""
-    return tuple(-ord(ch) for ch in hex_str)
 
 
 def build_usage(clusters: list[ColorCluster]) -> UsagePalette:

@@ -486,7 +486,7 @@ class PolitenessPolicy:
 
         The read-and-stamp step is guarded by an :class:`asyncio.Lock` so concurrent callers
         serialize correctly, but the actual sleep happens *outside* the lock: we reserve this
-        caller's slot by stamping the projected next-fetch time (``last + interval``)
+        caller's slot by stamping the reserved next-fetch time (``last + interval``)
         before releasing, so two same-host callers arriving together chain (each waits
         the interval after the previous) instead of both computing a zero wait — yet
         waits for *different* hosts no longer serialize through one global mutex.
@@ -498,13 +498,12 @@ class PolitenessPolicy:
         async with self._throttle_lock:
             last = self._last_fetch.get(host)
             now = self._clock()
-            # Projected fetch time: ``now`` if the interval has already elapsed, else the
-            # next free slot after the previous (reserved) fetch. Stamping it under the lock
-            # is what makes concurrent same-host callers chain rather than collide.
+            # Stamping the reservation under the lock is what makes concurrent same-host
+            # callers chain rather than collide.
             interval = self._host_interval(host)
-            projected = now if last is None else max(now, last + interval)
-            self._last_fetch[host] = projected
-        wait = projected - now
+            reserved_at = now if last is None else max(now, last + interval)
+            self._last_fetch[host] = reserved_at
+        wait = reserved_at - now
         if wait > 0:
             await self._sleeper(wait)
 

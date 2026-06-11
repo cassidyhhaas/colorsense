@@ -215,8 +215,8 @@ def build_inventory(harvest: Harvest, classified: list[ClassifiedElement]) -> li
     for members in groups.values():
         group = [entries[i] for i in members]
 
-        # Representative: largest area weight, ties (and all-zero) broken by hex.
-        rep = max(group, key=lambda e: (e.area_weight, _neg_hex_key(e.color.hex)))
+        # Representative: largest area weight, ties (and all-zero) broken by smallest hex.
+        rep = min(group, key=lambda e: (-e.area_weight, e.color.hex))
         total_area = sum(e.area_weight for e in group)
 
         summed: dict[ComponentType, float] = defaultdict(float)
@@ -241,12 +241,3 @@ def build_inventory(harvest: Harvest, classified: list[ClassifiedElement]) -> li
 
     clusters.sort(key=lambda c: (-c.area_weight, c.color.hex))
     return clusters
-
-
-def _neg_hex_key(hex_str: str) -> tuple[int, ...]:
-    """Return a key so that ``max`` on it selects the *smallest* hex string.
-
-    Used as a tie-breaker inside ``max``: negating each code point makes the
-    lexicographically smallest hex compare greatest.
-    """
-    return tuple(-ord(ch) for ch in hex_str)

@@ -26,6 +26,7 @@ All thresholds are module-level constants, documented and tunable.
 from __future__ import annotations
 
 import math
+from dataclasses import dataclass
 
 from colorsense.color.primitives import delta_e
 from colorsense.models import (
@@ -115,7 +116,7 @@ class _IntentGroup:
 
 
 def _aggregate_intent(tokens: list[ClassifiedToken]) -> list[_IntentGroup]:
-    """STEP 1 — group declared tokens by color and build per-category intent scores.
+    """Group declared tokens by color and build per-category intent scores.
 
     Only tokens with a resolved color and a non-empty ``usage_prior`` are considered.
     Tokens are processed sorted by ``record.name`` for determinism; a token joins an
@@ -157,6 +158,9 @@ def reconcile(
 ) -> tuple[UsagePalette, list[DivergenceItem]]:
     """Fuse declared intent (``tokens``) with measured ``usage`` by log-linear pooling.
 
+    The pipeline is aggregation (:func:`_aggregate_intent`) → per-category pooling
+    (:func:`_pool_category`) → divergence (:func:`_build_divergence`).
+
     Returns a posterior :class:`UsagePalette` and a deterministic list of
     :class:`DivergenceItem`. ``alpha`` weights intent vs. usage and is clamped to
     ``[0, 1]``. Posterior entries carry the matched measured entry's ``area`` and
@@ -175,6 +179,20 @@ def reconcile(
     return posterior, divergence
 
 
+@dataclass
+class _PoolCandidate:
+    """One color in a category's pooling universe.
+
+    ``measured`` is the matched usage entry (supplying ``area`` + ``components``) or
+    ``None`` for a token-only color.
+    """
+
+    measured: UsageEntry | None
+    color: Color
+    p_usage: float
+    p_intent: float
+
+
 def _pool_category(
     category: UsageCategory,
     usage: UsagePalette,
@@ -182,7 +200,7 @@ def _pool_category(
     intents: list[dict[UsageCategory, float]],
     alpha: float,
 ) -> list[UsageEntry]:
-    """STEPS 2-3 — build the color universe for ``category``, pool, prune, renormalize."""
+    """Build the color universe for ``category``, pool, prune, renormalize."""
     usage_entries = usage.mapping.get(category, ())
 
     # EMPTY-CATEGORY GATE: a category with no measured usage candidates yields an empty
@@ -195,12 +213,7 @@ def _pool_category(
     if not usage_entries:
         return []
 
-    # Color universe entries: (measured_entry_or_None, representative color, p_usage,
-    # p_intent). The measured entry supplies area + components on a match.
-    measured_by_idx: list[UsageEntry | None] = []
-    rep_colors: list[Color] = []
-    p_usage_by_idx: list[float] = []
-    p_intent_by_idx: list[float] = []
+    candidates: list[_PoolCandidate] = []
     # Track which intent groups have already been matched to a usage entry so we
     # don't double-count them when adding token-only colors.
     matched_group: list[bool] = [False] * len(groups)
@@ -222,28 +235,33 @@ def _pool_category(
 
     # Usage entries first; they own the representative Color object on a match.
     for entry in usage_entries:
-        measured_by_idx.append(entry)
-        rep_colors.append(entry.color)
-        p_usage_by_idx.append(entry.probability)
-        p_intent_by_idx.append(intent_for(entry.color))
+        candidates.append(
+            _PoolCandidate(
+                measured=entry,
+                color=entry.color,
+                p_usage=entry.probability,
+                p_intent=intent_for(entry.color),
+            )
+        )
 
     # Token-only colors with mass on this category and not already matched to a usage color.
     for gi, group in enumerate(groups):
         if category not in intents[gi] or matched_group[gi]:
             continue
-        measured_by_idx.append(None)
-        rep_colors.append(group.color)
-        p_usage_by_idx.append(0.0)
-        p_intent_by_idx.append(intents[gi][category])
+        candidates.append(
+            _PoolCandidate(
+                measured=None,
+                color=group.color,
+                p_usage=0.0,
+                p_intent=intents[gi][category],
+            )
+        )
 
-    if not rep_colors:
+    if not candidates:
         return []
 
     # Log-linear pool.
-    unnorm = [
-        (p_usage_by_idx[i] + EPS) ** (1.0 - alpha) * (p_intent_by_idx[i] + EPS) ** alpha
-        for i in range(len(rep_colors))
-    ]
+    unnorm = [(c.p_usage + EPS) ** (1.0 - alpha) * (c.p_intent + EPS) ** alpha for c in candidates]
     total = sum(unnorm)
     if total <= 0.0:  # pragma: no cover - guarded by EPS floor
         return []
@@ -254,19 +272,19 @@ def _pool_category(
     if not survivors:
         argmax_idx = max(range(len(posterior_prob)), key=lambda i: posterior_prob[i])
         survivors = [argmax_idx]
-        posterior_prob = [1.0 if i == argmax_idx else 0.0 for i in range(len(rep_colors))]
+        posterior_prob = [1.0 if i == argmax_idx else 0.0 for i in range(len(candidates))]
     else:
         surv_total = sum(posterior_prob[i] for i in survivors)
         posterior_prob = [
             (posterior_prob[i] / surv_total if i in set(survivors) else 0.0)
-            for i in range(len(rep_colors))
+            for i in range(len(candidates))
         ]
 
     result = [
         UsageEntry(
-            color=rep_colors[i],
+            color=candidates[i].color,
             probability=posterior_prob[i],
-            area=measured.area if (measured := measured_by_idx[i]) is not None else 0.0,
+            area=measured.area if (measured := candidates[i].measured) is not None else 0.0,
             components=dict(measured.components) if measured is not None else {},
         )
         for i in survivors
@@ -280,7 +298,7 @@ def _build_divergence(
     groups: list[_IntentGroup],
     intents: list[dict[UsageCategory, float]],
 ) -> list[DivergenceItem]:
-    """STEP 4 — declared-but-unused and used-but-undeclared discrepancies."""
+    """Report declared-but-unused and used-but-undeclared discrepancies."""
     # All measured usage colors across every category (for nearest-color membership tests).
     usage_colors: list[Color] = [
         entry.color for entries in usage.mapping.values() for entry in entries
