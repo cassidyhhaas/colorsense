@@ -20,7 +20,8 @@ from colorsense.models import (
 )
 from colorsense.palette.inventory import (
     DELTA_E_CLUSTER,
-    DELTA_E_MATCH,
+    DELTA_E_MATCH_BG,
+    DELTA_E_MATCH_TEXT_BORDER,
     build_inventory,
 )
 
@@ -214,7 +215,7 @@ def test_element_far_from_all_bins_is_new_cluster() -> None:
     # measured text color, so the far color is now the text channel.
     harvest = _harvest([ScreenshotBin(color=_color("#ffffff"), area_fraction=0.8)])
     far = _color("#000000")
-    assert delta_e(far, _color("#ffffff")) > DELTA_E_MATCH
+    assert delta_e(far, _color("#ffffff")) > DELTA_E_MATCH_TEXT_BORDER
 
     classified = [_classified(None, {ComponentType.page_text: 1.0}, text=far)]
     clusters = build_inventory(harvest, classified)
@@ -241,7 +242,7 @@ def test_element_without_bg_or_dist_is_ignored() -> None:
 def test_text_mass_routes_to_text_color_not_bg() -> None:
     light_bg = _color("#ffffff")
     dark_text = _color("#111111")
-    assert delta_e(light_bg, dark_text) > DELTA_E_MATCH
+    assert delta_e(light_bg, dark_text) > DELTA_E_MATCH_TEXT_BORDER
 
     harvest = _harvest([ScreenshotBin(color=light_bg, area_fraction=0.9)])
     classified = [
@@ -266,7 +267,7 @@ def test_text_mass_routes_to_text_color_not_bg() -> None:
 def test_border_mass_routes_to_border_color() -> None:
     bg = _color("#ffffff")
     border = _color("#3366cc")
-    assert delta_e(bg, border) > DELTA_E_MATCH
+    assert delta_e(bg, border) > DELTA_E_MATCH_TEXT_BORDER
 
     harvest = _harvest([ScreenshotBin(color=bg, area_fraction=0.9)])
     classified = [
@@ -348,13 +349,14 @@ def test_build_inventory_permutation_invariant_on_well_separated_colors() -> Non
 
     CAVEAT (why the pinned property is deliberately weaker than full
     permutation-invariance): entry creation order can legitimately matter by
-    design. Two elements whose colors are both far (> DELTA_E_MATCH) from every
-    bin but between DELTA_E_CLUSTER and DELTA_E_MATCH of each other join one
-    entry whose color is whichever element came first, changing the cluster's
-    representative hex. Likewise nearest-entry ties (`<=` keeps the later index)
-    depend on bin order for equidistant bins. So we pin the property the module
-    does guarantee: when every pairwise color distance exceeds DELTA_E_MATCH,
-    matching is unambiguous and the output is exactly permutation-invariant.
+    design. Two elements whose colors are both far (beyond the channel's join
+    radius) from every bin but between DELTA_E_CLUSTER and the radius of each
+    other join one entry whose color is whichever element came first, changing
+    the cluster's representative hex. Likewise nearest-entry ties (`<=` keeps
+    the later index) depend on bin order for equidistant bins. So we pin the
+    property the module does guarantee: when every pairwise color distance
+    exceeds the largest join radius (DELTA_E_MATCH_BG), matching is unambiguous
+    and the output is exactly permutation-invariant.
 
     All masses are dyadic (1.0), so float summation order cannot perturb the
     result and exact equality is safe.
@@ -369,7 +371,7 @@ def test_build_inventory_permutation_invariant_on_well_separated_colors() -> Non
     colors = [white, blue, red, black]
     for i in range(len(colors)):
         for j in range(i + 1, len(colors)):
-            assert delta_e(colors[i], colors[j]) > DELTA_E_MATCH
+            assert delta_e(colors[i], colors[j]) > DELTA_E_MATCH_BG
 
     bins = [
         ScreenshotBin(color=white, area_fraction=0.5),
@@ -405,5 +407,60 @@ def test_equal_area_clusters_sorted_by_hex() -> None:
 
 
 def test_thresholds_relationship() -> None:
-    # Clustering threshold must not exceed the match threshold.
-    assert DELTA_E_CLUSTER <= DELTA_E_MATCH
+    # Clustering threshold must not exceed either channel join radius, and the
+    # text/border radius is deliberately the tighter of the two.
+    assert DELTA_E_CLUSTER <= DELTA_E_MATCH_TEXT_BORDER <= DELTA_E_MATCH_BG
+
+
+# ---------------------------------------------------------------------------
+# Per-channel join radii (bg loose, text/border tight).
+# ---------------------------------------------------------------------------
+
+# GitHub's near-black body text vs. its dark code-block surface: 0.078 deltaEOK —
+# between DELTA_E_MATCH_TEXT_BORDER (0.05) and DELTA_E_MATCH_BG (0.10). The live-probe
+# regression: under a single 0.10 radius the text color was absorbed into the adjacent
+# dark surface bin, erasing the body-text color from the usage view.
+_DARK_SURFACE = "#0d1117"
+_NEAR_BLACK_TEXT = "#1f2328"
+
+
+def test_text_color_near_dark_surface_bin_forms_distinct_entry() -> None:
+    surface, text = _color(_DARK_SURFACE), _color(_NEAR_BLACK_TEXT)
+    gap = delta_e(surface, text)
+    assert DELTA_E_MATCH_TEXT_BORDER < gap <= DELTA_E_MATCH_BG  # the regression window
+
+    harvest = _harvest([ScreenshotBin(color=surface, area_fraction=0.2)])
+    classified = [_classified(None, {ComponentType.page_text: 1.0}, text=text)]
+    clusters = build_inventory(harvest, classified)
+
+    # Two distinct clusters: the text did NOT merge into the dark surface bin.
+    assert len(clusters) == 2
+    text_cluster = next(c for c in clusters if c.color.hex == text.hex)
+    assert text_cluster.area_weight == pytest.approx(0.0, abs=1e-9)
+    assert max(text_cluster.component_mix) == ComponentType.page_text
+    bin_cluster = next(c for c in clusters if c.color.hex == surface.hex)
+    assert ComponentType.page_text not in bin_cluster.component_mix
+
+
+def test_border_channel_uses_tight_radius() -> None:
+    surface, border = _color(_DARK_SURFACE), _color(_NEAR_BLACK_TEXT)
+    harvest = _harvest([ScreenshotBin(color=surface, area_fraction=0.2)])
+    classified = [_classified(None, {ComponentType.border: 1.0}, border=border)]
+    clusters = build_inventory(harvest, classified)
+
+    assert len(clusters) == 2
+    border_cluster = next(c for c in clusters if c.color.hex == border.hex)
+    assert max(border_cluster.component_mix) == ComponentType.border
+
+
+def test_bg_channel_keeps_loose_radius_at_same_distance() -> None:
+    # The SAME color pair on the BG channel still merges: screenshot quantization and
+    # anti-aliasing smear backgrounds, so bg keeps the generous 0.10 join radius.
+    surface, bg = _color(_DARK_SURFACE), _color(_NEAR_BLACK_TEXT)
+    harvest = _harvest([ScreenshotBin(color=surface, area_fraction=0.2)])
+    classified = [_classified(bg, {ComponentType.card_bg: 1.0})]
+    clusters = build_inventory(harvest, classified)
+
+    assert len(clusters) == 1
+    assert clusters[0].color.hex == surface.hex
+    assert max(clusters[0].component_mix) == ComponentType.card_bg
