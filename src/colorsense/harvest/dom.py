@@ -2,8 +2,9 @@
 
 Walks the rendered DOM in-page, capturing for each element its computed
 ``background-color`` / ``color`` / ``border-color`` (parsed to :class:`Color`), bounding rect,
-position, tag/role/id/class tokens, and structural flags (iframe, cross-origin, shadow
-host, clickable, box shadow, direct text content, vendor match, visible, aria-hidden).
+position, tag/role/id/class tokens, the input ``type`` attribute (``<input>`` only), and
+structural flags (iframe, cross-origin, shadow host, clickable, box shadow, direct text
+content, vendor match, visible, aria-hidden).
 Hidden, zero-area, or
 aria-hidden elements are excluded from the returned list (their flags are still computed
 on what is returned).
@@ -41,6 +42,7 @@ class _RawElement(TypedDict):
     bg: str
     text: str
     border: str
+    input_type: str | None
     has_box_shadow: bool
     has_text: bool
     is_iframe: bool
@@ -115,7 +117,7 @@ _COLLECT_DOM_JS: str = r"""
         const cursorPointer = style.cursor === 'pointer';
         const inputType = (el.getAttribute('type') || '').toLowerCase();
         const isSubmit = tag === 'input'
-            && ['submit', 'button', 'reset'].includes(inputType);
+            && ['submit', 'button', 'reset', 'image'].includes(inputType);
         const clickable = tag === 'a' || tag === 'button' || role === 'button'
             || el.hasAttribute('onclick') || isSubmit || cursorPointer;
 
@@ -153,6 +155,9 @@ _COLLECT_DOM_JS: str = r"""
             bg: style.backgroundColor,
             text: style.color,
             border: borderColor,
+            // Only meaningful on <input>: null for other tags and for inputs with
+            // no/empty type attribute (the HTML default type is "text").
+            input_type: (tag === 'input' && inputType !== '') ? inputType : null,
             has_box_shadow: hasBoxShadow,
             has_text: hasText,
             is_iframe: isIframe,
@@ -200,6 +205,7 @@ async def harvest_elements(
                 bg=parse_css_color(raw["bg"]),
                 text=parse_css_color(raw["text"]),
                 border=parse_css_color(raw["border"]),
+                input_type=raw["input_type"],
                 has_box_shadow=raw["has_box_shadow"],
                 has_text=raw["has_text"],
                 is_iframe=raw["is_iframe"],

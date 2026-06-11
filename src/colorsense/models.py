@@ -4,6 +4,11 @@ These models are the single shared-contract surface for the pipeline. This file 
 **frozen** by design: downstream code must not modify it. A change to a contract here
 must be made centrally and re-validated against every dependent module, never patched
 locally by a consumer. (Most recent central change: ``HarvestedElement`` gained
+``input_type: str | None = None`` — the lowercased ``type`` attribute of an ``<input>``
+element, ``None`` for non-inputs and for inputs with no/empty ``type`` attribute; mirrors
+the ``has_box_shadow``/``has_text`` precedent (defaulted, the DOM harvester always sets
+it) — re-validated against ``harvest.dom``, ``classify.components``, and every test
+constructing ``HarvestedElement``. Previous central change: ``HarvestedElement`` gained
 ``has_text: bool = False`` — true iff the element has a direct child text node with
 non-whitespace content; mirrors the ``has_box_shadow`` precedent (default ``False``, the
 DOM harvester always sets it) — re-validated against ``harvest.dom``,
@@ -231,6 +236,11 @@ class HarvestedElement(BaseModel):
     harvester): true iff the element has at least one **direct child** text node with
     non-whitespace content — descendant text does not count, otherwise every ancestor
     wrapper of any text would carry the flag.
+    ``input_type`` follows the same precedent (default ``None``, always set by the
+    harvester): the lowercased ``type`` attribute when the element is an ``<input>``
+    with a non-empty ``type``; ``None`` means "not an input, or no ``type`` attribute
+    declared" (the HTML default type is ``text``, but the harvester reports the absence
+    rather than inferring it).
     """
 
     tag: str
@@ -242,6 +252,7 @@ class HarvestedElement(BaseModel):
     bg: Color | None
     text: Color | None
     border: Color | None
+    input_type: str | None = None
     has_box_shadow: bool = False
     has_text: bool = False
     is_iframe: bool
