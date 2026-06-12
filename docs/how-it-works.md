@@ -311,15 +311,21 @@ white-surfaced page reads as "used" and stays silent.
 
 Two kinds of discrepancy are reported:
 
-- **Declared but unused** — a declared color group with intent mass and no perceptual
-  match (within 0.10) among measured usage in *any* category. This is gated to
-  **high-intent** origins only: tokens classified by an explicit name rule or relational
-  pattern. The gate exists because of another live failure: on token-heavy sites, every
-  unused shade of every numbered color scale is technically "declared", and the report
-  was 100% noise — **54 out of 54 items on github.com** were unused scale shades. Scale
-  members, alias followers, and fallbacks therefore never fire this item.
+- **Declared but unused** — a declared color with no perceptual match (within 0.10)
+  among measured usage in *any* category. This is gated to **high-intent** origins only:
+  tokens classified by an explicit name rule or relational pattern. The gate exists
+  because of another live failure: on token-heavy sites, every unused shade of every
+  numbered color scale is technically "declared", and the report was 100% noise — **54
+  out of 54 items on github.com** were unused scale shades. Scale members, alias
+  followers, and fallbacks therefore never fire this item. Name-rule tokens report under
+  their intent's strongest category; relational tokens (`--on-primary`-style foreground
+  colors, which carry no category prior) report under `text`.
 - **Used but undeclared** — a measured entry with probability ≥ 0.15 whose color matches
-  no declared token group. A prominent rendered color the design system doesn't name.
+  no *declared* color at all. Membership is tested against every resolved token color —
+  including relational, status, scale, and fallback classifications that carry no intent
+  mass — because "undeclared" is a statement about the stylesheet: a page rendering
+  exactly its declared `--on-primary` text color is not undeclared. A prominent rendered
+  color the design system doesn't name.
 
 ## 6. The 60/30/10 roles view
 

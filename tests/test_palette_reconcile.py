@@ -107,10 +107,25 @@ def test_declared_but_unused_appears_in_divergence() -> None:
     assert hits[0].category == UsageCategory.surface
 
 
+def _relational_token(name: str, css: str, weight: float = 1.0) -> ClassifiedToken:
+    # The shape classify_tokens actually produces for --on-*/-foreground tokens: role
+    # text_on, EMPTY usage prior (the config row is a channel route, not a distribution).
+    return _token(
+        name,
+        css,
+        prior={},
+        weight=weight,
+        semantic_role=TokenSemanticRole.text_on,
+        origin=TokenOrigin.relational,
+    )
+
+
 def test_declared_but_unused_gated_to_high_intent_origins() -> None:
     # The divergence-noise fix: a scale-origin token (e.g. an unused --green-300 shade)
     # must NOT raise declared-but-unused — on token-heavy sites every unused shade of
-    # every scale used to fire. A name_rule-origin token with the same color MUST.
+    # every scale used to fire. A name_rule-origin token with the same color MUST, and
+    # so must a relational token (which classifies with an EMPTY usage prior, the shape
+    # classify_tokens really emits — it reports through the dedicated relational pass).
     usage = UsagePalette(mapping={UsageCategory.interactive: (_entry("#2563eb", 1.0),)})
     unused = "#10b981"
 
@@ -121,10 +136,63 @@ def test_declared_but_unused_gated_to_high_intent_origins() -> None:
         _, divergence = reconcile(usage, tokens, alpha=0.4)
         assert not any("unused" in d.note for d in divergence), low_intent
 
-    for high_intent in (TokenOrigin.name_rule, TokenOrigin.relational):
-        tokens = [_token("--brand", unused, {UsageCategory.interactive: 1.0}, origin=high_intent)]
-        _, divergence = reconcile(usage, tokens, alpha=0.4)
-        assert any("unused" in d.note for d in divergence), high_intent
+    tokens = [_token("--brand", unused, {UsageCategory.interactive: 1.0})]
+    _, divergence = reconcile(usage, tokens, alpha=0.4)
+    assert any("unused" in d.note for d in divergence)
+
+    tokens = [_relational_token("--on-primary", unused)]
+    _, divergence = reconcile(usage, tokens, alpha=0.4)
+    hits = [d for d in divergence if "unused" in d.note]
+    assert hits and hits[0].category == UsageCategory.text
+    assert hits[0].note == "declared '--on-primary' unused in render"
+
+
+def test_rendered_relational_token_color_is_not_undeclared() -> None:
+    # The release-review false positive: a page whose dominant text color exactly
+    # matches its declared --on-primary was reported "used but undeclared" because
+    # empty-prior tokens (relational, excluded status) were invisible to the
+    # membership test. Undeclaredness is about the stylesheet, not intent mass.
+    white = "#ffffff"
+    usage = UsagePalette(
+        mapping={
+            UsageCategory.text: (_entry(white, 1.0, components={ComponentType.page_text: 1.0}),)
+        }
+    )
+    tokens = [_relational_token("--on-primary", white)]
+    _, divergence = reconcile(usage, tokens, alpha=0.4)
+
+    assert not any(d.note == "used but undeclared" for d in divergence)
+    # And the rendered relational token is not "unused" either.
+    assert not any("unused" in d.note for d in divergence)
+
+
+def test_rendered_status_token_color_is_not_undeclared() -> None:
+    # Status tokens get an empty prior when status_excluded_from_palette is set; their
+    # declared color must still count for the used-but-undeclared membership test.
+    red = "#dc2626"
+    usage = UsagePalette(mapping={UsageCategory.interactive: (_entry(red, 1.0),)})
+    tokens = [
+        _token("--danger", red, prior={}, semantic_role=TokenSemanticRole.status),
+    ]
+    _, divergence = reconcile(usage, tokens, alpha=0.4)
+
+    assert not any(d.note == "used but undeclared" for d in divergence)
+
+
+def test_near_identical_relational_tokens_report_once() -> None:
+    # Two unused foreground tokens within DELTA_E_MATCH fold into one relational group:
+    # one divergence item, rep_name from the heavier token.
+    usage = UsagePalette(mapping={UsageCategory.surface: (_entry("#111111", 1.0),)})
+    tokens = [
+        _relational_token("--on-primary", "#fefefe", weight=1.0),
+        _relational_token("--card-foreground", "#ffffff", weight=3.0),
+    ]
+    _, divergence = reconcile(usage, tokens, alpha=0.4)
+
+    unused = [d for d in divergence if "unused" in d.note]
+    assert len(unused) == 1
+    assert unused[0].note == "declared '--card-foreground' unused in render"
+    assert unused[0].category == UsageCategory.text
 
 
 def test_alpha_zero_is_pure_usage() -> None:

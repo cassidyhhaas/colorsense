@@ -88,6 +88,10 @@ UNDECLARED_MIN_PROB: float = 0.15
 #: ``scale`` members (every shade of a palette scale is "declared" but most are never
 #: meant to render), ``alias`` followers, and ``fallback`` classifications are excluded
 #: (see docs/how-it-works.md for the token-heavy-site failure that motivated the gate).
+#: The two qualifying origins reach the report by different paths: ``name_rule`` tokens
+#: carry usage priors and report through their intent group's argmax category, while
+#: ``relational`` tokens carry no prior (channel-routed) and report through the
+#: dedicated `_aggregate_relational` pass, attributed to ``text``.
 HIGH_INTENT_ORIGINS: frozenset[TokenOrigin] = frozenset(
     {TokenOrigin.relational, TokenOrigin.name_rule}
 )
@@ -124,21 +128,18 @@ class _IntentGroup:
         return {category: val / total for category, val in self.intent_raw.items()}
 
 
-def _aggregate_intent(tokens: list[ClassifiedToken]) -> list[_IntentGroup]:
-    """Group declared tokens by color and build per-category intent scores.
+def _group_by_color(eligible: list[ClassifiedToken]) -> list[_IntentGroup]:
+    """Fold ``eligible`` tokens into `_IntentGroup`\\ s by nearest color.
 
-    Only tokens with a resolved color and a non-empty ``usage_prior`` are considered.
     Tokens are processed sorted by ``record.name`` for determinism; a token joins an
     existing group when within `DELTA_E_MATCH` of the group's color, else starts a
-    new group anchored on its own resolved color.
+    new group anchored on its own resolved color. Callers must pre-filter to tokens
+    with a resolved color.
     """
-    eligible = [t for t in tokens if t.record.resolved is not None and len(t.usage_prior) > 0]
-    eligible.sort(key=lambda t: t.record.name)
-
     groups: list[_IntentGroup] = []
-    for token in eligible:
+    for token in sorted(eligible, key=lambda t: t.record.name):
         color = token.record.resolved
-        assert color is not None  # narrowed by the filter above
+        assert color is not None  # callers filter on resolved
         matched: _IntentGroup | None = None
         for group in groups:
             if delta_e(color, group.color) <= DELTA_E_MATCH:
@@ -149,6 +150,39 @@ def _aggregate_intent(tokens: list[ClassifiedToken]) -> list[_IntentGroup]:
             groups.append(matched)
         matched.add(token)
     return groups
+
+
+def _aggregate_intent(tokens: list[ClassifiedToken]) -> list[_IntentGroup]:
+    """Group declared tokens by color and build per-category intent scores.
+
+    Only tokens with a resolved color and a non-empty ``usage_prior`` are considered —
+    these are the tokens that can shape pooling. Relational and (excluded) status tokens
+    carry empty priors by construction and are handled separately in divergence
+    (`_aggregate_relational`, and the all-resolved-colors membership test).
+    """
+    return _group_by_color(
+        [t for t in tokens if t.record.resolved is not None and len(t.usage_prior) > 0]
+    )
+
+
+def _aggregate_relational(tokens: list[ClassifiedToken]) -> list[_IntentGroup]:
+    """Group relational (``--on-primary``-style) tokens for divergence reporting.
+
+    Relational classifications always carry an EMPTY ``usage_prior`` (their config row
+    is a channel route, not a category distribution), so they never form intent groups
+    and never shape pooling — but they are direct author intent (`HIGH_INTENT_ORIGINS`)
+    and must still be able to raise declared-but-unused. The empty-prior filter keeps a
+    (hand-constructed) prior-bearing relational token from being reported twice.
+    """
+    return _group_by_color(
+        [
+            t
+            for t in tokens
+            if t.origin is TokenOrigin.relational
+            and t.record.resolved is not None
+            and not t.usage_prior
+        ]
+    )
 
 
 def _clamp_alpha(alpha: float) -> float:
@@ -185,7 +219,7 @@ def reconcile(
         posterior_mapping[category] = tuple(_pool_category(category, usage, groups, intents, alpha))
 
     posterior = UsagePalette(mapping=posterior_mapping)
-    divergence = _build_divergence(usage, groups, intents)
+    divergence = _build_divergence(usage, tokens, groups, intents)
     return posterior, divergence
 
 
@@ -287,6 +321,7 @@ def _pool_category(
 
 def _build_divergence(
     usage: UsagePalette,
+    tokens: list[ClassifiedToken],
     groups: list[_IntentGroup],
     intents: list[dict[UsageCategory, float]],
 ) -> list[DivergenceItem]:
@@ -322,8 +357,29 @@ def _build_divergence(
             )
         )
 
-    # USED-BUT-UNDECLARED: prominent usage entry with no matching token color.
-    token_colors = [g.color for g in groups]
+    # DECLARED-BUT-UNUSED, relational arm: relational tokens carry no usage prior (so
+    # they never join `groups`), but they are direct author intent and an unused
+    # ``--on-primary`` deserves a report. They are foreground/text colors by
+    # construction (the ``text_on`` channel), so the item is attributed to ``text``.
+    for group in _aggregate_relational(tokens):
+        if group.token_weight < DECLARE_MIN_WEIGHT:
+            continue
+        if matches_any_usage(group.color):
+            continue
+        items.append(
+            DivergenceItem(
+                category=UsageCategory.text,
+                color=group.color,
+                note=f"declared '{group.rep_name}' unused in render",
+            )
+        )
+
+    # USED-BUT-UNDECLARED: prominent usage entry matching no declared token color.
+    # Membership is tested against EVERY resolved declared color — including relational,
+    # status, scale, and fallback classifications that carry no usage prior — because
+    # "undeclared" is a statement about the stylesheet, not about intent mass: a page
+    # rendering exactly its declared ``--on-primary`` text color is not undeclared.
+    token_colors = [t.record.resolved for t in tokens if t.record.resolved is not None]
 
     def matches_any_token(color: Color) -> bool:
         return any(delta_e(color, tc) <= DELTA_E_MATCH_MEASURED for tc in token_colors)

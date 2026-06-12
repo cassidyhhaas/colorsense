@@ -58,6 +58,15 @@ Other changes riding the redesign:
 
 ### Fixed — pre-release review follow-up
 
+- **Relational and status tokens are visible to divergence again.** Empty-prior tokens
+  (relational `--on-primary`-style foregrounds; status tokens excluded from the palette)
+  were invisible to reconciliation: a page rendering exactly its declared
+  `--on-primary` color was falsely reported "used but undeclared" (the canonical
+  shadcn/Material `*-foreground` pattern), and the documented relational arm of the
+  declared-but-unused gate was unreachable. Used-but-undeclared membership now tests
+  against every resolved declared color, and unused relational tokens report
+  declared-but-unused under `text` via a dedicated pass.
+
 - **Reconciliation pooling no longer vetoes undeclared colors.** The log-linear pool's
   intent factor is now uniform-smoothed (`+ 1/K` over the category's K measured entries)
   instead of floored at `EPS = 1e-9`: lacking a token match costs a bounded,
