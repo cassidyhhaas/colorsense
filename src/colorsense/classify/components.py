@@ -107,9 +107,7 @@ def _matches_interactivity(rule: WhenRule, element: HarvestedElement) -> bool:
         return element.tag == "button" and element.clickable
     if when == "has_hover_color_change":
         return element.has_hover_color_change
-    if when == "has_focus_ring":
-        # No corresponding field on HarvestedElement — treat as never true.
-        return False
+    # Unreachable for validated configs: Config rejects unknown predicates at load time.
     return False
 
 
@@ -119,7 +117,7 @@ def _matches_geometry(
     thresholds: GeometryThresholds,
     viewport: Viewport,
 ) -> bool:
-    """Dispatch the known geometry ``when`` predicates; unknown ones are False."""
+    """Dispatch the geometry ``when`` predicates (validated at config load)."""
     rect = element.rect
     vp_w = float(viewport.width)
     vp_h = float(viewport.height)
@@ -223,9 +221,6 @@ def _apply_suppressors(
                 triggered = element.aria_hidden
             elif key == "zero_area_or_hidden":
                 triggered = (not element.visible) or rect.width <= 0.0 or rect.height <= 0.0
-            elif key == "consent_masked_region":
-                # No mask info available at this layer.
-                triggered = False
             if triggered:
                 for component in accum:
                     accum[component] *= suppressor.factor

@@ -58,6 +58,20 @@ Other changes riding the redesign:
 
 ### Fixed — pre-release review follow-up
 
+- **Dead classifier knobs removed; the config loader now rejects unknown dispatch
+  names.** The bundled YAML shipped two knobs the classifier could never act on: the
+  `has_focus_ring` interactivity rule (no focus-ring signal exists on harvested elements)
+  and the `consent_masked_region` suppressor (consent rects are consumed by screenshot
+  masking and never reach the classification layer) — both hard-returned False in
+  `classify/components.py`, contradicting the "nothing hard-coded, the YAML is the single
+  source of truth" contract and inviting consumers to tune values that did nothing. Both
+  entries and their dead code branches are gone. To keep removed (or misspelled) names
+  from becoming silent no-ops in custom `config_path=` YAMLs, `Config` now validates
+  dispatch names against the closed sets the classifier implements: unknown
+  interactivity/geometry `when:` predicates, suppressor keys, and suppressor `applies_to`
+  scopes fail loudly at load time. Bundled-config behavior is unchanged (golden snapshots
+  untouched).
+
 - **The egress gate now covers WebSockets and service workers.** The `request_filter`
   route handler is installed via Playwright's `context.route`, which never sees WebSocket
   opening handshakes and (by default) service-worker-originated requests — so a hostile

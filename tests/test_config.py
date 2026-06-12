@@ -166,6 +166,75 @@ def test_presence_feature_families_required(tmp_path: Path) -> None:
     assert "border_presence" in str(excinfo.value)
 
 
+@pytest.mark.parametrize(
+    ("section", "entry", "expected_fragment"),
+    [
+        ("interactivity", {"when": "has_focus_ring", "votes": {"cta_bg": 0.5}}, "has_focus_ring"),
+        ("interactivity", {"when": "is_animated", "votes": {"cta_bg": 1.0}}, "is_animated"),
+        ("geometry", {"when": "left_half & tall", "votes": {"nav_bg": 1.0}}, "left_half"),
+    ],
+)
+def test_unknown_when_predicate_rejected(
+    tmp_path: Path, section: str, entry: dict[str, object], expected_fragment: str
+) -> None:
+    """A ``when`` predicate the classifier does not implement fails at load time.
+
+    Regression guard for the 0.4.0 release review: the bundled YAML used to ship a
+    ``has_focus_ring`` interactivity rule that the classifier hard-returned False
+    for — a dead knob. Unknown predicates must fail loudly, not become silent no-ops.
+    """
+    import yaml
+
+    raw = yaml.safe_load(
+        (Path(__file__).parents[1] / "src/colorsense/data/palette_config.yaml").read_text()
+    )
+    if section == "geometry":
+        raw["component_classifier"]["geometry"]["rules"].append(entry)
+    else:
+        raw["component_classifier"][section].append(entry)
+    bad = tmp_path / "unknown_when.yaml"
+    bad.write_text(yaml.safe_dump(raw), encoding="utf-8")
+    with pytest.raises(ValidationError) as excinfo:
+        load_config(bad)
+    assert expected_fragment in str(excinfo.value)
+
+
+def test_unknown_suppressor_key_rejected(tmp_path: Path) -> None:
+    """A suppressor key the classifier does not implement fails at load time.
+
+    Regression guard: ``consent_masked_region`` shipped as a suppressor the
+    classifier never triggered (no mask info reaches the classification layer).
+    """
+    import yaml
+
+    raw = yaml.safe_load(
+        (Path(__file__).parents[1] / "src/colorsense/data/palette_config.yaml").read_text()
+    )
+    raw["component_classifier"]["suppressors"]["consent_masked_region"] = {
+        "factor": 0.0,
+        "applies_to": "all",
+    }
+    bad = tmp_path / "unknown_suppressor.yaml"
+    bad.write_text(yaml.safe_dump(raw), encoding="utf-8")
+    with pytest.raises(ValidationError) as excinfo:
+        load_config(bad)
+    assert "consent_masked_region" in str(excinfo.value)
+
+
+def test_unknown_suppressor_scope_rejected(tmp_path: Path) -> None:
+    """``applies_to`` outside the two implemented scopes fails at load time."""
+    import yaml
+
+    raw = yaml.safe_load(
+        (Path(__file__).parents[1] / "src/colorsense/data/palette_config.yaml").read_text()
+    )
+    raw["component_classifier"]["suppressors"]["aria_hidden"]["applies_to"] = "everything"
+    bad = tmp_path / "bad_scope.yaml"
+    bad.write_text(yaml.safe_dump(raw), encoding="utf-8")
+    with pytest.raises(ValidationError):
+        load_config(bad)
+
+
 def test_default_config_loads_from_package() -> None:
     """The bundled config resolves via the package, independent of the working dir."""
     config = load_default_config()

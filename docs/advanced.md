@@ -52,7 +52,10 @@ package and is loaded automatically. It is the single source of truth for:
 
 The weights are calibrated starting points, not ground truth. To tune them, copy the
 bundled file, edit your copy, and pass its path as `config_path=` to `analyze` (or load it
-with `load_config`). To inspect the defaults programmatically:
+with `load_config`). The loader is strict about dispatch names: geometry/interactivity
+`when:` predicates and suppressor keys must name predicates the classifier actually
+implements — an unknown name fails validation at load time rather than becoming a knob
+that silently never fires. To inspect the defaults programmatically:
 
 ```python
 from colorsense import load_default_config
