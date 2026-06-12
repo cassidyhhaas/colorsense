@@ -396,11 +396,16 @@ held while a browser is genuinely rendering.
 `block_private_networks()` returns an async predicate applied to every URL the browser
 requests (navigation and all sub-resources) and to the policy's own `robots.txt` GET
 (including each redirect hop). On a cache miss, the blocking `getaddrinfo` runs on a
-worker thread via `asyncio.to_thread`; verdicts land in a per-hostname TTL+LRU cache
-(negative verdicts too — re-resolving a hostile hostname on every request would hand the
-page a thread-pool amplifier), and concurrent misses for one host coalesce into a single
-lookup. Every failure mode — malformed URL, resolution failure, empty resolution, a
-raising predicate — **fails closed**: the request is aborted, never waved through. A
+small thread pool the predicate itself owns — never the loop's shared default
+`to_thread` executor, so guard lookups cannot starve the pipeline's CPU phase or an
+embedding application's own thread-pool work — capped by a fail-closed per-lookup
+timeout; verdicts land in a per-hostname TTL+LRU cache (negative verdicts too —
+re-resolving a hostile hostname on every request would hand the page an amplifier),
+concurrent misses for one host coalesce into a single lookup, and fan-out to distinct
+slow hostnames beyond the pool size queues inside the guard's own pool rather than
+pinning a thread per host. Every failure mode — malformed URL, resolution failure,
+resolution timeout, empty resolution, a raising predicate — **fails closed**: the
+request is aborted, never waved through. A
 hostname passes only if *all* of its resolved addresses are public (one public plus one
 internal A record is exactly the split-horizon shape an attacker would use). The
 predicate's single-flight futures are loop-bound, so each guard instance serves **one

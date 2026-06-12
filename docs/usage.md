@@ -227,9 +227,10 @@ policy** — whether a fetch is authorized is the consumer's decision, made *bef
   hostname and rejects URLs resolving to private/loopback/link-local (metadata)/CGNAT/other
   non-public addresses, failing closed, with an optional narrowing `allowed_hosts`
   allowlist. It does not fully defeat DNS rebinding (Chromium resolves hostnames
-  independently); its DNS lookups run off the event loop on a worker thread (cached per
-  hostname with a TTL; concurrent misses for one host share a single lookup) — network
-  isolation remains the primary control. Each predicate serves one event loop at a time:
+  independently); its DNS lookups run off the event loop on a small dedicated thread pool
+  with a fail-closed per-lookup timeout (cached per hostname with a TTL; concurrent misses
+  for one host share a single lookup; fan-out to distinct hosts beyond the pool size
+  queues) — network isolation remains the primary control. Each predicate serves one event loop at a time:
   sequential reuse across loops (e.g. back-to-back `asyncio.run` calls) is supported —
   the predicate re-binds when idle and keeps its verdict cache — but *concurrent* use
   from multiple event loops raises `RuntimeError` (detected best-effort; it fails closed

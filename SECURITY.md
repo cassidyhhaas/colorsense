@@ -58,8 +58,9 @@ must enforce your own guard rails before and around the call**:
 - **Filter egress in-library** with `request_filter`, so the rendered page's sub-resource
   requests are subject to the same rules as the navigation. The library ships an
   implementation: `block_private_networks()` builds an async filter that resolves each
-  hostname — off the event loop, on a worker thread, with per-host verdict caching and
-  single-flight coalescing — and rejects any URL resolving to a private, loopback,
+  hostname — off the event loop, on a small thread pool the filter itself owns (never the
+  loop's shared default executor), with a fail-closed per-lookup timeout, per-host verdict
+  caching and single-flight coalescing — and rejects any URL resolving to a private, loopback,
   link-local (metadata), CGNAT, multicast, or otherwise non-public address — failing
   closed on resolution failure, with an optional narrowing host allowlist. It does **not**
   fully defeat DNS rebinding: the

@@ -12,7 +12,8 @@ failures fail **closed**. This is the shipped mechanism for the SECURITY.md §1
 "filter egress in-library" item.
 
 The honest limits — DNS rebinding is not fully defeated (network isolation stays the
-primary control), resolution runs off-loop behind a TTL+LRU verdict cache with single-flight
+primary control), resolution runs off-loop on a small predicate-owned thread pool with a
+fail-closed per-lookup timeout behind a TTL+LRU verdict cache with single-flight
 coalescing, and each predicate serves one event loop at a time — are documented in full on
 [`block_private_networks`][colorsense.block_private_networks], the public docstring users see.
 """
@@ -25,6 +26,7 @@ import socket
 import time
 from collections import OrderedDict
 from collections.abc import Awaitable, Callable, Iterable
+from concurrent.futures import ThreadPoolExecutor
 from urllib.parse import urlsplit
 
 IPAddress = ipaddress.IPv4Address | ipaddress.IPv6Address
@@ -43,11 +45,27 @@ DEFAULT_GUARD_MAX_ENTRIES = 1024
 """LRU bound on cached verdicts — a hostile page requesting many hostnames cannot grow
 the cache without bound."""
 
+DEFAULT_GUARD_RESOLVE_TIMEOUT_SECONDS = 10.0
+"""Per-lookup ceiling on a single DNS resolution; on expiry the URL fails **closed** and
+the negative verdict is cached like any other. 10 seconds comfortably covers a healthy
+OS resolver retrying once (typical per-attempt timeouts are ~5s) while bounding how long
+a black-holed nameserver can hold a guard pool thread — and the request awaiting the
+verdict — hostage."""
+
+GUARD_RESOLVER_MAX_WORKERS = 8
+"""Size of each predicate's own DNS-lookup thread pool. Small on purpose: per-host
+single-flight coalescing already collapses duplicate lookups, so only *distinct* novel
+hostnames compete for threads, and 8 keeps a burst of legitimate sub-resource hosts
+moving while bounding what a hostile page fanning out unique slow hostnames can pin —
+excess lookups queue inside the pool instead of consuming a thread each. Saturating the
+pool slows the guard's own verdicts (briefly, given the resolve timeout), never the
+event loop or anyone else's executor."""
+
 
 def _default_resolver(host: str) -> list[IPAddress]:
     """Resolve ``host`` to all of its addresses via stdlib ``socket.getaddrinfo``.
 
-    Blocking by design — the guard runs it inside ``asyncio.to_thread`` on a cache miss,
+    Blocking by design — the guard runs it on its own bounded lookup pool on a cache miss,
     so the ``Resolver`` seam stays a plain synchronous callable; the verdict is cached. IP
     literals pass straight through ``getaddrinfo`` without a network round trip. Raises
     ``OSError`` on resolution failure — the guard treats that as fail-closed.
@@ -100,12 +118,23 @@ class _PrivateNetworkBlocker:
         ttl: float,
         max_entries: int,
         clock: Clock,
+        resolve_timeout: float,
     ) -> None:
         self._allowed_hosts = allowed_hosts
         self._resolver = resolver
         self._ttl = ttl
         self._max_entries = max_entries
         self._clock = clock
+        self._resolve_timeout = resolve_timeout
+        # The predicate-owned DNS lookup pool (lazily created on the first cache miss).
+        # Deliberately NOT the loop's default to_thread executor: that pool is shared
+        # with the pipeline's CPU phase and the embedding application, so letting guard
+        # lookups land there would let a page fanning out distinct slow hostnames starve
+        # unrelated work. Never explicitly shut down — it lives as long as the predicate
+        # and its (idle) threads are reclaimed at interpreter shutdown. Unlike the
+        # single-flight futures it is loop-independent, so it survives sequential
+        # re-binding across event loops.
+        self._executor: ThreadPoolExecutor | None = None
         # hostname -> (expiry, verdict). Most-recently-used keys at the end; overflow
         # evicts from the front. Negative verdicts are cached too — repeatedly re-resolving
         # a hostile hostname would hand the page a worker-thread-lookup amplifier. Read and
@@ -149,8 +178,9 @@ class _PrivateNetworkBlocker:
         *concurrent* cross-loop use would corrupt them or hang waiters — that case raises.
         *Sequential* reuse across loops (back-to-back ``asyncio.run`` calls) is fine and
         supported: the ``finally`` cleanup in ``_host_is_public`` guarantees
-        ``self._inflight`` is empty between runs, and the TTL+LRU verdict cache is plain
-        data, so the predicate simply re-binds to the new loop and keeps its warm cache.
+        ``self._inflight`` is empty between runs, the TTL+LRU verdict cache is plain
+        data, and the lookup pool is loop-independent, so the predicate simply re-binds
+        to the new loop and keeps its warm cache (and pool).
 
         Detection is **best-effort**: concurrent multi-thread/multi-loop use was never
         supported, and this check reads unsynchronized state, so it catches the common
@@ -199,14 +229,25 @@ class _PrivateNetworkBlocker:
                     # own pending cancel; the latter must be honored, not swallowed.
                     raise
                 return False
-        # Leader: dispatch exactly one worker-thread lookup for this host. Only
+        # Leader: dispatch exactly one lookup for this host onto the predicate's own
+        # bounded pool (never the loop's shared default executor — see __init__). Only
         # _resolve_verdict (pure: catches OSError/ValueError, returns a bool) runs in the
         # thread; the cache write/eviction happens back on the loop thread.
         loop = asyncio.get_running_loop()
         future: asyncio.Future[bool] = loop.create_future()
         self._inflight[host] = future
         try:
-            verdict = await asyncio.to_thread(self._resolve_verdict, host)
+            try:
+                verdict = await asyncio.wait_for(
+                    loop.run_in_executor(self._lookup_pool(), self._resolve_verdict, host),
+                    timeout=self._resolve_timeout,
+                )
+            except TimeoutError:
+                # Lookup exceeded resolve_timeout: fail CLOSED, and cache the negative
+                # verdict like any other (re-resolving a hostile hostname on every
+                # request would hand the page an amplifier). The pool thread keeps
+                # running until the resolver returns; its verdict is discarded.
+                verdict = False
         except BaseException:
             # Leader cancelled — or a buggy custom resolver raised something outside the
             # OSError/ValueError set _resolve_verdict catches: cancel the shared Future so
@@ -218,7 +259,9 @@ class _PrivateNetworkBlocker:
                 future.cancel()
             raise
         else:
-            self._cache[host] = (now + self._ttl, verdict)
+            # Stamp expiry from a fresh clock read: a resolution slower than the TTL
+            # must not produce an entry that is already expired the moment it lands.
+            self._cache[host] = (self._clock() + self._ttl, verdict)
             self._cache.move_to_end(host)
             while len(self._cache) > self._max_entries:
                 self._cache.popitem(last=False)
@@ -227,6 +270,19 @@ class _PrivateNetworkBlocker:
             return verdict
         finally:
             self._inflight.pop(host, None)
+
+    def _lookup_pool(self) -> ThreadPoolExecutor:
+        """The predicate-owned DNS lookup pool, created lazily on the first cache miss.
+
+        See the ``__init__`` comment for why this is a dedicated bounded pool rather
+        than the loop's default ``to_thread`` executor, and for its lifecycle.
+        """
+        if self._executor is None:
+            self._executor = ThreadPoolExecutor(
+                max_workers=GUARD_RESOLVER_MAX_WORKERS,
+                thread_name_prefix="colorsense-guard-dns",
+            )
+        return self._executor
 
     def _resolve_verdict(self, host: str) -> bool:
         try:
@@ -248,6 +304,7 @@ def block_private_networks(
     ttl: float = DEFAULT_GUARD_TTL_SECONDS,
     max_entries: int = DEFAULT_GUARD_MAX_ENTRIES,
     clock: Clock = time.monotonic,
+    resolve_timeout: float = DEFAULT_GUARD_RESOLVE_TIMEOUT_SECONDS,
 ) -> Callable[[str], Awaitable[bool]]:
     """Build a ``request_filter`` predicate that rejects non-public destinations.
 
@@ -275,17 +332,26 @@ def block_private_networks(
     Chromium resolves hostnames independently when it connects, so a hostname can flip from
     public to internal between this check and the connection. Network isolation of the
     browser environment remains the primary control per SECURITY.md; this filter is defense
-    in depth. Resolution runs **off the event loop**: a cache miss dispatches the blocking
-    ``getaddrinfo`` to a worker thread via ``asyncio.to_thread``, concurrent misses for one
-    host coalesce into a single lookup, and verdicts land in a per-hostname TTL+LRU cache
-    (negative verdicts cached too) — so a slow resolver costs a worker thread plus latency
-    for that host only, never a loop stall.
+    in depth. Resolution runs **off the event loop** on a small thread pool the predicate
+    itself owns (`GUARD_RESOLVER_MAX_WORKERS` threads, created lazily on the first
+    cache miss and kept for the predicate's lifetime) — never the loop's shared default
+    ``to_thread`` executor, so guard lookups cannot starve the pipeline's CPU phase or an
+    embedding application's own thread-pool work. Concurrent misses for one host coalesce
+    into a single lookup; fan-out to *distinct* novel hostnames beyond the pool size
+    queues inside the guard's own pool (bounded threads, not one pinned thread per
+    hostile hostname); each lookup is capped at ``resolve_timeout`` seconds, after which
+    the URL fails **closed** and the negative verdict is cached. Verdicts land in a
+    per-hostname TTL+LRU cache (negative verdicts cached too) — so a slow resolver costs
+    bounded guard-pool time plus latency for that host only, never a loop stall. Honest
+    limit: a timed-out lookup's thread still runs the resolver to completion inside the
+    pool — the timeout bounds the caller's wait, not the thread's occupancy.
 
     **Single-event-loop-at-a-time contract:** the coalescing machinery uses loop-bound
     ``asyncio.Future``\\ s, so each returned predicate must only be used from one event
     loop at a time. Reusing one predicate *sequentially* across loops (e.g. back-to-back
     ``asyncio.run`` calls) is supported — when idle it re-binds to the new loop and keeps
-    its verdict cache. *Concurrent* use from multiple event loops raises
+    its verdict cache (the lookup pool itself is loop-independent and carries over
+    unchanged). *Concurrent* use from multiple event loops raises
     `RuntimeError` (detected best-effort). Direct callers see that error; through
     ``request_filter`` it fails closed instead, so misuse there manifests as requests from
     the other loop being aborted. Create a separate predicate per loop for concurrent use.
@@ -298,8 +364,8 @@ def block_private_networks(
         only-public addresses. The allowlist narrows the filter, never widens it.
     resolver:
         ``host -> [addresses]`` seam, injectable for tests. Stays *synchronous* — the
-        guard runs it inside ``asyncio.to_thread`` on a cache miss. Defaults to a blocking
-        ``socket.getaddrinfo`` lookup; raising ``OSError`` fails closed.
+        guard runs it on its own bounded lookup pool on a cache miss. Defaults to a
+        blocking ``socket.getaddrinfo`` lookup; raising ``OSError`` fails closed.
     ttl:
         Seconds a hostname's verdict is reused before re-resolving. Defaults to
         `DEFAULT_GUARD_TTL_SECONDS` (60).
@@ -308,6 +374,9 @@ def block_private_networks(
         (1024).
     clock:
         Monotonic time source for the TTL, injectable for tests.
+    resolve_timeout:
+        Seconds a single lookup may take before the URL fails closed (and the negative
+        verdict is cached). Defaults to `DEFAULT_GUARD_RESOLVE_TIMEOUT_SECONDS` (10).
     """
     hosts = None if allowed_hosts is None else frozenset(h.lower() for h in allowed_hosts)
     return _PrivateNetworkBlocker(
@@ -316,4 +385,5 @@ def block_private_networks(
         ttl=ttl,
         max_entries=max_entries,
         clock=clock,
+        resolve_timeout=resolve_timeout,
     )

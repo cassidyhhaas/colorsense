@@ -80,6 +80,19 @@ Other changes riding the redesign:
   numeric coincidence of `EPS`/`alpha`/`MIN_POSTERIOR_PROB`, and the reconcile docstring
   contradicted the documented guarantee). Declared-but-unused intent surfaces through
   `divergence`, as before.
+- **Guard DNS lookups no longer share the loop's default executor.** Each
+  `block_private_networks()` predicate now owns a small dedicated thread pool
+  (`GUARD_RESOLVER_MAX_WORKERS = 8`, created lazily, living as long as the predicate)
+  instead of dispatching resolutions via `asyncio.to_thread`. Single-flight coalescing is
+  per-host, so a hostile page fanning requests at many *distinct* slow hostnames could
+  previously pin one default-executor thread per hostname — the same pool the pipeline's
+  per-theme CPU phase and any embedding application use, a cross-request DoS vector in
+  multi-tenant deployments. Excess distinct-host lookups now queue inside the guard's own
+  bounded pool. Each lookup is additionally capped by a new fail-closed
+  `resolve_timeout` parameter (default `DEFAULT_GUARD_RESOLVE_TIMEOUT_SECONDS = 10.0`);
+  on expiry the URL is rejected and the negative verdict cached like any other. Also
+  fixes a marginal cache detail: the TTL expiry is now stamped *after* resolution
+  completes, so a lookup slower than the TTL no longer produces a born-expired entry.
 
 ### Fixed — measurement-layer gaps (live-probe follow-up)
 
