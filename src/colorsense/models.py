@@ -167,9 +167,11 @@ class Theme(StrEnum):
 class Color(BaseModel):
     """An sRGB color with cached OKLCH coordinates.
 
-    ``hex`` is the opaque (or alpha-bearing) sRGB hex string; ``lightness``/``chroma``/
-    ``hue`` are the OKLCH coordinates of the (composited) color. ``alpha`` is the source
-    alpha.
+    ``hex`` is always the *opaque* normalized lowercase 7-char sRGB hex string
+    (``#rrggbb``) — alpha is carried separately in ``alpha`` and never encoded in the
+    hex (the invariant ``color/primitives.py`` establishes; fixed-length hexes are also
+    what keeps lexicographic tie-breaks well-defined). ``lightness``/``chroma``/``hue``
+    are the OKLCH coordinates of the (composited) color; ``alpha`` is the source alpha.
     """
 
     model_config = ConfigDict(frozen=True)
