@@ -23,7 +23,10 @@ scale.
 A render opens a fresh browser context at a fixed viewport (1280×800 by default) with the
 requested `prefers-color-scheme` (light by default), navigates, waits for the `load`
 event plus a short, capped network-idle wait, injects CSS that disables all transitions
-and animations (so computed colors are stable, not mid-fade), step-scrolls the full page
+and animations (so computed colors are stable, not mid-fade — best-effort: the injection
+is retried once and, if it still fails, skipped with a `RuntimeWarning` rather than
+failing the render, since on busy pages Playwright can spuriously reject it over an
+unrelated CSP-violation console error), step-scrolls the full page
 height (up to 20 viewport-steps) to trigger lazily loaded content, and detects
 cookie-consent / overlay banners so they can be masked out later.
 

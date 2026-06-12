@@ -99,6 +99,94 @@ async def test_render_error_raised_on_navigation_failure(monkeypatch: pytest.Mon
     assert err.__cause__ is original  # original Playwright error chained via ``from``
 
 
+# --- Motion-neutralization CSS injection is best-effort --------------------------------
+#
+# Playwright's add_style_tag races its evaluation against ANY console error on the page
+# mentioning "Content Security Policy" (Frame._raceWithCSPError in the driver), so on a
+# busy page an *unrelated* violation — e.g. the site's own third-party tracker blocked by
+# its connect-src — can spuriously reject the call. Seen live as
+# ``RenderError: Page.add_style_tag: Connecting to 'https://...' violates the following
+# Content Security Policy directive: "connect-src ..."`` on analyze("https://stripe.com").
+# The injection is stabilization, not harvesting: goto() must retry once, then warn and
+# continue rendering without the CSS — never fail the whole analysis.
+
+_CSP_RACE_ERROR_TEXT = (
+    "Page.add_style_tag: Connecting to 'https://dm.tracker.example/' violates the "
+    'following Content Security Policy directive: "connect-src ..."'
+)
+
+
+class _MotionFakePage:
+    """Fake Page for driving ``RenderSession.goto``; ``add_style_tag`` fails N times."""
+
+    def __init__(self, style_failures: int) -> None:
+        self._style_failures = style_failures
+        self.style_attempts = 0
+        self.injected_css: list[str] = []
+
+    async def goto(self, _url: str, **_kwargs: object) -> None:
+        return None
+
+    async def wait_for_load_state(self, _state: str, **_kwargs: object) -> None:
+        return None
+
+    async def add_style_tag(self, *, content: str) -> None:
+        self.style_attempts += 1
+        if self.style_attempts <= self._style_failures:
+            raise PlaywrightError(_CSP_RACE_ERROR_TEXT)
+        self.injected_css.append(content)
+
+    async def evaluate(self, _js: str, *_args: object) -> list[object]:
+        return []
+
+
+def _session_with_page(page: _MotionFakePage) -> RenderSession:
+    session = RenderSession(Theme.light, VIEWPORT)
+    session._page = page  # type: ignore[assignment]
+    return session
+
+
+async def test_goto_injects_motion_css_once_on_success(
+    recwarn: pytest.WarningsRecorder,
+) -> None:
+    page = _MotionFakePage(style_failures=0)
+
+    await _session_with_page(page).goto("https://example.test/")
+
+    assert page.style_attempts == 1
+    assert page.injected_css == [render_mod._DISABLE_MOTION_CSS]
+    assert not [w for w in recwarn if issubclass(w.category, RuntimeWarning)]
+
+
+async def test_goto_retries_transient_style_injection_failure(
+    recwarn: pytest.WarningsRecorder,
+) -> None:
+    # One spurious CSP-race rejection: the retry must land the CSS, with no warning and
+    # no error escaping goto().
+    page = _MotionFakePage(style_failures=1)
+
+    await _session_with_page(page).goto("https://example.test/")
+
+    assert page.style_attempts == 2
+    assert page.injected_css == [render_mod._DISABLE_MOTION_CSS]
+    assert not [w for w in recwarn if issubclass(w.category, RuntimeWarning)]
+
+
+async def test_goto_warns_and_continues_when_style_injection_keeps_failing() -> None:
+    # Persistent failure (e.g. the page's CSP genuinely forbids inline styles): goto()
+    # gives up after exactly one retry, emits a RuntimeWarning, and the render proceeds
+    # without the CSS instead of raising.
+    page = _MotionFakePage(style_failures=99)
+    session = _session_with_page(page)
+
+    with pytest.warns(RuntimeWarning, match="transition/animation-disabling CSS"):
+        await session.goto("https://example.test/")
+
+    assert page.style_attempts == 2  # initial attempt + one retry, then degrade
+    assert page.injected_css == []
+    assert session.consent_rects == []  # the rest of goto() still ran
+
+
 # --- RenderSession teardown: every resource is closed exactly once --------------------
 
 

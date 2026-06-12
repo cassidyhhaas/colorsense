@@ -24,6 +24,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import inspect
+import warnings
 from collections.abc import Awaitable, Callable, Sequence
 from types import TracebackType
 from typing import Literal, Self
@@ -469,10 +470,10 @@ class RenderSession:
     async def goto(self, url: str, *, nav_timeout_ms: float = DEFAULT_NAV_TIMEOUT_MS) -> None:
         """Navigate to ``url`` and stabilize the page for harvesting.
 
-        Performs ``goto(..., wait_until="load")``, a guarded ``networkidle`` wait, motion
-        neutralization, step-scrolling to trigger lazy content, and consent-region
-        detection. ``networkidle`` is guarded with a timeout/try-except so ``file://``
-        pages that never report idle do not hang.
+        Performs ``goto(..., wait_until="load")``, a guarded ``networkidle`` wait,
+        best-effort motion neutralization (see `_disable_motion`), step-scrolling to
+        trigger lazy content, and consent-region detection. ``networkidle`` is guarded
+        with a timeout/try-except so ``file://`` pages that never report idle do not hang.
 
         Parameters
         ----------
@@ -487,13 +488,42 @@ class RenderSession:
         with contextlib.suppress(Exception):
             await page.wait_for_load_state("networkidle", timeout=_NETWORKIDLE_TIMEOUT_MS)
 
-        await page.add_style_tag(content=_DISABLE_MOTION_CSS)
+        await self._disable_motion(page)
 
         # Step-scrolling is best-effort (triggers lazy content).
         with contextlib.suppress(Exception):
             await page.evaluate(_STEP_SCROLL_JS, _MAX_SCROLL_STEPS)
 
         self._consent_rects = await self._detect_consent_rects()
+
+    @staticmethod
+    async def _disable_motion(page: Page) -> None:
+        """Inject the transition/animation-disabling CSS, best-effort.
+
+        Playwright's ``add_style_tag`` races its in-page evaluation against *any* console
+        error mentioning "Content Security Policy" (``Frame._raceWithCSPError`` in the
+        driver) — it never checks that the CSP message relates to the injected tag. On a
+        busy page, an unrelated page-side violation (e.g. a third-party tracker blocked by
+        the site's own ``connect-src``) landing in that window spuriously rejects the call
+        even though the inline ``<style>`` insert is fine. The injection is stabilization,
+        not harvesting, so it must never be fatal: retry once past the transient window,
+        then warn and render without the CSS (computed colors may be read mid-transition —
+        degraded, but far better than failing the whole analysis). A double insert from a
+        retry after a spurious rejection is harmless: the CSS is idempotent.
+        """
+        last_error: Exception | None = None
+        for _attempt in range(2):
+            try:
+                await page.add_style_tag(content=_DISABLE_MOTION_CSS)
+                return
+            except Exception as exc:  # best-effort: failure is reported via the warning
+                last_error = exc
+        warnings.warn(
+            "colorsense: could not inject the transition/animation-disabling CSS "
+            f"({last_error}); continuing without it — computed colors may be mid-transition",
+            RuntimeWarning,
+            stacklevel=2,
+        )
 
     async def _detect_consent_rects(self) -> list[Rect]:
         """Return bounding rects of consent/overlay banners without clicking them."""

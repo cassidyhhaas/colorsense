@@ -58,6 +58,19 @@ Other changes riding the redesign:
 
 ### Fixed — pre-release review follow-up
 
+- **Motion-neutralizing CSS injection no longer aborts a render.** The
+  transition/animation-disabling `<style>` injected after navigation could fail the whole
+  `analyze()` with `RenderError: Page.add_style_tag: Connecting to '…' violates the
+  following Content Security Policy directive: "connect-src …"` — intermittently, on
+  sites whose own third-party trackers trip their CSP (seen live on stripe.com).
+  Playwright's `add_style_tag` races its evaluation against *any* console error
+  mentioning "Content Security Policy" (`Frame._raceWithCSPError`), so an unrelated
+  page-side violation landing in that window spuriously rejects the call. The injection
+  is stabilization, not harvesting: it is now retried once and, if it still fails (e.g. a
+  CSP that genuinely forbids inline styles), skipped with a `RuntimeWarning` so the
+  render continues — computed colors may then be read mid-transition, which is degraded
+  but never fatal.
+
 - **Dead data path removed: `ClassifiedToken.text_on_base`.** The relational classifier
   resolved each `--on-<base>` / `--<base>-foreground` token's base surface to a semantic
   role and threaded it through the classification tuple and alias inheritance — but
