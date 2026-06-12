@@ -10,10 +10,12 @@ most of them now as library knobs:
   your policy.
 * **Egress filtering** (§1 "Filter egress in-library"): the library-shipped
   :func:`colorsense.block_private_networks` is installed as the policy's
-  ``request_filter``, so every request the rendered page makes — navigation, redirects,
-  sub-resources, the page's own ``fetch`` calls — and the policy's own ``robots.txt``
-  fetch (each of its redirect hops vetted before being requested) is checked against
-  private/loopback/link-local/metadata ranges, failing closed.
+  ``request_filter``, so every HTTP(S) request the rendered page makes — navigation,
+  redirects, sub-resources, the page's own ``fetch`` calls — and the policy's own
+  ``robots.txt`` fetch (each of its redirect hops vetted before being requested) is
+  checked against private/loopback/link-local/metadata ranges, failing closed; installing
+  the filter also makes the library refuse WebSocket connections outright (service
+  workers are always blocked).
 * **Concurrency cap** (§2): ``PolitenessPolicy(max_concurrent_renders=...)`` bounds
   simultaneous renders process-wide (the policy instance is shared, so its semaphore is).
 * **Overall deadline** (§2): ``analyze(..., max_total_seconds=...)`` bounds each call end

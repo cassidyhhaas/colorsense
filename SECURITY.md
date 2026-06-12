@@ -33,9 +33,16 @@ and sub-resource requests** (scripts, images, XHR/`fetch`) can reach internal en
 regardless of where the navigation pointed — a perfectly public page can still probe
 `169.254.169.254` from inside the browser. The in-library mechanism for this is
 `PolitenessPolicy(request_filter=...)`: a predicate — synchronous or asynchronous — over
-**every** request URL the browser makes (the navigation included), aborting any request it
-rejects (and failing closed if the predicate itself errors); a sync predicate runs inline
-on the event loop and must not block. `block_private_networks()` is a shipped filter for the common
+every HTTP(S) request URL the browser makes (the navigation, redirects, sub-resources,
+and the page's own `fetch`/XHR included), aborting any request it rejects (and failing
+closed if the predicate itself errors); a sync predicate runs inline on the event loop and
+must not block. The two browser network paths the route interceptor cannot see are closed
+off rather than filtered: **WebSocket connections are refused outright** whenever a
+`request_filter` is configured (their opening handshakes bypass Playwright's
+`context.route`, so instead of vetting `ws://` URLs the library never connects them at
+all), and **service workers are always blocked** at browser-context creation (their
+requests would otherwise bypass the route interceptor; rendering for color extraction
+never needs them). `block_private_networks()` is a shipped filter for the common
 case (see "What you must do" below); deciding *which* destinations are safe remains your
 policy, and network isolation (below) remains the strong recommendation even with a filter
 in place.
@@ -56,7 +63,8 @@ must enforce your own guard rails before and around the call**:
 
 - **Allowlist** the schemes and hosts you are willing to fetch; reject everything else.
 - **Filter egress in-library** with `request_filter`, so the rendered page's sub-resource
-  requests are subject to the same rules as the navigation. The library ships an
+  requests are subject to the same rules as the navigation (configuring one also turns on
+  the outright WebSocket refusal above). The library ships an
   implementation: `block_private_networks()` builds an async filter that resolves each
   hostname — off the event loop, on a small thread pool the filter itself owns (never the
   loop's shared default executor), with a fail-closed per-lookup timeout, per-host verdict
@@ -156,7 +164,7 @@ cannot stall your pipeline; raise the cap to honor longer delays. Two caveats:
 
 | Risk | Library's stance | Your responsibility |
 | --- | --- | --- |
-| **SSRF** | `http(s)` only by default (`file://` opt-in, other schemes rejected); no host/IP validation unless configured; follows redirects; optional `request_filter` (sync or async) over every browser request and the policy's own `robots.txt` fetch (each redirect hop included), with `block_private_networks()` as the shipped filter — async, resolving DNS off the event loop (does not fully defeat DNS rebinding) | Allowlist hosts, configure `request_filter` (e.g. `block_private_networks()`), pin redirects, isolate egress — network isolation stays primary |
+| **SSRF** | `http(s)` only by default (`file://` opt-in, other schemes rejected); no host/IP validation unless configured; follows redirects; optional `request_filter` (sync or async) over every HTTP(S) browser request and the policy's own `robots.txt` fetch (each redirect hop included); WebSocket connections refused outright when a filter is configured (handshakes bypass route interception); service workers always blocked; `block_private_networks()` is the shipped filter — async, resolving DNS off the event loop (does not fully defeat DNS rebinding) | Allowlist hosts, configure `request_filter` (e.g. `block_private_networks()`), pin redirects, isolate egress — network isolation stays primary |
 | **Resource / DoS** | Timeout, rate limiter (incl. capped `Crawl-delay`), capture dimension + decode pixel caps, robots-fetch caps (timeout, redirects, body size); opt-in `max_concurrent_renders` and `max_total_seconds` (both unset by default); opt-in V8-heap cap via `browser_args`; no in-process memory/CPU cap (by design) | Container limits (the enforceable cap), set `max_concurrent_renders` + `max_total_seconds`, cap the V8 heap via `browser_args`, network isolation |
 | **`robots.txt`** | Respected by default (incl. `Crawl-delay`, capped at 30s), but fails open; can be disabled | Don't disable without authorization; gate authorization yourself before calling |
 

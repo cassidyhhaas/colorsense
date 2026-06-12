@@ -1,10 +1,15 @@
 """A library-shipped egress filter blocking private-network destinations.
 
 [`block_private_networks`][colorsense.block_private_networks] builds a predicate suitable for
-``PolitenessPolicy(request_filter=...)``: it is applied by the library to **every** URL the
-browser requests while rendering (the navigation and all sub-resources) *and* to the
+``PolitenessPolicy(request_filter=...)``: it is applied by the library to every URL the
+browser requests through ``context.route`` while rendering — the navigation, every redirect
+hop, and all sub-resources including the page's own ``fetch``/XHR — *and* to the
 policy's own server-side ``robots.txt`` GET (the robots URL and each redirect hop, vetted
-before being requested), resolving each hostname and rejecting any URL whose resolution
+before being requested). The two browser network paths ``context.route`` does **not**
+intercept are closed off rather than filtered: WebSocket handshakes are refused outright
+when a filter is configured (never connected upstream) and service workers are blocked
+unconditionally at context creation (see ``harvest/render.py``). The predicate works by
+resolving each hostname and rejecting any URL whose resolution
 includes a non-public address — loopback,
 RFC 1918, link-local (including the cloud metadata endpoint 169.254.169.254), CGNAT
 (100.64.0.0/10), unspecified, multicast, reserved, and their IPv6 equivalents. Resolution
@@ -311,11 +316,15 @@ def block_private_networks(
     The returned **async** predicate (``await guard(url) -> bool``; ``True`` permits,
     ``False`` aborts; only usable under a running event loop, as the ``request_filter``
     seams are) is meant for ``PolitenessPolicy(request_filter=...)``, where the library applies
-    it to **every** URL the browser requests while rendering — the navigation, every
-    redirect hop, and all sub-resources, including the page's own ``fetch`` calls — and to
-    the policy's own ``robots.txt`` GET, whose initial URL and every redirect ``Location``
-    are vetted before each request goes out. It implements the SECURITY.md §1
-    egress-filter item:
+    it to every ``http(s)`` URL the browser requests while rendering — the navigation,
+    every redirect hop, and all sub-resources, including the page's own ``fetch``/XHR
+    calls — and to the policy's own ``robots.txt`` GET, whose initial URL and every
+    redirect ``Location`` are vetted before each request goes out. The two browser network
+    paths Playwright's ``context.route`` cannot intercept are closed rather than filtered:
+    WebSocket connections are **refused outright** whenever a ``request_filter`` is
+    configured (the handshake never reaches the network), and **service workers are always
+    blocked** at context creation — strictly stronger than per-URL vetting for both. It
+    implements the SECURITY.md §1 egress-filter item:
 
     * only ``http(s)`` URLs pass; URLs carrying userinfo (``user:pass@host``) are rejected;
     * the hostname is resolved (stdlib ``getaddrinfo``; IP literals pass through without a

@@ -34,6 +34,7 @@ from playwright.async_api import (
     Page,
     Playwright,
     Route,
+    WebSocketRoute,
     async_playwright,
 )
 
@@ -190,8 +191,12 @@ def _route_handler(
 ) -> Callable[[Route], Awaitable[None]]:
     """Build the ``context.route`` handler enforcing ``request_filter`` on every request.
 
-    The predicate sees the request URL (the navigation itself and every sub-resource the
-    rendered page asks for: scripts, images, XHR/``fetch``). ``False`` aborts the request.
+    The predicate sees the request URL (the navigation itself, every redirect hop, and
+    every sub-resource the rendered page asks for: scripts, images, XHR/``fetch``).
+    ``False`` aborts the request. What ``context.route`` does NOT intercept — WebSocket
+    opening handshakes and service-worker traffic — is blocked outright instead of
+    filtered (see `_refuse_web_socket` and the ``service_workers="block"`` context option),
+    so no browser-initiated network path escapes both the filter and the block.
     Evaluation goes through `evaluate_request_filter`, so sync and async predicates
     are handled uniformly and a predicate that *raises* fails CLOSED — the request is
     aborted. Module-level so the abort/continue logic is unit testable without a browser.
@@ -212,6 +217,23 @@ def _route_handler(
             await route.abort()
 
     return handle
+
+
+async def _refuse_web_socket(ws_route: WebSocketRoute) -> None:
+    """Refuse a WebSocket connection outright (the WS arm of the egress gate).
+
+    ``context.route`` does not intercept WebSocket opening handshakes, so the HTTP route
+    handler above never sees a ``new WebSocket('ws://...')`` issued by the rendered page —
+    left unrouted, that handshake would be a real GET the ``request_filter`` cannot vet.
+    Rather than proxying the connection through the filter (which would require connecting
+    to the real server before a verdict), this handler simply never calls
+    ``connect_to_server`` — no egress occurs at all — and closes the page-side socket so
+    the page observes a dead connection. A dead WebSocket is harmless for palette
+    extraction, mirroring the data:/blob: abort rationale in ``net/guard.py``.
+    Installed (against all URLs) only when a ``request_filter`` is configured, alongside
+    the HTTP route.
+    """
+    await ws_route.close()
 
 
 class SharedBrowser:
@@ -313,8 +335,11 @@ class RenderSession:
         over every request URL the browser makes (the navigation and all sub-resources), installed
         as a ``context.route`` interceptor: requests for which it returns ``False`` — or for which
         it raises (fail closed) — are aborted. A sync predicate runs inline on the event loop and
-        must not block; an async one is awaited. ``None`` (the default) installs no route at all, so
-        the unfiltered path has zero interception overhead.
+        must not block; an async one is awaited. WebSocket handshakes are not routable through
+        ``context.route``, so when a filter is configured they are refused outright rather than
+        filtered (see `_refuse_web_socket`); service workers are blocked unconditionally at
+        context creation. ``None`` (the default) installs no routes at all, so the unfiltered
+        path has zero interception overhead.
     browser:
         When not ``None``, an externally owned `Browser` the
         session opens its context inside instead of launching its own Chromium (the per-
@@ -371,16 +396,24 @@ class RenderSession:
         assert self._browser is not None  # external browser, or just launched above
         # ``user_agent=None`` is Playwright's own default (stock headless-Chromium UA), so a
         # configured UA overrides it and ``None`` passes through unchanged.
+        # ``service_workers="block"`` is unconditional: service workers are irrelevant to
+        # color harvesting, and by default their requests bypass ``context.route`` — an
+        # unrouted path the egress filter would never see. Blocking registration removes
+        # that path entirely.
         self._context = await self._browser.new_context(
             viewport={"width": self._viewport.width, "height": self._viewport.height},
             device_scale_factor=self._viewport.device_scale_factor,
             color_scheme=_COLOR_SCHEME[self._theme],
             user_agent=self._user_agent,
+            service_workers="block",
         )
-        # Egress filtering is opt-in: install the interceptor only when a filter exists, so
-        # the default (None) path has zero routing overhead.
+        # Egress filtering is opt-in: install the interceptors only when a filter exists, so
+        # the default (None) path has zero routing overhead. WebSocket handshakes are not
+        # seen by ``context.route``, so they get their own route that refuses to connect
+        # (see _refuse_web_socket).
         if self._request_filter is not None:
             await self._context.route("**/*", _route_handler(self._request_filter))
+            await self._context.route_web_socket("**/*", _refuse_web_socket)
         self._page = await self._context.new_page()
         return self
 

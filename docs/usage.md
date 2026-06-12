@@ -213,9 +213,12 @@ policy** — whether a fetch is authorized is the consumer's decision, made *bef
   directive cannot stall a pipeline.
 - **`allow_file_urls`** — off by default; `file://` reads arbitrary local files, so it is
   an explicit opt-in (the test suite opts in to render its local fixtures).
-- **`request_filter`** — an optional predicate over **every URL the browser requests**
-  while rendering (the navigation *and* the page's own sub-resources), aborting any request
-  it rejects. It may be **synchronous or asynchronous** (the `RequestFilter` type alias):
+- **`request_filter`** — an optional predicate over **every HTTP(S) URL the browser
+  requests** while rendering (the navigation *and* the page's own sub-resources), aborting
+  any request it rejects. The two paths route interception cannot see are closed outright
+  rather than filtered: configuring a filter also refuses every WebSocket connection (the
+  handshake never goes out), and service workers are always blocked at context creation.
+  It may be **synchronous or asynchronous** (the `RequestFilter` type alias):
   a sync predicate is invoked inline on the event loop's request path and must not block
   (cheap string checks only); an async predicate is awaited, free to do slow work off the
   loop. The same filter also gates the policy's own server-side `robots.txt` GET:

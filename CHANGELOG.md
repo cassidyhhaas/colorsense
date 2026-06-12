@@ -58,6 +58,20 @@ Other changes riding the redesign:
 
 ### Fixed — pre-release review follow-up
 
+- **The egress gate now covers WebSockets and service workers.** The `request_filter`
+  route handler is installed via Playwright's `context.route`, which never sees WebSocket
+  opening handshakes and (by default) service-worker-originated requests — so a hostile
+  rendered page could issue `new WebSocket('ws://169.254.169.254/')`, a real blind GET to
+  an internal host the filter never vetted, despite the docs claiming coverage of "every
+  URL the browser requests". Both unrouted paths are now closed outright rather than
+  filtered: browser contexts are always created with `service_workers="block"` (service
+  workers are irrelevant to color harvesting), and when a `request_filter` is configured a
+  `context.route_web_socket` handler refuses every WebSocket connection — it never
+  connects upstream, so no handshake leaves the browser and the page just observes a dead
+  socket, harmless for palette extraction. The declared playwright floor rises
+  `>=1.40` → `>=1.48` (where `route_web_socket` landed; the lockfile already resolved
+  1.60.0). `SECURITY.md` §1 and the `block_private_networks` docs now state the coverage
+  precisely.
 - **Relational and status tokens are visible to divergence again.** Empty-prior tokens
   (relational `--on-primary`-style foregrounds; status tokens excluded from the palette)
   were invisible to reconciliation: a page rendering exactly its declared

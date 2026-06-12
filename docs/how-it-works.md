@@ -393,9 +393,11 @@ wraps strictly the render itself — never the throttle/robots wait — so a slo
 held while a browser is genuinely rendering.
 
 **The SSRF guard resolves DNS off the event loop and fails closed.**
-`block_private_networks()` returns an async predicate applied to every URL the browser
-requests (navigation and all sub-resources) and to the policy's own `robots.txt` GET
-(including each redirect hop). On a cache miss, the blocking `getaddrinfo` runs on a
+`block_private_networks()` returns an async predicate applied to every HTTP(S) URL the
+browser requests (navigation and all sub-resources) and to the policy's own `robots.txt`
+GET (including each redirect hop); the paths route interception cannot see are closed
+outright — WebSocket connections are refused whenever a filter is configured, and service
+workers are always blocked at context creation. On a cache miss, the blocking `getaddrinfo` runs on a
 small thread pool the predicate itself owns — never the loop's shared default
 `to_thread` executor, so guard lookups cannot starve the pipeline's CPU phase or an
 embedding application's own thread-pool work — capped by a fail-closed per-lookup

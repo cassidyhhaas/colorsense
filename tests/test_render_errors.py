@@ -406,6 +406,18 @@ class _UAFakePage:
 
 
 class _UAFakeContext:
+    """Fake context recording the route interceptors installed on it."""
+
+    def __init__(self) -> None:
+        self.routes: list[tuple[str, object]] = []
+        self.ws_routes: list[tuple[str, object]] = []
+
+    async def route(self, pattern: str, handler: object) -> None:
+        self.routes.append((pattern, handler))
+
+    async def route_web_socket(self, pattern: str, handler: object) -> None:
+        self.ws_routes.append((pattern, handler))
+
     async def new_page(self) -> _UAFakePage:
         return _UAFakePage()
 
@@ -418,10 +430,13 @@ class _UAFakeBrowser:
 
     def __init__(self) -> None:
         self.context_kwargs: list[dict[str, object]] = []
+        self.contexts: list[_UAFakeContext] = []
 
     async def new_context(self, **kwargs: object) -> _UAFakeContext:
         self.context_kwargs.append(kwargs)
-        return _UAFakeContext()
+        context = _UAFakeContext()
+        self.contexts.append(context)
+        return context
 
     async def close(self) -> None:
         return None
@@ -480,3 +495,71 @@ async def test_render_session_default_keeps_stock_user_agent(
         pass
 
     assert browser.context_kwargs[0]["user_agent"] is None
+
+
+# --- Egress gate arms context.route cannot cover: service workers + WebSockets ----------
+
+
+async def test_render_session_always_blocks_service_workers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Service-worker requests bypass context.route, so registration is blocked at context
+    # creation — unconditionally, filter or no filter (SW are irrelevant to harvesting).
+    browser = _patch_playwright(monkeypatch)
+
+    async with RenderSession(Theme.light, VIEWPORT):
+        pass
+    async with RenderSession(Theme.light, VIEWPORT, request_filter=lambda _url: True):
+        pass
+
+    assert [kwargs["service_workers"] for kwargs in browser.context_kwargs] == ["block", "block"]
+
+
+async def test_render_session_installs_ws_refusal_route_with_filter(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Configuring a request_filter must install BOTH interceptors: the HTTP route enforcing
+    # the filter and the route_web_socket refusing every WebSocket (whose handshakes the
+    # HTTP route never sees).
+    browser = _patch_playwright(monkeypatch)
+
+    async with RenderSession(Theme.light, VIEWPORT, request_filter=lambda _url: True):
+        pass
+
+    (context,) = browser.contexts
+    assert [pattern for pattern, _ in context.routes] == ["**/*"]
+    assert context.ws_routes == [("**/*", render_mod._refuse_web_socket)]
+
+
+async def test_render_session_installs_no_routes_without_filter(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The default (no filter) path stays interception-free: zero routes of either kind.
+    browser = _patch_playwright(monkeypatch)
+
+    async with RenderSession(Theme.light, VIEWPORT):
+        pass
+
+    (context,) = browser.contexts
+    assert context.routes == []
+    assert context.ws_routes == []
+
+
+async def test_refuse_web_socket_closes_without_connecting() -> None:
+    # The refusal handler must close the page-side socket and never call
+    # connect_to_server — refusal means zero egress, not a filtered proxy.
+    class _FakeWebSocketRoute:
+        def __init__(self) -> None:
+            self.closes = 0
+            self.connects = 0
+
+        async def close(self) -> None:
+            self.closes += 1
+
+        def connect_to_server(self) -> None:
+            self.connects += 1
+
+    ws_route = _FakeWebSocketRoute()
+    await render_mod._refuse_web_socket(ws_route)  # type: ignore[arg-type]
+    assert ws_route.closes == 1
+    assert ws_route.connects == 0
