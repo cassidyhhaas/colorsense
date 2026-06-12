@@ -245,6 +245,44 @@ async def test_no_request_filter_lets_subresource_load(fixtures_dir: Path) -> No
     assert bg == "rgb(255, 0, 0)"
 
 
+async def test_websocket_refused_when_request_filter_installed(fixtures_dir: Path) -> None:
+    # websocket.html attempts `new WebSocket('ws://127.0.0.1:1/')` and records every
+    # lifecycle event. WebSocket handshakes bypass context.route, so the egress gate
+    # refuses them outright via a route_web_socket handler whenever a request_filter is
+    # configured — even a permissive one: the HTTP filter below allows everything, proving
+    # it is the refusal route (not the filter) that kills the socket. The page-side socket
+    # must never open, and the render must still complete and be harvestable.
+    page_url = (fixtures_dir / "websocket.html").as_uri()
+
+    def allow_all_http(_url: str) -> bool:
+        return True
+
+    async with RenderSession(Theme.light, VIEWPORT, request_filter=allow_all_http) as session:
+        await session.goto(page_url)
+        await session.page.wait_for_function("() => window.__wsDone", timeout=5000)
+        events = await session.page.evaluate("() => window.__wsEvents")
+        bg = await session.page.evaluate("() => getComputedStyle(document.body).backgroundColor")
+
+    assert "open" not in events  # the socket never opened: no handshake ever went out
+    assert "close" in events  # the page observed a dead (closed) socket, nothing more
+    assert bg == "rgb(255, 255, 255)"  # the page itself rendered fine for harvesting
+
+
+async def test_websocket_fixture_harvests_under_request_filter(
+    fixtures_dir: Path, config: Config
+) -> None:
+    # End-to-end arm of the test above: a full harvest_page over the WS-attempting fixture
+    # completes normally with a request_filter installed (the dead socket is harmless).
+    harvest = await harvest_page(
+        (fixtures_dir / "websocket.html").as_uri(),
+        Theme.light,
+        config,
+        VIEWPORT,
+        request_filter=lambda _url: True,
+    )
+    assert harvest.elements  # the page rendered and was walked despite the refused socket
+
+
 async def test_render_session_exposes_page_and_consent(fixtures_dir: Path) -> None:
     async with RenderSession(Theme.light, VIEWPORT) as session:
         await session.goto((fixtures_dir / "consent.html").as_uri())

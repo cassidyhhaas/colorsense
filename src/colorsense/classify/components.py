@@ -107,9 +107,7 @@ def _matches_interactivity(rule: WhenRule, element: HarvestedElement) -> bool:
         return element.tag == "button" and element.clickable
     if when == "has_hover_color_change":
         return element.has_hover_color_change
-    if when == "has_focus_ring":
-        # No corresponding field on HarvestedElement — treat as never true.
-        return False
+    # Unreachable for validated configs: Config rejects unknown predicates at load time.
     return False
 
 
@@ -119,7 +117,7 @@ def _matches_geometry(
     thresholds: GeometryThresholds,
     viewport: Viewport,
 ) -> bool:
-    """Dispatch the known geometry ``when`` predicates; unknown ones are False."""
+    """Dispatch the geometry ``when`` predicates (validated at config load)."""
     rect = element.rect
     vp_w = float(viewport.width)
     vp_h = float(viewport.height)
@@ -223,9 +221,6 @@ def _apply_suppressors(
                 triggered = element.aria_hidden
             elif key == "zero_area_or_hidden":
                 triggered = (not element.visible) or rect.width <= 0.0 or rect.height <= 0.0
-            elif key == "consent_masked_region":
-                # No mask info available at this layer.
-                triggered = False
             if triggered:
                 for component in accum:
                     accum[component] *= suppressor.factor
@@ -244,7 +239,14 @@ def _finalize_distribution(
     accum: dict[ComponentType, float],
     config: Config,
 ) -> dict[ComponentType, float]:
-    """Softmax positive votes, prune below threshold, and renormalize survivors."""
+    """Softmax positive votes, prune below threshold, and renormalize survivors.
+
+    The prune/renormalize/argmax-fallback shape mirrors ``palette/_pruning.py``'s
+    `prune_distribution`, but deliberately stays local: this ranks ``ComponentType``
+    keys, not colors, so the palette helper's hex tie-break convention has no analogue
+    here (and ``classify/`` does not depend on ``palette/``). The argmax fallback is
+    deterministic regardless — ``accum`` is built in config-rule order.
+    """
     cc = config.component_classifier
     positive = {comp: vote for comp, vote in accum.items() if vote > 0.0}
     if not positive:

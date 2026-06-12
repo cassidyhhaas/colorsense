@@ -99,6 +99,94 @@ async def test_render_error_raised_on_navigation_failure(monkeypatch: pytest.Mon
     assert err.__cause__ is original  # original Playwright error chained via ``from``
 
 
+# --- Motion-neutralization CSS injection is best-effort --------------------------------
+#
+# Playwright's add_style_tag races its evaluation against ANY console error on the page
+# mentioning "Content Security Policy" (Frame._raceWithCSPError in the driver), so on a
+# busy page an *unrelated* violation — e.g. the site's own third-party tracker blocked by
+# its connect-src — can spuriously reject the call. Seen live as
+# ``RenderError: Page.add_style_tag: Connecting to 'https://...' violates the following
+# Content Security Policy directive: "connect-src ..."`` on analyze("https://stripe.com").
+# The injection is stabilization, not harvesting: goto() must retry once, then warn and
+# continue rendering without the CSS — never fail the whole analysis.
+
+_CSP_RACE_ERROR_TEXT = (
+    "Page.add_style_tag: Connecting to 'https://dm.tracker.example/' violates the "
+    'following Content Security Policy directive: "connect-src ..."'
+)
+
+
+class _MotionFakePage:
+    """Fake Page for driving ``RenderSession.goto``; ``add_style_tag`` fails N times."""
+
+    def __init__(self, style_failures: int) -> None:
+        self._style_failures = style_failures
+        self.style_attempts = 0
+        self.injected_css: list[str] = []
+
+    async def goto(self, _url: str, **_kwargs: object) -> None:
+        return None
+
+    async def wait_for_load_state(self, _state: str, **_kwargs: object) -> None:
+        return None
+
+    async def add_style_tag(self, *, content: str) -> None:
+        self.style_attempts += 1
+        if self.style_attempts <= self._style_failures:
+            raise PlaywrightError(_CSP_RACE_ERROR_TEXT)
+        self.injected_css.append(content)
+
+    async def evaluate(self, _js: str, *_args: object) -> list[object]:
+        return []
+
+
+def _session_with_page(page: _MotionFakePage) -> RenderSession:
+    session = RenderSession(Theme.light, VIEWPORT)
+    session._page = page  # type: ignore[assignment]
+    return session
+
+
+async def test_goto_injects_motion_css_once_on_success(
+    recwarn: pytest.WarningsRecorder,
+) -> None:
+    page = _MotionFakePage(style_failures=0)
+
+    await _session_with_page(page).goto("https://example.test/")
+
+    assert page.style_attempts == 1
+    assert page.injected_css == [render_mod._DISABLE_MOTION_CSS]
+    assert not [w for w in recwarn if issubclass(w.category, RuntimeWarning)]
+
+
+async def test_goto_retries_transient_style_injection_failure(
+    recwarn: pytest.WarningsRecorder,
+) -> None:
+    # One spurious CSP-race rejection: the retry must land the CSS, with no warning and
+    # no error escaping goto().
+    page = _MotionFakePage(style_failures=1)
+
+    await _session_with_page(page).goto("https://example.test/")
+
+    assert page.style_attempts == 2
+    assert page.injected_css == [render_mod._DISABLE_MOTION_CSS]
+    assert not [w for w in recwarn if issubclass(w.category, RuntimeWarning)]
+
+
+async def test_goto_warns_and_continues_when_style_injection_keeps_failing() -> None:
+    # Persistent failure (e.g. the page's CSP genuinely forbids inline styles): goto()
+    # gives up after exactly one retry, emits a RuntimeWarning, and the render proceeds
+    # without the CSS instead of raising.
+    page = _MotionFakePage(style_failures=99)
+    session = _session_with_page(page)
+
+    with pytest.warns(RuntimeWarning, match="transition/animation-disabling CSS"):
+        await session.goto("https://example.test/")
+
+    assert page.style_attempts == 2  # initial attempt + one retry, then degrade
+    assert page.injected_css == []
+    assert session.consent_rects == []  # the rest of goto() still ran
+
+
 # --- RenderSession teardown: every resource is closed exactly once --------------------
 
 
@@ -406,6 +494,18 @@ class _UAFakePage:
 
 
 class _UAFakeContext:
+    """Fake context recording the route interceptors installed on it."""
+
+    def __init__(self) -> None:
+        self.routes: list[tuple[str, object]] = []
+        self.ws_routes: list[tuple[str, object]] = []
+
+    async def route(self, pattern: str, handler: object) -> None:
+        self.routes.append((pattern, handler))
+
+    async def route_web_socket(self, pattern: str, handler: object) -> None:
+        self.ws_routes.append((pattern, handler))
+
     async def new_page(self) -> _UAFakePage:
         return _UAFakePage()
 
@@ -418,10 +518,13 @@ class _UAFakeBrowser:
 
     def __init__(self) -> None:
         self.context_kwargs: list[dict[str, object]] = []
+        self.contexts: list[_UAFakeContext] = []
 
     async def new_context(self, **kwargs: object) -> _UAFakeContext:
         self.context_kwargs.append(kwargs)
-        return _UAFakeContext()
+        context = _UAFakeContext()
+        self.contexts.append(context)
+        return context
 
     async def close(self) -> None:
         return None
@@ -480,3 +583,71 @@ async def test_render_session_default_keeps_stock_user_agent(
         pass
 
     assert browser.context_kwargs[0]["user_agent"] is None
+
+
+# --- Egress gate arms context.route cannot cover: service workers + WebSockets ----------
+
+
+async def test_render_session_always_blocks_service_workers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Service-worker requests bypass context.route, so registration is blocked at context
+    # creation — unconditionally, filter or no filter (SW are irrelevant to harvesting).
+    browser = _patch_playwright(monkeypatch)
+
+    async with RenderSession(Theme.light, VIEWPORT):
+        pass
+    async with RenderSession(Theme.light, VIEWPORT, request_filter=lambda _url: True):
+        pass
+
+    assert [kwargs["service_workers"] for kwargs in browser.context_kwargs] == ["block", "block"]
+
+
+async def test_render_session_installs_ws_refusal_route_with_filter(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Configuring a request_filter must install BOTH interceptors: the HTTP route enforcing
+    # the filter and the route_web_socket refusing every WebSocket (whose handshakes the
+    # HTTP route never sees).
+    browser = _patch_playwright(monkeypatch)
+
+    async with RenderSession(Theme.light, VIEWPORT, request_filter=lambda _url: True):
+        pass
+
+    (context,) = browser.contexts
+    assert [pattern for pattern, _ in context.routes] == ["**/*"]
+    assert context.ws_routes == [("**/*", render_mod._refuse_web_socket)]
+
+
+async def test_render_session_installs_no_routes_without_filter(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The default (no filter) path stays interception-free: zero routes of either kind.
+    browser = _patch_playwright(monkeypatch)
+
+    async with RenderSession(Theme.light, VIEWPORT):
+        pass
+
+    (context,) = browser.contexts
+    assert context.routes == []
+    assert context.ws_routes == []
+
+
+async def test_refuse_web_socket_closes_without_connecting() -> None:
+    # The refusal handler must close the page-side socket and never call
+    # connect_to_server — refusal means zero egress, not a filtered proxy.
+    class _FakeWebSocketRoute:
+        def __init__(self) -> None:
+            self.closes = 0
+            self.connects = 0
+
+        async def close(self) -> None:
+            self.closes += 1
+
+        def connect_to_server(self) -> None:
+            self.connects += 1
+
+    ws_route = _FakeWebSocketRoute()
+    await render_mod._refuse_web_socket(ws_route)  # type: ignore[arg-type]
+    assert ws_route.closes == 1
+    assert ws_route.connects == 0

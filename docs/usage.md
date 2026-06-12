@@ -124,11 +124,12 @@ for that theme.
 What colors paint each usage category, reconciled against the site's declared design
 tokens. Walk `palette.usage.mapping[category]` — the mapping always contains every
 `UsageCategory` (`surface`, `text`, `interactive`, `border`), with an empty tuple when
-nothing was detected. Every entry is backed by **measured** rendering evidence: a category
-with no measured usage stays empty even when declared tokens claim intent for it (such
-intent can surface through `divergence`, provided the declared color isn't perceptually
-matched by measured usage in some other category), so `components` is never empty. Each
-`UsageEntry` carries:
+nothing was detected. Every entry is backed by **measured** rendering evidence: the
+reconciled view only ever re-weights colors that actually rendered in the category, so a
+declared color with no measured match never appears as an entry (such intent can surface
+through `divergence`, provided the declared color isn't perceptually matched by measured
+usage in some other category), and `components` is never empty. Each `UsageEntry`
+carries:
 
 - **`color`** — a `Color`: an sRGB `hex` string plus cached **OKLCH** coordinates
   (`lightness`, `chroma`, `hue`) of the composited color, and the source `alpha`. `hex` is
@@ -212,9 +213,12 @@ policy** — whether a fetch is authorized is the consumer's decision, made *bef
   directive cannot stall a pipeline.
 - **`allow_file_urls`** — off by default; `file://` reads arbitrary local files, so it is
   an explicit opt-in (the test suite opts in to render its local fixtures).
-- **`request_filter`** — an optional predicate over **every URL the browser requests**
-  while rendering (the navigation *and* the page's own sub-resources), aborting any request
-  it rejects. It may be **synchronous or asynchronous** (the `RequestFilter` type alias):
+- **`request_filter`** — an optional predicate over **every HTTP(S) URL the browser
+  requests** while rendering (the navigation *and* the page's own sub-resources), aborting
+  any request it rejects. The two paths route interception cannot see are closed outright
+  rather than filtered: configuring a filter also refuses every WebSocket connection (the
+  handshake never goes out), and service workers are always blocked at context creation.
+  It may be **synchronous or asynchronous** (the `RequestFilter` type alias):
   a sync predicate is invoked inline on the event loop's request path and must not block
   (cheap string checks only); an async predicate is awaited, free to do slow work off the
   loop. The same filter also gates the policy's own server-side `robots.txt` GET:
@@ -226,9 +230,10 @@ policy** — whether a fetch is authorized is the consumer's decision, made *bef
   hostname and rejects URLs resolving to private/loopback/link-local (metadata)/CGNAT/other
   non-public addresses, failing closed, with an optional narrowing `allowed_hosts`
   allowlist. It does not fully defeat DNS rebinding (Chromium resolves hostnames
-  independently); its DNS lookups run off the event loop on a worker thread (cached per
-  hostname with a TTL; concurrent misses for one host share a single lookup) — network
-  isolation remains the primary control. Each predicate serves one event loop at a time:
+  independently); its DNS lookups run off the event loop on a small dedicated thread pool
+  with a fail-closed per-lookup timeout (cached per hostname with a TTL; concurrent misses
+  for one host share a single lookup; fan-out to distinct hosts beyond the pool size
+  queues) — network isolation remains the primary control. Each predicate serves one event loop at a time:
   sequential reuse across loops (e.g. back-to-back `asyncio.run` calls) is supported —
   the predicate re-binds when idle and keeps its verdict cache — but *concurrent* use
   from multiple event loops raises `RuntimeError` (detected best-effort; it fails closed

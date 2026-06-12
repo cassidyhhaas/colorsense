@@ -142,8 +142,8 @@ token_vocabulary:
 
   # --- Relational modifiers: reroute a token to "text-on-<base>". ------------
   # e.g. --primary-foreground / --md-sys-color-on-primary / --card-foreground.
-  # The token's value is a TEXT color paired with the referenced surface; the
-  # pairing is surfaced on the classified token (``text_on_base``) for consumers.
+  # The token's value is a TEXT color paired with the referenced surface, so it
+  # is classified ``text_on`` rather than as a surface/brand color itself.
   relational_modifiers:
     - {pattern: "^on-(?P<base>.+)$",     type: text_on, weight: 4.5}  # Material
     - {pattern: "^(?P<base>.+)-fore$",   type: text_on, weight: 3.0}
@@ -315,7 +315,6 @@ component_classifier:
     - {when: "clickable",               votes: {cta_bg: 1.5, link: 1.0}}
     - {when: "input[submit|button]",    votes: {cta_bg: 2.0}}
     - {when: "has_hover_color_change",  votes: {cta_bg: 1.5}}   # strong accent signal
-    - {when: "has_focus_ring",          votes: {cta_bg: 0.5}}
 
   # --- Feature family 4b: border presence. ------------------------------------
   # Applied to any element whose harvested `border` is non-None — the harvester
@@ -360,7 +359,6 @@ component_classifier:
     third_party_present:        {factor: 0.05, applies_to: brand_components}
     aria_hidden:                {factor: 0.0,  applies_to: all}
     zero_area_or_hidden:        {factor: 0.0,  applies_to: all}
-    consent_masked_region:      {factor: 0.0,  applies_to: all}
   # `border` is included since the border_presence family fires on ANY bordered
   # element — without damping, a bordered third-party widget would feed its border
   # color into the page's border palette.

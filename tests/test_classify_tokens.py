@@ -129,14 +129,13 @@ def test_alias_inherits_brand_accent_with_alias_origin() -> None:
     assert _by_name(classified, "--accent").origin is TokenOrigin.name_rule
 
 
-def test_relational_text_on_carries_base_role() -> None:
-    """--on-primary routes to text_on with empty prior, a base role, relational origin."""
+def test_relational_text_on_classification() -> None:
+    """--on-primary routes to text_on with an empty prior and relational origin."""
     classified = classify_tokens([_record("--on-primary")], CONFIG)
     token = _by_name(classified, "--on-primary")
     assert token.semantic_role is TokenSemanticRole.text_on
     assert token.origin is TokenOrigin.relational
     assert token.usage_prior == {}
-    assert token.text_on_base is TokenSemanticRole.brand_primary
 
 
 def test_chromatic_scale_origin_is_scale() -> None:

@@ -15,7 +15,8 @@ from collections.abc import Awaitable, Callable
 import pytest
 
 from colorsense import block_private_networks
-from colorsense.net.guard import IPAddress, _is_public_address
+from colorsense.net import guard as guard_module
+from colorsense.net.guard import IPAddress, _is_public_address, _PrivateNetworkBlocker
 
 PUBLIC_V4 = ipaddress.ip_address("93.184.216.34")
 PUBLIC_V6 = ipaddress.ip_address("2606:2800:220:1:248:1893:25c8:1946")
@@ -424,3 +425,129 @@ async def test_concurrent_use_from_a_second_loop_raises() -> None:
     assert await leader is True  # the refused call left the leader's loop state intact
     # The cross-loop call never reached the resolution machinery.
     assert calls == ["slow.example"]
+
+
+# -- dedicated lookup pool & resolve timeout -------------------------------------
+
+
+async def test_lookups_run_on_the_predicates_own_pool_not_the_default_executor() -> None:
+    # Isolation from the loop's shared to_thread executor (which the pipeline's CPU phase
+    # and any embedding app use): guard lookups must land on the predicate-owned pool,
+    # recognizable by its thread_name_prefix.
+    seen: list[str] = []
+
+    def resolver(host: str) -> list[IPAddress]:
+        seen.append(threading.current_thread().name)
+        return [PUBLIC_V4]
+
+    guard = block_private_networks(resolver=resolver)
+    assert await guard("https://example.com/") is True
+    assert seen and all(name.startswith("colorsense-guard-dns") for name in seen)
+
+
+async def test_slow_resolution_times_out_fails_closed_and_caches_negative() -> None:
+    # A lookup exceeding resolve_timeout fails CLOSED, the negative verdict is cached
+    # (re-resolving a hostile hostname per request would be an amplifier), and the
+    # single-flight bookkeeping is cleaned up.
+    release = threading.Event()
+    calls: list[str] = []
+
+    def resolver(host: str) -> list[IPAddress]:
+        calls.append(host)
+        release.wait(timeout=10.0)
+        return [PUBLIC_V4]
+
+    guard = block_private_networks(resolver=resolver, resolve_timeout=0.05)
+    assert isinstance(guard, _PrivateNetworkBlocker)
+    try:
+        assert await guard("https://blackhole.example/") is False  # fail closed on timeout
+        assert guard._inflight == {}  # single-flight state cleaned up
+        # Negative verdict cached: the follow-up call must not dispatch a new lookup.
+        assert await guard("https://blackhole.example/again") is False
+        assert calls == ["blackhole.example"]
+    finally:
+        release.set()  # unblock the (still running) pool thread for clean teardown
+
+
+async def test_followers_observe_a_timed_out_lookups_negative_verdict() -> None:
+    # Timeout must not corrupt single-flight state: followers parked on the shared
+    # future observe the leader's fail-closed verdict, not a hang or an error.
+    release = threading.Event()
+    calls: list[str] = []
+
+    def resolver(host: str) -> list[IPAddress]:
+        calls.append(host)
+        release.wait(timeout=10.0)
+        return [PUBLIC_V4]
+
+    guard = block_private_networks(resolver=resolver, resolve_timeout=0.05)
+    assert isinstance(guard, _PrivateNetworkBlocker)
+    leader = asyncio.create_task(guard("https://blackhole.example/"))
+    try:
+        await wait_until(lambda: bool(calls), "the leader parks in the pool thread")
+        follower = asyncio.create_task(guard("https://blackhole.example/other"))
+        for _ in range(20):  # follower attaches to the shared future
+            await asyncio.sleep(0)
+        assert await leader is False
+        assert await follower is False
+        assert guard._inflight == {}
+        assert calls == ["blackhole.example"]  # one lookup served both
+    finally:
+        release.set()
+
+
+async def test_distinct_host_fanout_is_bounded_by_the_pool_size(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The finding this guards against: a hostile page fanning requests at many DISTINCT
+    # slow hostnames must not pin one thread per host — concurrent resolver entries are
+    # capped at the pool size and the excess queues.
+    monkeypatch.setattr(guard_module, "GUARD_RESOLVER_MAX_WORKERS", 2)
+    release = threading.Event()
+    lock = threading.Lock()
+    active = 0
+    max_active = 0
+
+    def resolver(host: str) -> list[IPAddress]:
+        nonlocal active, max_active
+        with lock:
+            active += 1
+            max_active = max(max_active, active)
+        try:
+            if not release.wait(timeout=10.0):  # pragma: no cover - hang guard
+                raise OSError("test resolver was never released")
+            return [PUBLIC_V4]
+        finally:
+            with lock:
+                active -= 1
+
+    guard = block_private_networks(resolver=resolver, resolve_timeout=30.0)
+    tasks = [asyncio.create_task(guard(f"https://h{i}.example/")) for i in range(5)]
+    # Both pool threads must fill up with the first two lookups...
+    await wait_until(lambda: max_active == 2, "both pool threads are occupied")
+    # ...and the remaining three distinct-host lookups queue instead of spawning threads.
+    for _ in range(50):
+        await asyncio.sleep(0)
+    assert max_active == 2
+    release.set()
+    assert await asyncio.gather(*tasks) == [True] * 5
+    assert max_active == 2  # the queued lookups reused the two threads, never a third
+
+
+async def test_cache_expiry_is_stamped_after_resolution_completes() -> None:
+    # A resolution slower than the TTL must not produce a born-expired cache entry: the
+    # expiry is stamped from the clock AFTER the lookup lands, so the verdict is reusable
+    # for a full TTL from completion.
+    now = 0.0
+    calls: list[str] = []
+
+    def resolver(host: str) -> list[IPAddress]:
+        nonlocal now
+        calls.append(host)
+        now += 120.0  # the resolution itself takes twice the TTL
+        return [PUBLIC_V4]
+
+    guard = block_private_networks(resolver=resolver, ttl=60.0, clock=lambda: now)
+    assert await guard("https://example.com/") is True
+    assert await guard("https://example.com/again") is True  # served from cache
+    assert calls == ["example.com"]

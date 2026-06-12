@@ -31,6 +31,7 @@ import re
 from enum import StrEnum
 from importlib import resources
 from pathlib import Path
+from typing import Literal
 
 import yaml
 from pydantic import BaseModel, ConfigDict, model_validator
@@ -53,6 +54,34 @@ __all__ = [
 # The configuration bundled inside the package (importable resource location).
 _DATA_PACKAGE = "colorsense"
 _BUNDLED_CONFIG = "data/palette_config.yaml"
+
+# Component-classifier dispatch names implemented in ``classify.components``. The
+# ``when`` predicates and suppressor keys are matched by string there, so any name
+# outside these closed sets would be a silent no-op; the config model rejects them
+# at load time instead, making a stale custom YAML fail loudly.
+_KNOWN_INTERACTIVITY_PREDICATES = frozenset(
+    {
+        "clickable",
+        "input[submit|button]",
+        "has_hover_color_change",
+    }
+)
+_KNOWN_GEOMETRY_PREDICATES = frozenset(
+    {
+        "full_width & top<top_band & h<short_h",
+        "position in (fixed,sticky) & top<sticky_top_px",
+        "full_width & top<top_band & h>=hero_min_h",
+        "top>=bottom_band & full_width",
+        "area<=small_area & clickable",
+    }
+)
+_KNOWN_SUPPRESSORS = frozenset(
+    {
+        "third_party_present",
+        "aria_hidden",
+        "zero_area_or_hidden",
+    }
+)
 
 
 # ---------------------------------------------------------------------------
@@ -286,12 +315,17 @@ class ThirdPartyConfig(BaseModel):
 
 
 class Suppressor(BaseModel):
-    """A multiplicative veto applied after vote summation."""
+    """A multiplicative veto applied after vote summation.
+
+    ``applies_to`` is restricted to the two scopes the classifier implements:
+    ``"all"`` (every accumulated vote) or ``"brand_components"`` (only the
+    configured brand components, on third-party elements).
+    """
 
     model_config = ConfigDict(frozen=True)
 
     factor: float
-    applies_to: str
+    applies_to: Literal["all", "brand_components"]
 
 
 class ComponentClassifierConfig(BaseModel):
@@ -312,6 +346,33 @@ class ComponentClassifierConfig(BaseModel):
     third_party: ThirdPartyConfig
     suppressors: dict[str, Suppressor]
     brand_components: tuple[str, ...]
+
+    @model_validator(mode="after")
+    def _validate_dispatch_names(self) -> ComponentClassifierConfig:
+        """Reject ``when`` predicates and suppressor keys the classifier does not implement.
+
+        ``classify.components`` dispatches these by string; an unknown name would
+        otherwise be a knob that silently never fires.
+        """
+        for rule in self.interactivity:
+            if rule.when not in _KNOWN_INTERACTIVITY_PREDICATES:
+                raise ValueError(
+                    f"unknown interactivity predicate {rule.when!r}; "
+                    f"implemented predicates: {sorted(_KNOWN_INTERACTIVITY_PREDICATES)}"
+                )
+        for rule in self.geometry.rules:
+            if rule.when not in _KNOWN_GEOMETRY_PREDICATES:
+                raise ValueError(
+                    f"unknown geometry predicate {rule.when!r}; "
+                    f"implemented predicates: {sorted(_KNOWN_GEOMETRY_PREDICATES)}"
+                )
+        for key in self.suppressors:
+            if key not in _KNOWN_SUPPRESSORS:
+                raise ValueError(
+                    f"unknown suppressor {key!r}; "
+                    f"implemented suppressors: {sorted(_KNOWN_SUPPRESSORS)}"
+                )
+        return self
 
 
 # ---------------------------------------------------------------------------

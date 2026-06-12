@@ -56,6 +56,111 @@ Other changes riding the redesign:
   release by the `border_presence` family below, which generalizes the vote to every
   element that actually paints a border.)
 
+### Fixed — pre-release review follow-up
+
+- **Motion-neutralizing CSS injection no longer aborts a render.** The
+  transition/animation-disabling `<style>` injected after navigation could fail the whole
+  `analyze()` with `RenderError: Page.add_style_tag: Connecting to '…' violates the
+  following Content Security Policy directive: "connect-src …"` — intermittently, on
+  sites whose own third-party trackers trip their CSP (seen live on stripe.com).
+  Playwright's `add_style_tag` races its evaluation against *any* console error
+  mentioning "Content Security Policy" (`Frame._raceWithCSPError`), so an unrelated
+  page-side violation landing in that window spuriously rejects the call. The injection
+  is stabilization, not harvesting: it is now retried once and, if it still fails (e.g. a
+  CSP that genuinely forbids inline styles), skipped with a `RuntimeWarning` so the
+  render continues — computed colors may then be read mid-transition, which is degraded
+  but never fatal.
+
+- **Dead data path removed: `ClassifiedToken.text_on_base`.** The relational classifier
+  resolved each `--on-<base>` / `--<base>-foreground` token's base surface to a semantic
+  role and threaded it through the classification tuple and alias inheritance — but
+  nothing consumed it after the 0.4.0 contract change made `ClassifiedToken` internal-only
+  (the public `DesignToken` projection never carried it, and reconciliation's relational
+  divergence pass uses only origin, resolved color, weight, and name). The field, its
+  threading, and the base-role lookup are gone; the relational *classification* itself
+  (`text_on` role, weight, `relational` origin) is unchanged, as is the YAML
+  `relational_modifiers` schema — patterns still capture `base`, since the name match
+  depends on it. The bundled YAML's stale comment claiming the pairing "is surfaced on
+  the classified token for consumers" is corrected. No behavior change (golden snapshots
+  untouched).
+
+- **Dead classifier knobs removed; the config loader now rejects unknown dispatch
+  names.** The bundled YAML shipped two knobs the classifier could never act on: the
+  `has_focus_ring` interactivity rule (no focus-ring signal exists on harvested elements)
+  and the `consent_masked_region` suppressor (consent rects are consumed by screenshot
+  masking and never reach the classification layer) — both hard-returned False in
+  `classify/components.py`, contradicting the "nothing hard-coded, the YAML is the single
+  source of truth" contract and inviting consumers to tune values that did nothing. Both
+  entries and their dead code branches are gone. To keep removed (or misspelled) names
+  from becoming silent no-ops in custom `config_path=` YAMLs, `Config` now validates
+  dispatch names against the closed sets the classifier implements: unknown
+  interactivity/geometry `when:` predicates, suppressor keys, and suppressor `applies_to`
+  scopes fail loudly at load time. Bundled-config behavior is unchanged (golden snapshots
+  untouched).
+
+- **The egress gate now covers WebSockets and service workers.** The `request_filter`
+  route handler is installed via Playwright's `context.route`, which never sees WebSocket
+  opening handshakes and (by default) service-worker-originated requests — so a hostile
+  rendered page could issue `new WebSocket('ws://169.254.169.254/')`, a real blind GET to
+  an internal host the filter never vetted, despite the docs claiming coverage of "every
+  URL the browser requests". Both unrouted paths are now closed outright rather than
+  filtered: browser contexts are always created with `service_workers="block"` (service
+  workers are irrelevant to color harvesting), and when a `request_filter` is configured a
+  `context.route_web_socket` handler refuses every WebSocket connection — it never
+  connects upstream, so no handshake leaves the browser and the page just observes a dead
+  socket, harmless for palette extraction. The declared playwright floor rises
+  `>=1.40` → `>=1.48` (where `route_web_socket` landed; the lockfile already resolved
+  1.60.0). `SECURITY.md` §1 and the `block_private_networks` docs now state the coverage
+  precisely.
+- **Relational and status tokens are visible to divergence again.** Empty-prior tokens
+  (relational `--on-primary`-style foregrounds; status tokens excluded from the palette)
+  were invisible to reconciliation: a page rendering exactly its declared
+  `--on-primary` color was falsely reported "used but undeclared" (the canonical
+  shadcn/Material `*-foreground` pattern), and the documented relational arm of the
+  declared-but-unused gate was unreachable. Used-but-undeclared membership now tests
+  against every resolved declared color, and unused relational tokens report
+  declared-but-unused under `text` via a dedicated pass.
+
+- **Reconciliation pooling no longer vetoes undeclared colors.** The log-linear pool's
+  intent factor is now uniform-smoothed (`+ 1/K` over the category's K measured entries)
+  instead of floored at `EPS = 1e-9`: lacking a token match costs a bounded,
+  universe-scaled penalty (`(K + 1)^alpha`, ~1.6x at K=2 for the default `alpha=0.4`)
+  rather than a ~4000x multiplier. Previously, on a partially-tokenized page, one minor
+  declared color could erase a 95%-dominant undeclared color from `usage` entirely (a
+  95%-white page whose surface palette contained no white).
+- **The "`components` is never empty" guarantee is now structural.** The pooling
+  universe is restricted to the measured usage entries; declared-only colors never enter
+  the posterior in any category (previously they were injected and only pruned by a
+  numeric coincidence of `EPS`/`alpha`/`MIN_POSTERIOR_PROB`, and the reconcile docstring
+  contradicted the documented guarantee). Declared-but-unused intent surfaces through
+  `divergence`, as before.
+- **Guard DNS lookups no longer share the loop's default executor.** Each
+  `block_private_networks()` predicate now owns a small dedicated thread pool
+  (`GUARD_RESOLVER_MAX_WORKERS = 8`, created lazily, living as long as the predicate)
+  instead of dispatching resolutions via `asyncio.to_thread`. Single-flight coalescing is
+  per-host, so a hostile page fanning requests at many *distinct* slow hostnames could
+  previously pin one default-executor thread per hostname — the same pool the pipeline's
+  per-theme CPU phase and any embedding application use, a cross-request DoS vector in
+  multi-tenant deployments. Excess distinct-host lookups now queue inside the guard's own
+  bounded pool. Each lookup is additionally capped by a new fail-closed
+  `resolve_timeout` parameter (default `DEFAULT_GUARD_RESOLVE_TIMEOUT_SECONDS = 10.0`);
+  on expiry the URL is rejected and the negative verdict cached like any other. Also
+  fixes a marginal cache detail: the TTL expiry is now stamped *after* resolution
+  completes, so a lookup slower than the TTL no longer produces a born-expired entry.
+
+- **One shared prune/renormalize/argmax step; reconciliation's argmax tie-break is now
+  deterministic by hex.** The normalize → prune-below-threshold → renormalize-survivors
+  → keep-argmax-if-pruning-emptied pipeline was implemented independently in
+  `palette/usage.py`, `palette/roles.py`, and `palette/reconcile.py`, with three
+  different argmax tie-breaks: usage preferred the smallest hex (the documented
+  convention), roles preferred the *largest*, and reconciliation used a bare `max()`
+  (input position wins). All three now call `prune_distribution` in the new
+  `palette/_pruning.py`, which breaks exact-probability ties by smallest hex everywhere.
+  Behavior is unchanged outside those degenerate exact-tie fallbacks (golden snapshots
+  untouched). `classify/components.py`'s similar-looking softmax-prune block stays
+  local by design — it ranks `ComponentType` keys, not colors, so the hex convention
+  has no analogue there (and `classify/` does not depend on `palette/`).
+
 ### Fixed — measurement-layer gaps (live-probe follow-up)
 
 A live acceptance probe of the usage-keyed redesign against github.com exposed
@@ -67,8 +172,7 @@ measurement gaps the fixtures had masked; all are now encoded as offline fixture
   colors (github.com's `usage.border` was 16 never-rendered theme tokens, every entry
   with empty `components`). Honest emptiness beats intent-only noise; declared intent for
   an unmeasured category can still surface through `divergence` (when its color has no
-  perceptual match among measured usage), and token-only colors still pool normally
-  whenever the category has real measurement.
+  perceptual match among measured usage).
 - **`border_presence` feature family** (config YAML): any element whose harvested border
   is genuinely painted (width-gated) now votes `border`. Previously only the `<input>`
   semantic rule voted `border`, so pages without classified inputs measured zero border

@@ -23,7 +23,10 @@ scale.
 A render opens a fresh browser context at a fixed viewport (1280×800 by default) with the
 requested `prefers-color-scheme` (light by default), navigates, waits for the `load`
 event plus a short, capped network-idle wait, injects CSS that disables all transitions
-and animations (so computed colors are stable, not mid-fade), step-scrolls the full page
+and animations (so computed colors are stable, not mid-fade — best-effort: the injection
+is retried once and, if it still fails, skipped with a `RuntimeWarning` rather than
+failing the render, since on busy pages Playwright can spuriously reject it over an
+unrelated CSP-violation console error), step-scrolls the full page
 height (up to 20 viewport-steps) to trigger lazily loaded content, and detects
 cookie-consent / overlay banners so they can be masked out later.
 
@@ -85,8 +88,7 @@ the classifier code.
 Each declared token name is matched in strict precedence order:
 
 1. **Relational** — names like `--on-primary` or `--card-foreground` match a relational
-   pattern: the token is a *text* color paired with a base surface, classified `text_on`
-   with the base recorded.
+   pattern: the token is a *text* color paired with a base surface, classified `text_on`.
 2. **Name rule** — a direct vocabulary match on the namespace-stripped name
    (`--bs-primary` → `primary` → `brand_primary`; `--border` → `border`; `--gray` →
    `neutral`; and so on), each rule carrying a weight.
@@ -263,11 +265,17 @@ For each candidate color in a category, the two probabilities are combined as a
 **weighted geometric mean**:
 
 ```
-posterior ∝ (p_usage + EPS)^(1 − α) × (p_intent + EPS)^α
+posterior ∝ p_usage^(1 − α) × (p_intent + 1/K)^α
 ```
 
-then all candidates are normalized to sum to 1. Reading the formula:
+over the K measured entries in the category, then all candidates are normalized to
+sum to 1. Reading the formula:
 
+- **The candidates are the measured entries only.** Declared intent re-weights colors
+  that actually rendered; a declared color with no measured match never enters the
+  posterior (it surfaces through the divergence report instead). This is what makes the
+  contract guarantee structural: every posterior entry inherits its measured entry's
+  area and non-empty component breakdown.
 - **α (alpha) is the weight on intent**, default 0.4 and clamped to [0, 1]. At `α = 0`
   the intent factor collapses to `x^0 = 1` and the posterior is pure measurement; at
   `α = 1` it's pure declared intent. At 0.4, measurement leads but strong declared intent
@@ -275,45 +283,51 @@ then all candidates are normalized to sum to 1. Reading the formula:
 - **Why a *geometric* mean** (multiplying powers) rather than a weighted average? A
   geometric mean rewards agreement: a color must score in *both* signals to score high,
   and a near-zero on either side drags the product toward zero. A weighted average would
-  let a color with zero measured usage coast on intent alone.
-- **EPS (10⁻⁹) is a floor**, not a fudge: without it a missing signal contributes
-  `0^(power)` and, in log space, `log(0)` — undefined. With it, a missing signal
-  contributes a large-but-finite penalty, and the α boundaries stay clean (at `α = 0` a
-  token-only color's factor is `EPS^0 = 1`, so one-sided colors prune out rather than
-  blowing up).
+  let a barely-rendered color coast on intent alone.
+- **The `1/K` term is uniform smoothing** on the intent side: a color with no token
+  match within ΔE 0.10 still gets the uniform pseudo-intent `1/K`, so lacking a token
+  costs at most a bounded, universe-scaled factor of `(K + 1)^α` (≈1.6× at K = 2, ≈2.6×
+  at K = 10 for the default α) — a penalty, never a veto. An absolute floor (the
+  pre-0.4.0 `EPS = 10⁻⁹`) made the same term a ~4000× multiplier that let one minor
+  declared color erase a 95%-dominant undeclared one from the posterior entirely.
 
 Posterior entries below 0.02 are pruned and survivors renormalized (argmax kept if
-pruning empties the category). Entries that matched a measured color keep its area and
-component breakdown; token-only survivors carry `area = 0` and empty components.
+pruning empties the category). Every entry keeps its measured area and component
+breakdown.
 
 ### The empty-category gate
 
-A category with **no measured usage at all yields an empty posterior — token-only colors
-are not injected.** This is a deliberate asymmetry, and it came from a live failure: with
-zero measurement, every token-only color gets the *same* `EPS^(1−α)` usage factor, so the
-posterior collapses to `intent^α` — a near-uniform spread where everything survives
-pruning. On github.com that meant `usage.border` reported **16 never-rendered theme
-tokens**, every entry with empty components — pure noise presented as measurement. Honest
-emptiness beats intent-only noise. Declared intent for an unmeasured category can still
-surface through the divergence report — but only when the declared color has no
-perceptual match (within 0.10) among measured colors in *any* category; a near-white
-border token on a white-surfaced page reads as "used" and stays silent. When measurement *exists*, token-only colors stay
-in the pool: pooling against real usage mass crushes them naturally unless their intent
-is strong enough to clear the floor.
+A category with **no measured usage at all yields an empty posterior.** Declared-only
+colors never enter any posterior, and the original motivation was a live failure in
+exactly this case: when token-only colors were still injected, zero measurement gave
+every one the *same* floor usage factor, so the posterior collapsed to `intent^α` — a
+near-uniform spread where everything survives pruning. On github.com that meant
+`usage.border` reported **16 never-rendered theme tokens**, every entry with empty
+components — pure noise presented as measurement. Honest emptiness beats intent-only
+noise. Declared intent for an unmeasured category can still surface through the
+divergence report — but only when the declared color has no perceptual match (within
+0.10) among measured colors in *any* category; a near-white border token on a
+white-surfaced page reads as "used" and stays silent.
 
 ### Divergence reporting
 
 Two kinds of discrepancy are reported:
 
-- **Declared but unused** — a declared color group with intent mass and no perceptual
-  match (within 0.10) among measured usage in *any* category. This is gated to
-  **high-intent** origins only: tokens classified by an explicit name rule or relational
-  pattern. The gate exists because of another live failure: on token-heavy sites, every
-  unused shade of every numbered color scale is technically "declared", and the report
-  was 100% noise — **54 out of 54 items on github.com** were unused scale shades. Scale
-  members, alias followers, and fallbacks therefore never fire this item.
+- **Declared but unused** — a declared color with no perceptual match (within 0.10)
+  among measured usage in *any* category. This is gated to **high-intent** origins only:
+  tokens classified by an explicit name rule or relational pattern. The gate exists
+  because of another live failure: on token-heavy sites, every unused shade of every
+  numbered color scale is technically "declared", and the report was 100% noise — **54
+  out of 54 items on github.com** were unused scale shades. Scale members, alias
+  followers, and fallbacks therefore never fire this item. Name-rule tokens report under
+  their intent's strongest category; relational tokens (`--on-primary`-style foreground
+  colors, which carry no category prior) report under `text`.
 - **Used but undeclared** — a measured entry with probability ≥ 0.15 whose color matches
-  no declared token group. A prominent rendered color the design system doesn't name.
+  no *declared* color at all. Membership is tested against every resolved token color —
+  including relational, status, scale, and fallback classifications that carry no intent
+  mass — because "undeclared" is a statement about the stylesheet: a page rendering
+  exactly its declared `--on-primary` text color is not undeclared. A prominent rendered
+  color the design system doesn't name.
 
 ## 6. The 60/30/10 roles view
 
@@ -381,14 +395,21 @@ wraps strictly the render itself — never the throttle/robots wait — so a slo
 held while a browser is genuinely rendering.
 
 **The SSRF guard resolves DNS off the event loop and fails closed.**
-`block_private_networks()` returns an async predicate applied to every URL the browser
-requests (navigation and all sub-resources) and to the policy's own `robots.txt` GET
-(including each redirect hop). On a cache miss, the blocking `getaddrinfo` runs on a
-worker thread via `asyncio.to_thread`; verdicts land in a per-hostname TTL+LRU cache
-(negative verdicts too — re-resolving a hostile hostname on every request would hand the
-page a thread-pool amplifier), and concurrent misses for one host coalesce into a single
-lookup. Every failure mode — malformed URL, resolution failure, empty resolution, a
-raising predicate — **fails closed**: the request is aborted, never waved through. A
+`block_private_networks()` returns an async predicate applied to every HTTP(S) URL the
+browser requests (navigation and all sub-resources) and to the policy's own `robots.txt`
+GET (including each redirect hop); the paths route interception cannot see are closed
+outright — WebSocket connections are refused whenever a filter is configured, and service
+workers are always blocked at context creation. On a cache miss, the blocking `getaddrinfo` runs on a
+small thread pool the predicate itself owns — never the loop's shared default
+`to_thread` executor, so guard lookups cannot starve the pipeline's CPU phase or an
+embedding application's own thread-pool work — capped by a fail-closed per-lookup
+timeout; verdicts land in a per-hostname TTL+LRU cache (negative verdicts too —
+re-resolving a hostile hostname on every request would hand the page an amplifier),
+concurrent misses for one host coalesce into a single lookup, and fan-out to distinct
+slow hostnames beyond the pool size queues inside the guard's own pool rather than
+pinning a thread per host. Every failure mode — malformed URL, resolution failure,
+resolution timeout, empty resolution, a raising predicate — **fails closed**: the
+request is aborted, never waved through. A
 hostname passes only if *all* of its resolved addresses are public (one public plus one
 internal A record is exactly the split-horizon shape an attacker would use). The
 predicate's single-flight futures are loop-bound, so each guard instance serves **one

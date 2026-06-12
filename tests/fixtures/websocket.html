@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>WebSocket fixture</title>
+<style>
+  body { background: #ffffff; color: #111111; margin: 0; font-family: sans-serif; }
+</style>
+<script>
+  // Attempt a WebSocket connection and record every lifecycle event so the test can
+  // read back exactly what the page-side socket observed. ws://127.0.0.1:1/ is never
+  // reachable: port 1 is refused on any sane machine, and with the egress gate's
+  // WebSocket refusal route installed the handshake never leaves the browser at all.
+  window.__wsEvents = [];
+  window.__wsDone = false;
+  try {
+    const ws = new WebSocket("ws://127.0.0.1:1/");
+    ws.onopen = () => { window.__wsEvents.push("open"); };
+    ws.onerror = () => { window.__wsEvents.push("error"); };
+    ws.onclose = () => {
+      window.__wsEvents.push("close");
+      window.__wsDone = true;
+    };
+  } catch (e) {
+    window.__wsEvents.push("constructor-throw");
+    window.__wsDone = true;
+  }
+</script>
+</head>
+<body>
+  <h1>WebSocket probe page</h1>
+  <p>The palette content of this page is plain white/near-black.</p>
+</body>
+</html>

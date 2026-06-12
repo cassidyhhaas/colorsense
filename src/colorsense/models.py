@@ -167,9 +167,11 @@ class Theme(StrEnum):
 class Color(BaseModel):
     """An sRGB color with cached OKLCH coordinates.
 
-    ``hex`` is the opaque (or alpha-bearing) sRGB hex string; ``lightness``/``chroma``/
-    ``hue`` are the OKLCH coordinates of the (composited) color. ``alpha`` is the source
-    alpha.
+    ``hex`` is always the *opaque* normalized lowercase 7-char sRGB hex string
+    (``#rrggbb``) — alpha is carried separately in ``alpha`` and never encoded in the
+    hex (the invariant ``color/primitives.py`` establishes; fixed-length hexes are also
+    what keeps lexicographic tie-breaks well-defined). ``lightness``/``chroma``/``hue``
+    are the OKLCH coordinates of the (composited) color; ``alpha`` is the source alpha.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -308,8 +310,8 @@ class ClassifiedToken(BaseModel):
     """Internal: a token tagged with its semantic role and a prior over usage categories.
 
     Not part of the public contract — consumers see declared tokens only through
-    [`DesignToken`][colorsense.DesignToken]. ``weight`` and ``text_on_base`` are internal scoring
-    inputs; ``origin`` records the classification path for divergence gating.
+    [`DesignToken`][colorsense.DesignToken]. ``weight`` is an internal scoring
+    input; ``origin`` records the classification path for divergence gating.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -318,7 +320,6 @@ class ClassifiedToken(BaseModel):
     semantic_role: TokenSemanticRole
     weight: float
     usage_prior: dict[UsageCategory, float] = Field(default_factory=dict)
-    text_on_base: TokenSemanticRole | None = None
     origin: TokenOrigin = TokenOrigin.fallback
 
 

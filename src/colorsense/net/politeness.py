@@ -285,7 +285,8 @@ class PolitenessPolicy:
         rejections raise [`UnsupportedSchemeError`][colorsense.UnsupportedSchemeError].
     request_filter:
         Optional synchronous or asynchronous predicate ([`RequestFilter`][colorsense.RequestFilter])
-        over **every request URL the browser makes** while rendering — the navigation itself *and*
+        over **every HTTP(S) request URL the browser makes** while rendering — the navigation
+        itself *and*
         all sub-resources (scripts, images, XHR/``fetch`` issued by the page's own JS) — **and**
         over the policy's own ``robots.txt`` GET (the initial robots URL and each redirect hop it
         follows; a rejected hop aborts the fetch, which fails open as "no rules" while the
@@ -296,7 +297,10 @@ class PolitenessPolicy:
         resolves hostnames off-loop. This is the in-library mechanism against sub-resource SSRF:
         validating the navigation URL alone cannot stop the rendered page from requesting internal
         endpoints (e.g. ``169.254.169.254``). A predicate that *raises* fails closed (the request is
-        aborted). ``None`` (default) installs no interception at all — zero overhead.
+        aborted). What route interception cannot see is closed rather than filtered: configuring a
+        filter also refuses every WebSocket connection outright (the handshake never goes out), and
+        service workers are always blocked at context creation. ``None`` (default) installs no
+        interception at all — zero overhead.
     max_concurrent_renders:
         Optional cap on simultaneous *renders* through this policy — the SECURITY.md §2
         concurrency bound, shipped as a knob. ``None`` (default) is unbounded, the previous

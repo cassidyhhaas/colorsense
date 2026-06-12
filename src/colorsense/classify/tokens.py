@@ -42,30 +42,27 @@ __all__ = ["classify_tokens"]
 # Base weight for a numbered-scale match before any anchor boost is applied.
 _SCALE_BASE_WEIGHT: float = 3.0
 
-# The (role, weight, text_on_base, origin) classification quadruple.
-_Classification = tuple[TokenSemanticRole, float, TokenSemanticRole | None, TokenOrigin]
+# The (role, weight, origin) classification triple.
+_Classification = tuple[TokenSemanticRole, float, TokenOrigin]
 
 
 def _classify_self(record: TokenRecord, config: Config) -> _Classification:
     """Classify a single record on its own merits (no alias inheritance).
 
-    Returns ``(semantic_role, weight, text_on_base, origin)``. ``text_on_base`` is only
-    populated for relational (``text_on``) tokens; it is ``None`` otherwise.
+    Returns ``(semantic_role, weight, origin)``.
     """
     name = record.name
 
     # 1. Relational (text-on-<base>) takes precedence.
     relational = config.match_relational(name)
     if relational is not None:
-        base_match = config.match_name_rule("--" + relational.base)
-        text_on_base = base_match[0] if base_match is not None else None
-        return TokenSemanticRole.text_on, relational.weight, text_on_base, TokenOrigin.relational
+        return TokenSemanticRole.text_on, relational.weight, TokenOrigin.relational
 
     # 2. Direct name rule.
     name_match = config.match_name_rule(name)
     if name_match is not None:
         role, weight = name_match
-        return role, weight, None, TokenOrigin.name_rule
+        return role, weight, TokenOrigin.name_rule
 
     # 3. Numbered-scale detection.
     scale = config.detect_scale(name)
@@ -75,11 +72,11 @@ def _classify_self(record: TokenRecord, config: Config) -> _Classification:
             if scale.is_anchor:
                 boost = config.token_vocabulary.scale_detection.scale_present_confidence_boost
                 weight *= boost
-            return TokenSemanticRole.brand_accent, weight, None, TokenOrigin.scale
-        return TokenSemanticRole.neutral, _SCALE_BASE_WEIGHT, None, TokenOrigin.scale
+            return TokenSemanticRole.brand_accent, weight, TokenOrigin.scale
+        return TokenSemanticRole.neutral, _SCALE_BASE_WEIGHT, TokenOrigin.scale
 
     # 4. Fallback.
-    return TokenSemanticRole.ignore, 0.0, None, TokenOrigin.fallback
+    return TokenSemanticRole.ignore, 0.0, TokenOrigin.fallback
 
 
 def _usage_prior(role: TokenSemanticRole, config: Config) -> dict[UsageCategory, float]:
@@ -122,9 +119,9 @@ def _resolve_alias_role(
         target = index.get(target_name)
         if target is None:
             return None
-        role, weight, text_on_base, _origin = self_classifications[target.name]
+        role, weight, _origin = self_classifications[target.name]
         if role is not TokenSemanticRole.ignore:
-            return role, weight, text_on_base, TokenOrigin.alias
+            return role, weight, TokenOrigin.alias
         target_name = target.alias_target
     return None
 
@@ -150,13 +147,13 @@ def classify_tokens(tokens: list[TokenRecord], config: Config) -> list[Classifie
     classified: list[ClassifiedToken] = []
 
     for record in tokens:
-        role, weight, text_on_base, origin = self_classifications[record.name]
+        role, weight, origin = self_classifications[record.name]
 
         # Alias inheritance: an `ignore` token may adopt its target's role.
         if role is TokenSemanticRole.ignore and record.alias_target is not None:
             inherited = _resolve_alias_role(record, index, self_classifications)
             if inherited is not None:
-                role, weight, text_on_base, origin = inherited
+                role, weight, origin = inherited
 
         prior = _usage_prior(role, config)
 
@@ -169,7 +166,6 @@ def classify_tokens(tokens: list[TokenRecord], config: Config) -> list[Classifie
                 semantic_role=role,
                 weight=weight,
                 usage_prior=prior,
-                text_on_base=text_on_base,
                 origin=origin,
             )
         )

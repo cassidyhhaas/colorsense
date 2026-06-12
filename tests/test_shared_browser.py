@@ -63,12 +63,16 @@ class _FakeContext:
     def __init__(self) -> None:
         self.closes = 0
         self.routes: list[object] = []
+        self.ws_routes: list[object] = []
 
     async def new_page(self) -> _FakePage:
         return _FakePage()
 
     async def route(self, pattern: str, handler: object) -> None:
         self.routes.append((pattern, handler))
+
+    async def route_web_socket(self, pattern: str, handler: object) -> None:
+        self.ws_routes.append((pattern, handler))
 
     async def close(self) -> None:
         self.closes += 1

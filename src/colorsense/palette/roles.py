@@ -13,8 +13,8 @@ Design notes
 * The public entry point is `assign_roles`. It takes *only* the cluster list (no
   [`Config`][colorsense.Config]); every threshold/weight is a documented, module-level **tunable**
   constant defined below.
-* Everything is deterministic: iteration over dicts is sorted, ties are broken by ``hex``,
-  and there is no randomness.
+* Everything is deterministic: iteration over dicts is sorted, ties are broken by ``hex``
+  (smallest wins — the shared `prune_distribution` convention), and there is no randomness.
 * The 60/30/10 mental model:
     - **primary**   ~= the dominant neutral surface (~60%) — anchors contrast.
     - **secondary** ~= structural color (~30%) — cards/headers/nav surfaces.
@@ -35,6 +35,7 @@ from colorsense.models import (
     PaletteRole,
     RoleResults,
 )
+from colorsense.palette._pruning import prune_distribution
 
 __all__ = ["assign_roles"]
 
@@ -135,21 +136,18 @@ class _Features:
         return self.cluster.color
 
 
-def _softmax(scores: list[float], temperature: float) -> list[float]:
-    """Numerically-stable softmax of ``scores`` at ``temperature``.
+def _softmax_weights(scores: list[float], temperature: float) -> list[float]:
+    """Numerically-stable *unnormalized* softmax weights of ``scores`` at ``temperature``.
 
-    An empty input yields an empty list; a single score yields ``[1.0]``.
+    Returns ``exp((s - max)/T)`` per score (always positive); normalization into
+    probabilities happens in the shared `prune_distribution`. An empty input yields an
+    empty list.
     """
     if not scores:
         return []
     scaled = [s / temperature for s in scores]
     top = max(scaled)
-    exps = [math.exp(s - top) for s in scaled]
-    total = sum(exps)
-    if total <= 0.0:  # pragma: no cover - defensive (exp is always > 0)
-        n = len(scores)
-        return [1.0 / n] * n
-    return [e / total for e in exps]
+    return [math.exp(s - top) for s in scaled]
 
 
 def _build_candidates(
@@ -158,25 +156,16 @@ def _build_candidates(
 ) -> list[PaletteCandidate]:
     """Softmax ``scores`` over clusters, prune, renormalize, and rank candidates.
 
-    Returns a probability-descending (ties by hex) list of
-    [`PaletteCandidate`][colorsense.PaletteCandidate].
+    The prune/renormalize/argmax-fallback step is the shared `prune_distribution`
+    (ties broken by smallest hex). Returns a probability-descending (ties by hex) list
+    of [`PaletteCandidate`][colorsense.PaletteCandidate].
     """
-    probs = _softmax(scores, SOFTMAX_T)
-
-    kept: list[tuple[_Features, float]] = [
-        (f, p) for f, p in zip(feats, probs, strict=True) if p >= MIN_CANDIDATE_PROB
-    ]
-    if not kept:
-        # Pruning emptied the role: keep the single argmax at probability 1.0. Tie-break
-        # by larger probability, then by hex for determinism.
-        best_idx = max(
-            range(len(probs)),
-            key=lambda i: (probs[i], feats[i].color.hex),
-        )
-        kept = [(feats[best_idx], 1.0)]
-    else:
-        total = sum(p for _, p in kept)
-        kept = [(f, p / total) for f, p in kept]
+    kept = prune_distribution(
+        feats,
+        _softmax_weights(scores, SOFTMAX_T),
+        min_share=MIN_CANDIDATE_PROB,
+        tie_key=lambda f: f.color.hex,
+    )
 
     candidates = [
         PaletteCandidate(
