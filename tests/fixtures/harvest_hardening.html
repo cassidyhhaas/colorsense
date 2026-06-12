@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<!-- Fixture for the release-review harvest hardening: duplicate ids (selector
+     uniqueness), a document-level adopted stylesheet (token coverage), and a handful of
+     sized elements (payload-cap behavior is exercised by evaluating the collection JS
+     with a tiny cap). -->
+<html>
+<head>
+  <style>
+    :root { --plain-token: #336699; --second-token: #884422; }
+    body { margin: 0; background: #ffffff; }
+    .box { width: 200px; height: 100px; background: #eeeeee; }
+    .big { width: 600px; height: 400px; background: #dddddd; }
+    #dup { width: 120px; height: 40px; background: #2563eb; cursor: pointer; }
+  </style>
+</head>
+<body>
+  <div class="big">big block</div>
+  <div class="box">first box</div>
+  <div class="box">second box</div>
+  <!-- Duplicate ids: invalid HTML, common in the wild. Both are clickable, so a bare
+       '#dup' selector would make the hover prober read the FIRST one for both. -->
+  <div id="dup">first dup</div>
+  <div id="dup">second dup</div>
+  <button id="unique-btn">ok</button>
+  <script>
+    // Document-level constructed stylesheet: not part of document.styleSheets.
+    const sheet = new CSSStyleSheet();
+    sheet.replaceSync(':root { --adopted-token: #112233; }');
+    document.adoptedStyleSheets = [...document.adoptedStyleSheets, sheet];
+  </script>
+</body>
+</html>

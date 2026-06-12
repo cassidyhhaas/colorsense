@@ -39,9 +39,6 @@ from colorsense.models import (
 
 __all__ = ["classify_tokens"]
 
-# Base weight for a numbered-scale match before any anchor boost is applied.
-_SCALE_BASE_WEIGHT: float = 3.0
-
 # The (role, weight, origin) classification triple.
 _Classification = tuple[TokenSemanticRole, float, TokenOrigin]
 
@@ -64,16 +61,18 @@ def _classify_self(record: TokenRecord, config: Config) -> _Classification:
         role, weight = name_match
         return role, weight, TokenOrigin.name_rule
 
-    # 3. Numbered-scale detection.
+    # 3. Numbered-scale detection. Like every other classifier weight, the scale family's
+    # base weight comes from the YAML (``scale_detection.base_weight``), so consumers
+    # recalibrating the vocabulary can retune it alongside the name-rule weights.
     scale = config.detect_scale(name)
     if scale is not None:
+        scale_config = config.token_vocabulary.scale_detection
         if scale.is_chromatic:
-            weight = _SCALE_BASE_WEIGHT
+            weight = scale_config.base_weight
             if scale.is_anchor:
-                boost = config.token_vocabulary.scale_detection.scale_present_confidence_boost
-                weight *= boost
+                weight *= scale_config.scale_present_confidence_boost
             return TokenSemanticRole.brand_accent, weight, TokenOrigin.scale
-        return TokenSemanticRole.neutral, _SCALE_BASE_WEIGHT, TokenOrigin.scale
+        return TokenSemanticRole.neutral, scale_config.base_weight, TokenOrigin.scale
 
     # 4. Fallback.
     return TokenSemanticRole.ignore, 0.0, TokenOrigin.fallback

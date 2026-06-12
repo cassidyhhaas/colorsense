@@ -170,7 +170,9 @@ undeclared**. See the [advanced guide](advanced.md#design-token-auditing).
 The declared design tokens (CSS custom properties), as `DesignToken` (name, resolved
 color, inferred semantic role) — only when `analyze(..., include_tokens=True)`. The field
 distinguishes **`None`** (tokens were not requested — the default) from **`()`** (tokens
-were requested but the page declares none). Status tokens (success/error/warning) are kept
+were requested but no usable color tokens were found: a page that declares no custom
+properties and a page whose declarations are all non-color — e.g. `--spacing: 4px` — or
+ignore-classified both yield `()`). Status tokens (success/error/warning) are kept
 out of the palette views but appear here with `semantic_role=status`.
 
 ### `third_party_colors`

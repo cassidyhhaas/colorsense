@@ -291,3 +291,79 @@ async def test_render_session_exposes_page_and_consent(fixtures_dir: Path) -> No
         assert title == "Consent fixture"
         # A consent banner region was detected for masking.
         assert session.consent_rects, "expected a detected consent region"
+
+
+# ---------------------------------------------------------------------------
+# Release-review hardening: payload caps, selector uniqueness, adopted sheets
+# ---------------------------------------------------------------------------
+
+
+async def test_adopted_stylesheet_tokens_harvested(fixtures_dir: Path, config: Config) -> None:
+    # document.adoptedStyleSheets is not part of document.styleSheets; constructed
+    # sheets (the web-component design-system pattern) must still surface tokens.
+    harvest = await _harvest(fixtures_dir / "harvest_hardening.html", config)
+
+    by_name = {token.name: token for token in harvest.tokens}
+    assert "--plain-token" in by_name  # regular <style> sheet still covered
+    adopted = by_name.get("--adopted-token")
+    assert adopted is not None
+    assert adopted.resolved is not None and adopted.resolved.hex == "#112233"
+
+
+async def test_duplicate_id_selectors_resolve_uniquely(fixtures_dir: Path) -> None:
+    # Selectors must match EXACTLY the element they were built for: bare '#dup' would
+    # make the hover prober read the first duplicate for both.
+    from colorsense.harvest.dom import harvest_elements
+
+    fixture = fixtures_dir / "harvest_hardening.html"
+    async with RenderSession(Theme.light, VIEWPORT) as session:
+        await session.goto(fixture.as_uri())
+        _elements, selectors = await harvest_elements(session.page, [])
+        assert "#dup" not in selectors
+        # A unique id still uses the fast '#id' form.
+        assert "#unique-btn" in selectors
+        for selector in selectors:
+            if not selector:
+                continue  # deliberately skipped (pathological nesting)
+            count = await session.page.evaluate(
+                "(sel) => document.querySelectorAll(sel).length", selector
+            )
+            assert count == 1, f"selector {selector!r} matches {count} elements"
+
+
+async def test_element_payload_cap_keeps_largest_area(fixtures_dir: Path) -> None:
+    # The collection JS receives the cap as an argument; evaluating with a tiny cap
+    # exercises the truncation exactly as the shipped cap would on a hostile page.
+    from colorsense.harvest.dom import _COLLECT_DOM_JS
+
+    fixture = fixtures_dir / "harvest_hardening.html"
+    async with RenderSession(Theme.light, VIEWPORT) as session:
+        await session.goto(fixture.as_uri())
+        uncapped = await session.page.evaluate(_COLLECT_DOM_JS, 10_000)
+        assert len(uncapped) > 3
+        capped = await session.page.evaluate(_COLLECT_DOM_JS, 3)
+        assert len(capped) == 3
+        # The largest-area records survive (body and the 600x400 block among them),
+        # in document order.
+        kept_tags_classes = [(rec["tag"], rec["class_tokens"]) for rec in capped]
+        assert ("body", []) in kept_tags_classes
+        assert ("div", ["big"]) in kept_tags_classes
+        areas = [rec["rect"]["w"] * rec["rect"]["h"] for rec in capped]
+        dropped_areas = [
+            rec["rect"]["w"] * rec["rect"]["h"]
+            for rec in uncapped
+            if (rec["tag"], rec["class_tokens"]) not in kept_tags_classes
+        ]
+        assert min(areas) >= max(dropped_areas)
+
+
+async def test_token_payload_cap_stops_collection(fixtures_dir: Path) -> None:
+    from colorsense.harvest.tokens import _COLLECT_TOKENS_JS
+
+    fixture = fixtures_dir / "harvest_hardening.html"
+    async with RenderSession(Theme.light, VIEWPORT) as session:
+        await session.goto(fixture.as_uri())
+        uncapped = await session.page.evaluate(_COLLECT_TOKENS_JS, 5_000)
+        assert len(uncapped) >= 3  # two declared + one adopted
+        capped = await session.page.evaluate(_COLLECT_TOKENS_JS, 2)
+        assert len(capped) == 2

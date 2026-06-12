@@ -156,10 +156,11 @@ async def analyze(
         any render.
     include_tokens:
         When ``True``, each [`ThemePalette`][colorsense.ThemePalette] carries its declared design
-        tokens as ``tokens`` (a tuple of [`DesignToken`][colorsense.DesignToken]; ``()`` when the
-        page declares none). When ``False`` (the default) ``tokens`` is ``None``. The flag gates
-        **only output assembly**: token classification and reconciliation always run, so every other
-        field is identical either way.
+        tokens as ``tokens`` (a tuple of [`DesignToken`][colorsense.DesignToken]; ``()`` when no
+        usable color tokens were found — none declared, or all declarations filtered as
+        non-color/ignore/zero-weight). When ``False`` (the default) ``tokens`` is ``None``.
+        The flag gates **only output assembly**: token classification and reconciliation
+        always run, so every other field is identical either way.
 
     Raises
     ------
@@ -301,7 +302,12 @@ def _analyze_theme(
     clusters = build_inventory(harvest, classified_elements)
 
     measured_usage = build_usage(clusters)
-    posterior_usage, divergence = reconcile(measured_usage, classified_tokens)
+    # The full (pre-prune) inventory colors back the declared-but-unused divergence test,
+    # so a declared color that rendered below the usage prune threshold is not
+    # misreported as "unused in render" (see reconcile's measured_colors doc).
+    posterior_usage, divergence = reconcile(
+        measured_usage, classified_tokens, measured_colors=[c.color for c in clusters]
+    )
     measured_roles, fit_score = assign_roles(clusters)
 
     palette = ThemePalette(

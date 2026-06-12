@@ -34,7 +34,7 @@ from pathlib import Path
 from typing import Literal
 
 import yaml
-from pydantic import BaseModel, ConfigDict, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from colorsense.models import TokenSemanticRole, UsageCategory
 
@@ -109,21 +109,36 @@ class NameRule(BaseModel):
 
     match: str
     role: TokenSemanticRole
-    weight: float
+    weight: float = Field(ge=0.0)
     match_type: MatchType = MatchType.substring
 
 
 class RelationalModifier(BaseModel):
     """A regex modifier that reroutes a token to ``text-on-<base>``.
 
-    The ``pattern`` must contain a named capture group ``base``.
+    The ``pattern`` must compile and contain a named capture group ``base`` — enforced at
+    load so a typo'd pattern fails loudly instead of becoming a rule that silently never
+    reroutes anything (``match_relational`` skips matches without a ``base`` group).
     """
 
     model_config = ConfigDict(frozen=True)
 
     pattern: str
     type: str
-    weight: float
+    weight: float = Field(ge=0.0)
+
+    @model_validator(mode="after")
+    def _validate_pattern(self) -> RelationalModifier:
+        try:
+            compiled = re.compile(self.pattern)
+        except re.error as exc:
+            raise ValueError(f"relational_modifiers pattern {self.pattern!r}: {exc}") from exc
+        if "base" not in compiled.groupindex:
+            raise ValueError(
+                f"relational_modifiers pattern {self.pattern!r} must contain a "
+                "named capture group 'base' (e.g. '(?P<base>...)')"
+            )
+        return self
 
 
 class AnchorRange(BaseModel):
@@ -159,7 +174,28 @@ class ScaleDetectionConfig(BaseModel):
     chromatic_families: tuple[str, ...]
     neutral_families: tuple[str, ...]
     anchor_ranges: dict[str, AnchorRange]
-    scale_present_confidence_boost: float
+    base_weight: float = Field(gt=0.0)
+    scale_present_confidence_boost: float = Field(ge=0.0)
+
+    @model_validator(mode="after")
+    def _validate_number_pattern(self) -> ScaleDetectionConfig:
+        """The pattern must compile and capture the scale number as group 1.
+
+        ``detect_scale`` reads ``match.group(1)``; without this check a groupless pattern
+        validates fine and raises ``IndexError`` only when a numbered token first appears.
+        """
+        try:
+            compiled = re.compile(self.number_pattern)
+        except re.error as exc:
+            raise ValueError(
+                f"scale_detection.number_pattern {self.number_pattern!r}: {exc}"
+            ) from exc
+        if compiled.groups < 1:
+            raise ValueError(
+                f"scale_detection.number_pattern {self.number_pattern!r} must contain a "
+                "capture group for the scale number (group 1)"
+            )
+        return self
 
 
 class ChannelPrior(BaseModel):
@@ -189,7 +225,7 @@ class TokenVocabularyConfig(BaseModel):
 
     namespace_prefixes: tuple[str, ...]
     strip_trailing: tuple[str, ...]
-    known_system_confidence_boost: float
+    known_system_confidence_boost: float = Field(ge=0.0)
     name_rules: tuple[NameRule, ...]
     relational_modifiers: tuple[RelationalModifier, ...]
     scale_detection: ScaleDetectionConfig
@@ -219,8 +255,16 @@ class TokenVocabularyConfig(BaseModel):
                 normalized[role] = {"channel": row["channel"]}
                 continue
             total = 0.0
-            for weight in row.values():
-                total += float(weight)
+            for key, weight in row.items():
+                value = float(weight)
+                if value < 0.0:
+                    # A negative prior would survive normalization and reach reconcile's
+                    # ``** alpha`` pooling, where a negative base under a fractional
+                    # exponent yields a complex number — fail at load, not deep in math.
+                    raise ValueError(
+                        f"role_to_usage_prior[{role!r}][{key!r}] must be >= 0, got {value}"
+                    )
+                total += value
             if total <= 0.0:
                 raise ValueError(
                     f"role_to_usage_prior[{role!r}] distribution must sum to a positive value"
@@ -324,7 +368,7 @@ class Suppressor(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    factor: float
+    factor: float = Field(ge=0.0)
     applies_to: Literal["all", "brand_components"]
 
 
@@ -334,8 +378,10 @@ class ComponentClassifierConfig(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     component_types: tuple[str, ...]
-    softmax_temperature: float
-    min_component_prob: float
+    # gt=0: a zero temperature divides by zero at classify time, and a NEGATIVE one
+    # silently *inverts* the component ranking — the worst kind of misconfiguration.
+    softmax_temperature: float = Field(gt=0.0)
+    min_component_prob: float = Field(ge=0.0, le=1.0)
     semantic_tags: tuple[VoteRule, ...]
     geometry: GeometryConfig
     class_tokens: tuple[VoteRule, ...]

@@ -626,3 +626,15 @@ def test_no_viewport_uses_default() -> None:
     [result] = classify_components([header], CONFIG)
     assert result.component_dist
     assert _argmax(result.component_dist) is ComponentType.header_bg
+
+
+def test_finalize_distribution_does_not_overflow_on_large_votes() -> None:
+    """The softmax is max-shifted: stacked vote weights must not overflow math.exp.
+
+    Unshifted exp(vote/T) overflows around vote/T > 709; probabilities are
+    mathematically shift-invariant, so the winner and its share are unchanged.
+    """
+    accum = {ComponentType.cta_bg: 5_000.0, ComponentType.link: 4_999.0}
+    probs = _finalize_distribution(accum, CONFIG)
+    assert math.isclose(sum(probs.values()), 1.0, rel_tol=1e-9)
+    assert probs[ComponentType.cta_bg] > probs.get(ComponentType.link, 0.0)

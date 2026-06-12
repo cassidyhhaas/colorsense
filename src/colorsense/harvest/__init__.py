@@ -161,6 +161,11 @@ async def harvest_page(
     #   page that tampers with DOM APIs can make the in-page JS payloads come back
     #   malformed, blowing up payload parsing or model construction.
     # * ``_OversizedCaptureError`` — the captured screenshot exceeds the decode pixel cap.
+    # * ``TimeoutError`` — a per-operation ``asyncio.wait_for`` bound on an essential
+    #   harvest evaluate expired (a page whose JS wedged the renderer main thread; see
+    #   ``render.EVAL_TIMEOUT_S``). The pipeline's ``max_total_seconds`` deadline is NOT
+    #   this type at this layer — it cancels the harvest (``CancelledError``, a
+    #   ``BaseException`` that passes through) and is translated at the pipeline.
     # Deliberately not a broad ``except Exception``: anything outside this set is a real
     # bug and should surface as itself. The ``async with`` still exits and tears the
     # browser down on exception. ``RobotsDisallowedError`` is raised in the politeness
@@ -195,6 +200,7 @@ async def harvest_page(
         PlaywrightError,
         _OversizedCaptureError,
         KeyError,
+        TimeoutError,
         TypeError,
         ValueError,
         ValidationError,

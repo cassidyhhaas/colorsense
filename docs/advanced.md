@@ -13,7 +13,8 @@ each theme's `ThemePalette`:
 - **`palette.tokens`** — the declared design tokens (CSS custom properties) with their
   resolved color and inferred semantic role (e.g. `--accent-500` read as `brand_accent`).
   Opt-in: pass `include_tokens=True` to `analyze` (otherwise the field is `None`; `()`
-  means tokens were requested but none are declared).
+  means tokens were requested but no usable color tokens were found — none declared, or
+  every declaration filtered as non-color or ignore-classified).
 - **`palette.divergence`** — discrepancies between intent and usage, keyed by
   `UsageCategory`: **declared but unused** (only *high-intent* tokens — ones classified by
   an explicit name rule or relational pattern; unused shades of a numbered color scale,

@@ -14,17 +14,32 @@ virtually everything and feed meaningless (usually black) "border colors" downst
 
 ``has_hover_color_change`` / ``hover_bg`` are left at their defaults here; pseudo-state
 probing fills them.
+
+The element payload is capped at `_MAX_HARVEST_ELEMENTS` records (largest rendered area
+wins, document order preserved): every record crosses from the renderer into the caller's
+Python process, so the cap bounds host-process memory against a hostile page the same way
+the screenshot capture/decode caps do (see ``harvest/screenshot.py``).
 """
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Sequence
 from typing import TypedDict, cast
 
 from playwright.async_api import Page
 
 from colorsense.color.primitives import parse_css_color
+from colorsense.harvest.render import EVAL_TIMEOUT_S
 from colorsense.models import HarvestedElement, Rect
+
+# Bound on the per-render element payload. Each record below materializes as a pydantic
+# model in the *host* Python process — container limits bound the renderer, not the
+# consumer — so without a cap a hostile page that synthesizes millions of visible elements
+# (a few lines of JS) forces a multi-GB allocation here. Far above any genuine page (real
+# pages run a few thousand visible elements); over budget, the largest-area elements are
+# kept, since area dominates every downstream signal (screenshot fusion, component votes).
+_MAX_HARVEST_ELEMENTS: int = 10_000
 
 
 class _RawElement(TypedDict):
@@ -56,15 +71,30 @@ class _RawElement(TypedDict):
 # Vendor matching is finished in Python against the config prefixes; JS exports the raw
 # lowercased id/class/src blob used for matching.
 _COLLECT_DOM_JS: str = r"""
-() => {
+(maxElements) => {
     const out = [];
     const pageOrigin = window.location.origin;
 
+    // Ids are only usable as selectors when UNIQUE: duplicate ids are invalid HTML but
+    // common in the wild, and the hover prober resolves selectors via DOM.querySelector
+    // (first document-order match) — a duplicate-id selector would silently probe a
+    // different element than the one harvested here.
+    const idCounts = new Map();
+    for (const el of document.querySelectorAll('[id]')) {
+        idCounts.set(el.id, (idCounts.get(el.id) || 0) + 1);
+    }
+    const uniqueId = (node) => node.id !== '' && idCounts.get(node.id) === 1;
+
+    // A selector that matches EXACTLY the element it was built for: either a unique id,
+    // or a child-combinator chain anchored at a unique-id ancestor or the document root,
+    // with :nth-child disambiguation wherever same-tag siblings exist. Returns '' (the
+    // prober skips the element) on pathological nesting rather than an ambiguous chain.
     const cssSelector = (el) => {
-        if (el.id) return '#' + CSS.escape(el.id);
+        if (uniqueId(el)) return '#' + CSS.escape(el.id);
         const parts = [];
         let node = el;
-        while (node && node.nodeType === 1 && parts.length < 8) {
+        while (node && node.nodeType === 1) {
+            if (parts.length >= 32) return '';
             let part = node.tagName.toLowerCase();
             const parent = node.parentElement;
             if (parent) {
@@ -75,7 +105,7 @@ _COLLECT_DOM_JS: str = r"""
                 }
             }
             parts.unshift(part);
-            if (node.id) { parts[0] = '#' + CSS.escape(node.id); break; }
+            if (uniqueId(node)) { parts[0] = '#' + CSS.escape(node.id); break; }
             node = parent;
         }
         return parts.join(' > ');
@@ -167,6 +197,15 @@ _COLLECT_DOM_JS: str = r"""
             vendor_blob: vendorBlob,
         });
     }
+
+    // Host-process memory bound (see _MAX_HARVEST_ELEMENTS in Python): keep the
+    // largest-area records, preserving document order among the survivors.
+    if (out.length > maxElements) {
+        const ranked = out.map((rec, i) => [rec.rect.w * rec.rect.h, i]);
+        ranked.sort((a, b) => (b[0] - a[0]) || (a[1] - b[1]));
+        const keep = new Set(ranked.slice(0, maxElements).map((pair) => pair[1]));
+        return out.filter((rec, i) => keep.has(i));
+    }
     return out;
 }
 """
@@ -184,9 +223,18 @@ async def harvest_elements(
     """Harvest visible DOM elements with computed colors and structural flags.
 
     Returns the elements alongside a parallel list of CSS selectors (one per element) so
-    pseudo-state probing can re-target the same elements.
+    pseudo-state probing can re-target the same elements. A selector is either uniquely
+    resolvable to its element or the empty string (probing skips it); the payload is
+    capped at `_MAX_HARVEST_ELEMENTS` records (largest area wins).
     """
-    raw_elements = cast(list[_RawElement], await page.evaluate(_COLLECT_DOM_JS))
+    # ``wait_for`` bounds the evaluate (Playwright gives it no timeout of its own); a
+    # wedged renderer surfaces as TimeoutError -> RenderError instead of a hung harvest.
+    raw_elements = cast(
+        list[_RawElement],
+        await asyncio.wait_for(
+            page.evaluate(_COLLECT_DOM_JS, _MAX_HARVEST_ELEMENTS), EVAL_TIMEOUT_S
+        ),
+    )
 
     elements: list[HarvestedElement] = []
     selectors: list[str] = []

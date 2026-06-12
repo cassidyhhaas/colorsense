@@ -114,7 +114,7 @@ def _print_palette(result: AnalysisResult) -> None:
         if palette.tokens is not None:
             typer.echo("    tokens:")
             if not palette.tokens:
-                typer.echo("      (none declared)")
+                typer.echo("      (no usable color tokens)")
             for token in palette.tokens:
                 typer.echo(f"      {token.name}  {token.color.hex}  {token.semantic_role}")
 

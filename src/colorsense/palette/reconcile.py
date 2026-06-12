@@ -32,6 +32,7 @@ All thresholds are module-level constants, documented and tunable.
 from __future__ import annotations
 
 import math
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 from colorsense.color.primitives import delta_e
@@ -199,6 +200,8 @@ def reconcile(
     usage: UsagePalette,
     tokens: list[ClassifiedToken],
     alpha: float = 0.4,
+    *,
+    measured_colors: Sequence[Color] | None = None,
 ) -> tuple[UsagePalette, list[DivergenceItem]]:
     """Fuse declared intent (``tokens``) with measured ``usage`` by log-linear pooling.
 
@@ -210,6 +213,12 @@ def reconcile(
     to ``[0, 1]``. The posterior universe is the measured usage entries, so every posterior entry
     carries its measured entry's ``area`` and non-empty ``components``; a declared color with no
     measured match never appears in the posterior and is reported via divergence instead.
+
+    ``measured_colors``, when given, is the FULL measured color inventory (every cluster
+    color, pre-prune) used for the declared-but-unused membership test: ``usage`` entries
+    are post-prune, so testing against them alone would report a declared color that
+    genuinely rendered — just below every category's prune threshold — as "unused in
+    render". ``None`` falls back to the usage entries (all colors that survived pruning).
     """
     alpha = _clamp_alpha(alpha)
     groups = _aggregate_intent(tokens)
@@ -220,7 +229,7 @@ def reconcile(
         posterior_mapping[category] = tuple(_pool_category(category, usage, groups, intents, alpha))
 
     posterior = UsagePalette(mapping=posterior_mapping)
-    divergence = _build_divergence(usage, tokens, groups, intents)
+    divergence = _build_divergence(usage, tokens, groups, intents, measured_colors)
     return posterior, divergence
 
 
@@ -317,12 +326,20 @@ def _build_divergence(
     tokens: list[ClassifiedToken],
     groups: list[_IntentGroup],
     intents: list[dict[UsageCategory, float]],
+    measured_colors: Sequence[Color] | None,
 ) -> list[DivergenceItem]:
-    """Report declared-but-unused and used-but-undeclared discrepancies."""
-    # All measured usage colors across every category (for nearest-color membership tests).
-    usage_colors: list[Color] = [
-        entry.color for entries in usage.mapping.values() for entry in entries
-    ]
+    """Report declared-but-unused and used-but-undeclared discrepancies.
+
+    The "unused in render" membership test prefers ``measured_colors`` (the pre-prune
+    inventory — see `reconcile`) so a sub-threshold-but-rendered declared color is not
+    misreported as unused.
+    """
+    usage_colors: list[Color] = (
+        list(measured_colors)
+        if measured_colors is not None
+        # Fallback: all measured usage colors that survived per-category pruning.
+        else [entry.color for entries in usage.mapping.values() for entry in entries]
+    )
 
     def matches_any_usage(color: Color) -> bool:
         return any(delta_e(color, uc) <= DELTA_E_MATCH_MEASURED for uc in usage_colors)
