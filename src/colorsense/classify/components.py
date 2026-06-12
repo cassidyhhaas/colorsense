@@ -239,7 +239,14 @@ def _finalize_distribution(
     accum: dict[ComponentType, float],
     config: Config,
 ) -> dict[ComponentType, float]:
-    """Softmax positive votes, prune below threshold, and renormalize survivors."""
+    """Softmax positive votes, prune below threshold, and renormalize survivors.
+
+    The prune/renormalize/argmax-fallback shape mirrors ``palette/_pruning.py``'s
+    `prune_distribution`, but deliberately stays local: this ranks ``ComponentType``
+    keys, not colors, so the palette helper's hex tie-break convention has no analogue
+    here (and ``classify/`` does not depend on ``palette/``). The argmax fallback is
+    deterministic regardless — ``accum`` is built in config-rule order.
+    """
     cc = config.component_classifier
     positive = {comp: vote for comp, vote in accum.items() if vote > 0.0}
     if not positive:

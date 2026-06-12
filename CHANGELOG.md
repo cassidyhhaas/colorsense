@@ -135,6 +135,19 @@ Other changes riding the redesign:
   fixes a marginal cache detail: the TTL expiry is now stamped *after* resolution
   completes, so a lookup slower than the TTL no longer produces a born-expired entry.
 
+- **One shared prune/renormalize/argmax step; reconciliation's argmax tie-break is now
+  deterministic by hex.** The normalize → prune-below-threshold → renormalize-survivors
+  → keep-argmax-if-pruning-emptied pipeline was implemented independently in
+  `palette/usage.py`, `palette/roles.py`, and `palette/reconcile.py`, with three
+  different argmax tie-breaks: usage preferred the smallest hex (the documented
+  convention), roles preferred the *largest*, and reconciliation used a bare `max()`
+  (input position wins). All three now call `prune_distribution` in the new
+  `palette/_pruning.py`, which breaks exact-probability ties by smallest hex everywhere.
+  Behavior is unchanged outside those degenerate exact-tie fallbacks (golden snapshots
+  untouched). `classify/components.py`'s similar-looking softmax-prune block stays
+  local by design — it ranks `ComponentType` keys, not colors, so the hex convention
+  has no analogue there (and `classify/` does not depend on `palette/`).
+
 ### Fixed — measurement-layer gaps (live-probe follow-up)
 
 A live acceptance probe of the usage-keyed redesign against github.com exposed

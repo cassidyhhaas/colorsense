@@ -44,6 +44,7 @@ from colorsense.models import (
     UsageEntry,
     UsagePalette,
 )
+from colorsense.palette._pruning import prune_distribution
 from colorsense.palette.inventory import DELTA_E_MATCH_BG
 
 __all__ = ["reconcile"]
@@ -288,32 +289,24 @@ def _pool_category(
     unnorm = [
         (c.p_usage + EPS) ** (1.0 - alpha) * (c.p_intent + smoothing) ** alpha for c in candidates
     ]
-    total = sum(unnorm)
-    if total <= 0.0:  # pragma: no cover - guarded by the EPS/smoothing floors
-        return []
-    posterior_prob = [u / total for u in unnorm]
 
-    # Prune + renormalize survivors; if pruning empties the category, keep the argmax.
-    survivors = [i for i, p in enumerate(posterior_prob) if p >= MIN_POSTERIOR_PROB]
-    if not survivors:
-        argmax_idx = max(range(len(posterior_prob)), key=lambda i: posterior_prob[i])
-        survivors = [argmax_idx]
-        posterior_prob = [1.0 if i == argmax_idx else 0.0 for i in range(len(candidates))]
-    else:
-        surv_total = sum(posterior_prob[i] for i in survivors)
-        posterior_prob = [
-            (posterior_prob[i] / surv_total if i in set(survivors) else 0.0)
-            for i in range(len(candidates))
-        ]
+    # Normalize, prune, renormalize survivors via the shared step; if pruning empties
+    # the category, the deterministic argmax (ties broken by smallest hex) is kept.
+    kept = prune_distribution(
+        candidates,
+        unnorm,
+        min_share=MIN_POSTERIOR_PROB,
+        tie_key=lambda c: c.measured.color.hex,
+    )
 
     result = [
         UsageEntry(
-            color=candidates[i].measured.color,
-            probability=posterior_prob[i],
-            area=candidates[i].measured.area,
-            components=dict(candidates[i].measured.components),
+            color=candidate.measured.color,
+            probability=prob,
+            area=candidate.measured.area,
+            components=dict(candidate.measured.components),
         )
-        for i in survivors
+        for candidate, prob in kept
     ]
     result.sort(key=lambda e: (-e.probability, e.color.hex))
     return result

@@ -459,6 +459,27 @@ def test_pruning_that_empties_category_keeps_argmax_at_one() -> None:
     assert entries[0].probability == 1.0
 
 
+def test_argmax_fallback_tie_is_broken_by_smallest_hex() -> None:
+    # Regression for the release-review tie-break unification: when pruning empties the
+    # category AND the posterior has exactly-tied maxima, the smallest hex must win (the
+    # shared prune_distribution convention) — not the entry's position in the input
+    # (the old bare-max() behavior). The larger hex is deliberately listed FIRST.
+    n = 60
+    tied_prob = 0.019  # below MIN_POSTERIOR_PROB (0.02)
+    weak_share = (1.0 - 2 * tied_prob) / (n - 2)
+    assert weak_share < tied_prob
+    entries_in = [_entry("#cccccc", tied_prob), _entry("#aaaaaa", tied_prob)] + [
+        _entry(f"#0000{i:02x}", weak_share) for i in range(n - 2)
+    ]
+    usage = UsagePalette(mapping={UsageCategory.interactive: tuple(entries_in)})
+    posterior, _ = reconcile(usage, [], alpha=0.0)
+
+    entries = posterior.mapping[UsageCategory.interactive]
+    assert len(entries) == 1
+    assert entries[0].color.hex == _color("#aaaaaa").hex
+    assert entries[0].probability == 1.0
+
+
 def test_dominant_undeclared_color_stays_dominant() -> None:
     # The 0.4.0 release-review regression: with an EPS-floored intent factor, a single
     # declared minor color annihilated a 95%-dominant undeclared one (a 95%-white page

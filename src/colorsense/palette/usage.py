@@ -31,7 +31,8 @@ Design notes
       *ordering* is unchanged; only the shares compress, while genuinely tiny masses
       still prune.
 * Everything is deterministic: iteration is over stable sort orders, ties are broken by
-  color ``hex``, and there is no randomness.
+  color ``hex`` (smallest wins — the shared `prune_distribution` convention), and there
+  is no randomness.
 """
 
 from __future__ import annotations
@@ -45,6 +46,7 @@ from colorsense.models import (
     UsageEntry,
     UsagePalette,
 )
+from colorsense.palette._pruning import prune_distribution
 
 __all__ = ["build_usage"]
 
@@ -54,7 +56,8 @@ __all__ = ["build_usage"]
 
 # Entries below this within-category probability share are pruned (then survivors are
 # renormalized). If pruning would empty a non-empty category, the argmax entry is kept
-# at probability 1.0 instead (the RoleResults / palette.roles pattern).
+# at probability 1.0 instead (the shared `prune_distribution` step, used by every
+# palette ranking stage).
 MIN_SHARE: float = 0.02
 
 # Component-type -> usage-category routing. A fixed code-level convention (see the
@@ -109,32 +112,20 @@ def _build_entries(
     """Normalize prominence scores into probabilities, prune, renormalize, and rank.
 
     ``scored`` is ``(cluster, prominence, per-component masses)`` per participating
-    cluster. Entries below `MIN_SHARE` are pruned with the keep-argmax fallback;
-    output is sorted by ``(-probability, hex)``.
+    cluster. The prune/renormalize/argmax-fallback step is the shared
+    `prune_distribution` (which also covers the all-zero-prominence surface case —
+    every score ties, so the smallest hex wins outright); output is sorted by
+    ``(-probability, hex)``.
     """
-    if not scored:
-        return ()
-
-    total = sum(score for _, score, _ in scored)
-    if total <= 0.0:
-        # All-zero prominence (e.g. a surface-only cluster set with no screenshot area):
-        # fall back to the deterministic argmax by (score, hex) — i.e. smallest hex.
-        best = min(scored, key=lambda item: item[0].color.hex)
-        kept = [(best[0], 1.0, best[2])]
-    else:
-        probs = [(cluster, score / total, masses) for cluster, score, masses in scored]
-        kept = [(c, p, m) for c, p, m in probs if p >= MIN_SHARE]
-        if not kept:
-            # Pruning emptied the category: keep the single argmax at probability 1.0.
-            # Largest probability wins; ties broken by smallest hex for determinism.
-            best = min(probs, key=lambda item: (-item[1], item[0].color.hex))
-            kept = [(best[0], 1.0, best[2])]
-        else:
-            kept_total = sum(p for _, p, _ in kept)
-            kept = [(c, p / kept_total, m) for c, p, m in kept]
+    kept = prune_distribution(
+        scored,
+        [score for _, score, _ in scored],
+        min_share=MIN_SHARE,
+        tie_key=lambda item: item[0].color.hex,
+    )
 
     entries: list[UsageEntry] = []
-    for cluster, prob, masses in kept:
+    for (cluster, _score, masses), prob in kept:
         mass_total = sum(masses.values())
         components = (
             {comp: mass / mass_total for comp, mass in masses.items()} if mass_total > 0.0 else {}
