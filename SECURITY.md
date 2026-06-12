@@ -92,18 +92,25 @@ attacker-influenceable page with **JavaScript execution** and **full-page screen
 A hostile or merely pathological target can try to exhaust your resources: huge or infinite
 pages, heavy scripts, many sub-resource requests, large DOMs, memory balloons.
 
-The library's built-in bounds are the **navigation timeout**, the per-host **rate limiter**
-in `PolitenessPolicy` (including a capped `robots.txt` `Crawl-delay`), **capture dimension
-caps** on the full-page screenshot (~20k x 10k px), a **decode pixel cap** rejecting
-decompression-bomb captures, and **caps on the policy's own `robots.txt` fetch** (request
+The library's built-in bounds are the **navigation timeout**, **per-operation timeouts on
+every post-navigation harvest step** (in-page evaluations, the CDP hover-probe pass — so a
+page whose JS wedges the renderer after the load event fails bounded instead of hanging a
+deadline-less `analyze()` forever), the per-host **rate limiter** in `PolitenessPolicy`
+(including a capped `robots.txt` `Crawl-delay`), **capture dimension caps** on the
+full-page screenshot (~20k x 10k px, additionally shrunk to fit the decode budget at the
+session's device scale factor), a **decode pixel cap** rejecting decompression-bomb
+captures, **harvest payload caps** bounding what crosses from the renderer into the host
+Python process (10,000 element records / 5,000 token declarations per render — a hostile
+page synthesizing millions of elements or custom properties cannot balloon the embedding
+service's memory), and **caps on the policy's own `robots.txt` fetch** (request
 timeout, 20-redirect cap, 512 KiB body cap — so a hostile robots host cannot stream
 unbounded data into the server-side loader). Two further bounds exist but are **off by default — you must
 set them**: `PolitenessPolicy(max_concurrent_renders=...)` caps simultaneous renders
 through a policy, and `analyze(..., max_total_seconds=...)` deadlines a whole call (raising
-`AnalysisTimeoutError`, a `TimeoutError` subclass). There is still **no cap** on per-page
-memory or on the number of sub-requests a page may make. The library does not save
-downloaded files to disk — it captures an in-memory screenshot — but the *render itself* is
-the cost, and it is unbounded unless you bound it.
+`AnalysisTimeoutError`, a `TimeoutError` subclass). There is still **no cap** on the
+*renderer process's* memory or on the number of sub-requests a page may make. The library
+does not save downloaded files to disk — it captures an in-memory screenshot — but the
+*render itself* is the cost, and it is unbounded unless you bound it.
 
 **Hard per-render memory/CPU caps are container-level by design.** The library does not —
 and will not — enforce them in-process: a userland watchdog cannot hold under exactly the

@@ -25,7 +25,8 @@ Result & contracts
   ([`DivergenceItem`][colorsense.DivergenceItem]) reports declared-vs-measured discrepancies, and
   ``tokens`` ([`DesignToken`][colorsense.DesignToken]) carries the declared design tokens — opt-in
   via ``analyze(..., include_tokens=True)`` (``None`` when not requested, ``()`` when requested but
-  none declared).
+  no usable color tokens were found: pages that declare none, and pages whose declarations are all
+  non-color or ignore-classified, both yield ``()``).
 * [`Color`][colorsense.Color] / [`Viewport`][colorsense.Viewport] — value types (``Viewport`` is
   also an ``analyze`` argument).
 * [`Theme`][colorsense.Theme], [`UsageCategory`][colorsense.UsageCategory],

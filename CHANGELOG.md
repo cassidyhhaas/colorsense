@@ -23,7 +23,7 @@ Migration table (old → new):
 | `AnalysisResult.fit_score` | `ThemePalette.fit_score` (per theme; descriptive "how 60/30/10-like", not a quality score) |
 | `AnalysisResult.divergence` | `ThemePalette.divergence` (per theme) |
 | `DivergenceItem.role: PaletteRole` | `DivergenceItem.category: UsageCategory` |
-| `AnalysisResult.tokens: tuple[ClassifiedToken, ...]` | `ThemePalette.tokens: tuple[DesignToken, ...] \| None` — **opt-in** via `analyze(..., include_tokens=True)`; `None` = not requested, `()` = requested but none declared. `DesignToken` carries `name`, resolved `color`, `semantic_role`. |
+| `AnalysisResult.tokens: tuple[ClassifiedToken, ...]` | `ThemePalette.tokens: tuple[DesignToken, ...] \| None` — **opt-in** via `analyze(..., include_tokens=True)`; `None` = not requested, `()` = requested but no usable color tokens found (none declared, or every declaration filtered as non-color / ignore-classified / zero-weight). `DesignToken` carries `name`, resolved `color`, `semantic_role`. |
 | `AnalysisResult.status_colors` | Removed. Status tokens stay excluded from the palette views and surface in the opt-in token list with `semantic_role=status`. |
 | `PaletteCandidate.evidence` | Removed (internal scoring-term names are not contract). `color`/`probability`/`area` remain. |
 | `RunMetadata.single_theme` | Removed; use `len(metadata.themes_analyzed) == 1`. |
@@ -42,10 +42,23 @@ Other changes riding the redesign:
 - The CLI's human-readable output (unstable by design) now leads with the usage view per
   theme, then the roles summary + fit score, divergence, and (with `--tokens`) the token
   list.
-- Config YAML: `role_to_palette_prior` is renamed **`role_to_usage_prior`** and its
-  distributions are now over the four usage categories; custom config files must be
-  updated. The token classifier's neutral light/dark special-case is gone (the usage
-  taxonomy has no light/dark neutral split).
+- Config YAML — **custom `config_path=` files from 0.3.0 must be updated** (the loader
+  fails loudly on each of these, in this order):
+    1. `role_to_palette_prior` is renamed **`role_to_usage_prior`** and its distributions
+       are now over the four usage categories. The token classifier's neutral light/dark
+       special-case is gone (the usage taxonomy has no light/dark neutral split).
+    2. The **`border_presence`** and **`text_presence`** feature families (see the
+       measurement-layer fixes below) are new **required** keys under
+       `component_classifier`.
+    3. **`scale_detection.base_weight`** is a new **required** key: the numbered-scale
+       classifier's base weight (previously hard-coded at `3.0` in
+       `classify/tokens.py`, contradicting the "all weights come from the YAML" design)
+       now lives in the YAML alongside the other classifier weights.
+    4. The dead `has_focus_ring` / `consent_masked_region` knobs are now **rejected** (see
+       the dead-knobs entry below).
+
+  The simplest migration is to re-copy the bundled `data/palette_config.yaml` and re-apply
+  your tuning.
 - Inventory channel routing: `link` component mass now routes to the element's **text**
   color (a link paints its typography, not its usually-transparent background), and
   fully-transparent (`alpha == 0`) channel colors no longer donate vote mass (previously
@@ -213,6 +226,97 @@ measurement gaps the fixtures had masked; all are now encoded as offline fixture
   backgrounds into the `interactive` usage category. Aligning the harvest with that set,
   `<input type="image">` (a graphical submit button) is now also harvested as
   `clickable`.
+
+### Fixed — second pre-release review (hardening pass)
+
+- **The DOM-element and design-token harvest payloads are now bounded** (10,000 element
+  records / 5,000 token declarations per render). Both channels serialize one record per
+  visible element / declared custom property into the *host* Python process, where each
+  materializes as a pydantic model — container limits bound the renderer, not the
+  consumer — so a hostile page synthesizing millions of divs or `--props` could force a
+  multi-GB allocation in the embedding service (the same vector the screenshot
+  capture/decode caps closed for images). Over budget, the element harvest keeps the
+  largest-area records (area dominates every downstream signal) in document order; the
+  token harvest stops at the cap in stylesheet order. Both caps sit far above any genuine
+  page.
+- **Oversized-page screenshot fallback now succeeds at retina scale factors.** The capture
+  clip was clamped in CSS pixels but the decompression-bomb decode cap counts *device*
+  pixels, so the very pages the clip fallback was built to survive still failed with
+  `RenderError` at `device_scale_factor=2` (e.g. a >20,000px-tall page at the default
+  1280-wide viewport → 102.4M device px against the 90M cap), or whenever both dimension
+  caps bound at once. The clip is now additionally shrunk (height first) to fit the decode
+  budget at the session's scale factor; the decode check remains as a pure backstop.
+- **Post-navigation harvest operations are bounded even without a deadline.** Playwright
+  applies no timeout to `page.evaluate` or CDP sends, so under the default
+  `max_total_seconds=None` a page whose JS wedged the renderer main thread after the load
+  event hung `analyze()` forever. Essential evaluates (DOM walk, token enumeration,
+  document-size probe) are now bounded at 30s and surface as `RenderError`; best-effort
+  stabilization steps (step-scroll, consent detection, motion-disabling CSS) are bounded
+  at 10s and degrade as before; the hover-probe pass has a single 30s wall-clock bound and
+  keeps whatever it probed (CDP detach is bounded too).
+- **Hover probes can no longer read a different element than the one harvested.**
+  Generated selectors used bare `#id` even for duplicate ids (invalid but common in the
+  wild) and capped un-anchored descendant chains at 8 parts, so CDP `DOM.querySelector`
+  (first document-order match) could land on a sibling/clone and misattribute
+  `has_hover_color_change`/`hover_bg`. Selectors are now unique by construction — `#id`
+  only when the id is unique on the page, otherwise a child-combinator chain anchored at a
+  unique-id ancestor or the document root with `:nth-child` disambiguation — and elements
+  with pathologically deep nesting (>32 levels) are skipped rather than probed ambiguously.
+- **`RenderSession.__aenter__` no longer leaks the Playwright driver on setup failure.**
+  A launch/context/page failure partway through enter (Chromium not installed, sandbox
+  refusal, bad `browser_args`) propagated without `__aexit__` ever running, leaking the
+  already-started driver subprocess (and possibly the launched browser) on every failed
+  attempt — one leaked node process per retry in a long-running server. Unreachable via
+  `analyze()` (which always passes a `SharedBrowser`), reachable via direct
+  `PolitenessPolicy.fetch`/`harvest_page` use. Enter now tears down what it started before
+  re-raising.
+- **`SharedBrowser` teardown now serializes with in-flight launches.** `__aexit__` did not
+  take the launch lock, so under unstructured concurrency a `get()` suspended in
+  `chromium.launch` could assign and return a fresh browser *after* teardown closed
+  everything — a Chromium nobody would ever close. Teardown now waits for the in-flight
+  launch and closes its result. (`analyze()` was never affected: it joins all renders
+  before teardown.)
+- **`robots.txt` fetches are single-flighted.** Concurrent cache-missing callers for the
+  same robots URL (e.g. the light and dark fetch leaders of one two-theme `analyze`, which
+  have distinct render-cache keys) each issued their own robots GET when the first fetch
+  outlasted the per-host throttle interval. They now coalesce onto one GET via the same
+  future-per-key pattern (and cancellation semantics) as the render single-flight.
+- **The config loader now validates numeric ranges, not just dispatch names.** Previously
+  a hand-authored custom YAML could load successfully and then fail far from the cause —
+  or worse, silently corrupt results: a negative `role_to_usage_prior` weight survived
+  normalization and produced *complex numbers* inside reconciliation's `** alpha` pooling;
+  `softmax_temperature: 0` crashed with `ZeroDivisionError` at classify time while a
+  *negative* temperature silently inverted the component ranking; a groupless
+  `scale_detection.number_pattern` raised `IndexError` only when a numbered token first
+  appeared; a `relational_modifiers` pattern without the documented `base` group became a
+  rule that silently never fired. All of these are now load-time `ValidationError`s
+  (weights/boosts/factors `>= 0`, temperature `> 0`, `min_component_prob` in `[0, 1]`,
+  patterns must compile with their required groups). The component softmax is also
+  max-shifted (matching `palette/roles.py`), so stacked vote weights can no longer
+  overflow `math.exp` — probabilities are mathematically unchanged.
+- **Divergence "declared … unused in render" is now tested against the full measured
+  inventory.** Membership was tested against the post-prune usage entries, so a declared
+  color that genuinely rendered — just below every category's 2% prune threshold — was
+  misreported as unused. The pipeline now passes the pre-prune cluster colors to
+  `reconcile`, so "unused in render" means exactly that.
+- **The roles view's primary-anchor tie-break now follows the documented smallest-hex
+  convention.** On an exact (score, area) tie the `max()` over the key tuple picked the
+  lexicographically *largest* hex, contradicting the module's own design notes and the
+  shared `prune_distribution` convention used everywhere else in `palette/` (the chosen
+  anchor feeds accent contrast scoring). Output is unchanged except on exact float ties.
+- **Token harvesting covers `document.adoptedStyleSheets`.** Constructed stylesheets
+  adopted at the document level — the standard token-shipping mechanism for
+  web-component-heavy design systems (Lit, etc.) — are not part of `document.styleSheets`
+  and were silently skipped, so their declared tokens vanished from the token list and
+  reconciliation saw usage with no declared intent. Sheets adopted inside shadow *roots*
+  are still not visited; the harvest docstrings now state the scope precisely.
+- **The hover-probe pass no longer fetches the entire DOM tree over CDP.**
+  `DOM.getDocument` was called with `depth: -1` (serializing the complete node tree into
+  the host process on every render) when only the root `nodeId` is consumed; it now
+  requests the default depth.
+- **`docs.yml` pins its actions to commit SHAs**, matching the discipline already applied
+  to the publish/CI workflows (the deploy job runs with `pages: write` + `id-token:
+  write`).
 
 ### Added
 

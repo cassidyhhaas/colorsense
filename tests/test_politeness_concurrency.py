@@ -378,3 +378,38 @@ def test_max_concurrent_renders_validation() -> None:
     with pytest.raises(ValueError, match="max_concurrent_renders"):
         PolitenessPolicy(max_concurrent_renders=-1)
     PolitenessPolicy(max_concurrent_renders=1)  # the boundary value is accepted
+
+
+async def test_robots_fetch_is_single_flighted() -> None:
+    """Concurrent cache-missing robots lookups for one URL coalesce onto one GET.
+
+    The light and dark fetch leaders of a two-theme analyze have distinct render cache
+    keys, so both used to miss the robots cache and each issue a robots.txt GET when the
+    first fetch outlasted the throttle interval (release-review fix).
+    """
+    calls = 0
+    gate = asyncio.Event()
+
+    async def slow_loader(
+        _url: str, _user_agent: str, _request_filter: RequestFilter | None = None
+    ) -> str | None:
+        nonlocal calls
+        calls += 1
+        await gate.wait()
+        return "User-agent: *\nAllow: /"
+
+    policy = PolitenessPolicy(robots_loader=slow_loader)
+    robots_url = "https://single-flight.test/robots.txt"
+    first = asyncio.ensure_future(policy._robots_parser(robots_url))
+    second = asyncio.ensure_future(policy._robots_parser(robots_url))
+    await _spin()
+    gate.set()
+    parser_a, parser_b = await asyncio.gather(first, second)
+
+    assert calls == 1  # one GET served both callers
+    assert parser_a is parser_b
+    assert parser_a is not None and parser_a.can_fetch("colorsense", "https://x.test/")
+
+    # A later call is served from the cache without re-fetching.
+    assert await policy._robots_parser(robots_url) is parser_a
+    assert calls == 1

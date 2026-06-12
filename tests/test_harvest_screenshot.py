@@ -238,6 +238,10 @@ async def test_harvest_screenshot_oversized_page_clips_width() -> None:
 
 @pytest.mark.asyncio
 async def test_harvest_screenshot_oversized_page_clips_both_dimensions() -> None:
+    # Both caps binding at once: the raw capped clip (20k x 10k = 200M px) exceeds the
+    # 90M decode budget, so the height is additionally shrunk until the clip fits — the
+    # fallback must SUCCEED on the pages it exists for, not trade RenderError for
+    # RenderError (previously this exact shape raised at decode time).
     page = _FakePage(
         doc_width=_MAX_CAPTURE_WIDTH_PX + 1.0,
         doc_height=_MAX_CAPTURE_HEIGHT_PX + 1.0,
@@ -250,7 +254,32 @@ async def test_harvest_screenshot_oversized_page_clips_both_dimensions() -> None
     clip = page.screenshot_kwargs.get("clip")
     assert clip is not None
     assert clip["width"] == _MAX_CAPTURE_WIDTH_PX
-    assert clip["height"] == _MAX_CAPTURE_HEIGHT_PX
+    assert clip["height"] < _MAX_CAPTURE_HEIGHT_PX  # shrunk to fit the decode budget
+    assert clip["width"] * clip["height"] <= _MAX_DECODE_PIXELS
+
+
+@pytest.mark.asyncio
+async def test_harvest_screenshot_retina_scale_fits_decode_budget() -> None:
+    # device_scale_factor=2 (public via Viewport / the CLI --scale flag): the screenshot
+    # decodes at DEVICE pixels, so the CSS-px clip must satisfy (w*2)*(h*2) <= budget.
+    # A >20k-tall page at a 1280-wide viewport previously clipped to 20_000x1280 CSS px
+    # = 102.4M device px > 90M and raised RenderError on exactly the pages the clip
+    # fallback was built to survive.
+    dsf = 2.0
+    page = _FakePage(
+        doc_width=1280.0,
+        doc_height=_MAX_CAPTURE_HEIGHT_PX + 50_000.0,
+        image=_png_bytes(40, 30, (0, 0, 255)),
+    )
+
+    bins = await harvest_screenshot(page, [], dsf)  # type: ignore[arg-type]
+
+    assert page.screenshot_kwargs is not None
+    clip = page.screenshot_kwargs.get("clip")
+    assert clip is not None
+    assert clip["width"] == 1280.0
+    assert (clip["width"] * dsf) * (clip["height"] * dsf) <= _MAX_DECODE_PIXELS
+    assert [b.color.hex for b in bins] == ["#0000ff"]
 
 
 @pytest.mark.asyncio

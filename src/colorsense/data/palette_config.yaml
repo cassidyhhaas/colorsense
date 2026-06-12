@@ -168,6 +168,10 @@ token_vocabulary:
     anchor_ranges:
       tailwind: [500, 700]   # 50..950
       radix:    [9, 10]      # 1..12
+    # Base weight for any numbered-scale classification, before the anchor boost below.
+    # Sits inside the name-rule weight range (2.0-5.0): a scale hit is stronger evidence
+    # than a generic substring match, weaker than an exact semantic name.
+    base_weight: 3.0
     scale_present_confidence_boost: 1.3
 
   # --- Semantic token role -> prior distribution over usage categories. -------

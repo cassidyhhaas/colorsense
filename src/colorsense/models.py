@@ -473,7 +473,9 @@ class ThemePalette(BaseModel):
     * ``divergence`` — declared-vs-measured discrepancies, keyed by usage category.
     * ``tokens`` — declared design tokens, opt-in: ``None`` means tokens were **not
       requested** (``include_tokens=False``, the default); ``()`` means tokens were
-      requested but the page declares none.
+      requested but no usable color tokens were found — the page declares no custom
+      properties at all, or every declaration was filtered as non-meaningful (no
+      resolvable color, ``ignore`` semantic role, or zero classification weight).
     """
 
     model_config = ConfigDict(frozen=True)

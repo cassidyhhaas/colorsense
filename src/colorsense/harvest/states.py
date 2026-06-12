@@ -19,12 +19,16 @@ buttons/links); the only effect it cannot see is purely JS-driven hover (e.g. a
 class toggled on ``mouseenter``).
 
 Per-element interaction is wrapped in try/except so a single uncooperative element cannot
-abort the whole harvest, and the whole pass degrades to a no-op if a CDP session cannot be
-established.
+abort the whole harvest, the whole pass degrades to a no-op if a CDP session cannot be
+established, and the pass as a whole is bounded by `_PROBE_PASS_TIMEOUT_S` — CDP sends
+have no Playwright timeout, so a page whose JS wedges the renderer main thread after load
+would otherwise hang the harvest indefinitely (per-element isolation cannot bound a send
+that never returns).
 """
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 from typing import Any, cast
 
@@ -35,6 +39,14 @@ from colorsense.models import Color, HarvestedElement
 
 # Max elements to probe so a huge page can't blow up render time.
 _MAX_PROBE: int = 80
+
+# Wall-clock bound (seconds) on the whole hover-probe pass (CDP setup + every send). On a
+# wedged renderer the pass is abandoned and the elements keep their (already correct)
+# resting colors — hover data is a heuristic enrichment, never worth hanging the harvest.
+_PROBE_PASS_TIMEOUT_S: float = 30.0
+
+# Bound on the final CDP detach during cleanup (it, too, is an unbounded send).
+_DETACH_TIMEOUT_S: float = 5.0
 
 # Pseudo-classes forced while reading the hover background. ``focus``/``focus-visible`` are
 # included to match the prior mouse path, which both hovered and focused each element.
@@ -56,39 +68,50 @@ async def probe_hover_states(
     """
     updated: list[HarvestedElement] = list(elements)
 
-    client = await _open_cdp(page)
-    if client is None:  # CDP unavailable — degrade to a no-op rather than abort the harvest.
-        return updated
-
+    client: CDPSession | None = None
     try:
-        root = await _document_root(client)
-        if root is None:
-            return updated
+        async with asyncio.timeout(_PROBE_PASS_TIMEOUT_S):
+            client = await _open_cdp(page)
+            if client is None:  # CDP unavailable — degrade to a no-op, don't abort.
+                return updated
 
-        probed = 0
-        for index, element in enumerate(elements):
-            if not element.clickable:
-                continue
-            if probed >= _MAX_PROBE:
-                break
-            selector = selectors[index] if index < len(selectors) else None
-            if not selector:
-                continue
-            probed += 1
+            root = await _document_root(client)
+            if root is None:
+                return updated
 
-            hover_bg = await _read_hover_bg(client, root, selector)
-            if hover_bg is None:
-                continue
+            probed = 0
+            for index, element in enumerate(elements):
+                if not element.clickable:
+                    continue
+                if probed >= _MAX_PROBE:
+                    break
+                selector = selectors[index] if index < len(selectors) else None
+                if not selector:
+                    continue
+                probed += 1
 
-            resting = element.bg
-            # A change is "real" when there is no resting bg, or the hex/alpha differ.
-            if resting is None or hover_bg.hex != resting.hex or hover_bg.alpha != resting.alpha:
-                updated[index] = element.model_copy(
-                    update={"has_hover_color_change": True, "hover_bg": hover_bg}
-                )
+                hover_bg = await _read_hover_bg(client, root, selector)
+                if hover_bg is None:
+                    continue
+
+                resting = element.bg
+                # A change is "real" when there is no resting bg, or the hex/alpha differ.
+                if (
+                    resting is None
+                    or hover_bg.hex != resting.hex
+                    or hover_bg.alpha != resting.alpha
+                ):
+                    updated[index] = element.model_copy(
+                        update={"has_hover_color_change": True, "hover_bg": hover_bg}
+                    )
+    except TimeoutError:
+        # Wedged renderer: keep whatever was probed before the deadline — resting colors
+        # are already correct, and hover data is best-effort by design.
+        pass
     finally:
-        with contextlib.suppress(Exception):
-            await client.detach()
+        if client is not None:
+            with contextlib.suppress(Exception):
+                await asyncio.wait_for(client.detach(), _DETACH_TIMEOUT_S)
 
     return updated
 
@@ -105,9 +128,14 @@ async def _open_cdp(page: Page) -> CDPSession | None:
 
 
 async def _document_root(client: CDPSession) -> int | None:
-    """Return the document root ``nodeId`` for ``DOM.querySelector`` calls."""
+    """Return the document root ``nodeId`` for ``DOM.querySelector`` calls.
+
+    Only the root node is needed — ``DOM.querySelector`` resolves against the backend —
+    so the default depth (1) is requested; ``depth: -1`` would serialize the entire DOM
+    tree over the CDP transport just to discard it.
+    """
     try:
-        doc = cast(dict[str, Any], await client.send("DOM.getDocument", {"depth": -1}))
+        doc = cast(dict[str, Any], await client.send("DOM.getDocument"))
         return int(doc["root"]["nodeId"])
     except Exception:
         return None

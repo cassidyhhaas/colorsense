@@ -235,10 +235,12 @@ def assign_roles(clusters: list[ColorCluster]) -> tuple[RoleResults, float]:
         score = W_AREA * f.area + W_NEUTRAL * f.neutrality + W_COMP_PRIMARY * comp_primary
         primary_scores.append(score)
 
-    # Provisional primary = argmax primary_score; tie-break by larger area, then hex.
-    primary_idx = max(
+    # Provisional primary = argmax primary_score; tie-break by larger area, then smallest
+    # hex (min over negated score/area keeps the hex leg on the shared
+    # prune_distribution convention — a max over the tuple would flip it to largest-hex).
+    primary_idx = min(
         range(len(feats)),
-        key=lambda i: (primary_scores[i], feats[i].area, feats[i].color.hex),
+        key=lambda i: (-primary_scores[i], -feats[i].area, feats[i].color.hex),
     )
     primary_color = feats[primary_idx].color
 

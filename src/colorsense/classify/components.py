@@ -252,8 +252,12 @@ def _finalize_distribution(
     if not positive:
         return {}
 
+    # Max-shifted (matching palette/roles.py's _softmax_weights): mathematically the
+    # probabilities are shift-invariant, but unshifted exp(vote/T) overflows once a
+    # config's vote weights stack high enough relative to its temperature.
     temperature = cc.softmax_temperature
-    exps = {comp: math.exp(vote / temperature) for comp, vote in positive.items()}
+    max_vote = max(positive.values())
+    exps = {comp: math.exp((vote - max_vote) / temperature) for comp, vote in positive.items()}
     total = sum(exps.values())
     probs = {comp: value / total for comp, value in exps.items()}
 

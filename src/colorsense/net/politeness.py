@@ -388,6 +388,14 @@ class PolitenessPolicy:
         # small entry per host, so their size is bounded by the number of distinct hosts a
         # consumer fetches (tiny in practice), not by request volume.
         self._robots_cache: dict[str, RobotFileParser | None] = {}
+        # In-flight robots coalescing, mirroring ``_inflight``: concurrent cache-missing
+        # callers (e.g. the light and dark fetch leaders of one two-theme analyze, which
+        # have distinct render cache keys) share one robots.txt GET instead of each
+        # issuing their own. A future-per-URL rather than a Lock: a contended
+        # ``asyncio.Lock`` binds to its first loop, which would break the documented
+        # sequential-``asyncio.run`` reuse of one policy; futures are per-loop by
+        # construction and always popped before their leader returns.
+        self._robots_inflight: dict[str, asyncio.Future[RobotFileParser | None]] = {}
         self._last_fetch: dict[str, float] = {}
         # Per-host ``Crawl-delay`` learned from robots.txt, keyed by netloc — the same key
         # space as ``_last_fetch`` so the limiter can join the two. Populated as a side
@@ -429,27 +437,66 @@ class PolitenessPolicy:
     # -- robots --------------------------------------------------------------
 
     async def _robots_parser(self, robots_url: str) -> RobotFileParser | None:
-        """Load and memoize a parser for ``robots_url``; ``None`` when no rules apply."""
-        if robots_url in self._robots_cache:
-            return self._robots_cache[robots_url]
-        # The wire UA and egress filter ride along — see the RobotsLoader seam doc for the
-        # robots-redirect SSRF rationale.
-        text = await self._robots_loader(robots_url, self.user_agent, self.request_filter)
-        parser: RobotFileParser | None
-        if text is None:
-            parser = None
+        """Load and memoize a parser for ``robots_url``; ``None`` when no rules apply.
+
+        Concurrent cache misses for the same URL are coalesced (single-flight) so one
+        robots.txt GET serves them all — the simplified sibling of `fetch`'s render
+        coalescing, including its cancellation semantics: a cancelled leader cancels the
+        shared future, and followers re-elect instead of inheriting the cancellation.
+        """
+        while True:
+            if robots_url in self._robots_cache:
+                return self._robots_cache[robots_url]
+            existing = self._robots_inflight.get(robots_url)
+            if existing is None:
+                break  # no leader in flight — become the leader
+            # Follower: shield mirrors fetch() — the follower's own cancellation must not
+            # cancel the future the leader and other followers still use.
+            try:
+                return await asyncio.shield(existing)
+            except asyncio.CancelledError:
+                if not existing.cancelled():
+                    raise  # the follower's own task was cancelled
+                current = asyncio.current_task()
+                if current is not None and current.cancelling() > 0:
+                    raise  # own cancellation landed in the same tick — honor it
+                continue  # leader cancelled, follower not: re-elect
+        future: asyncio.Future[RobotFileParser | None] = asyncio.get_running_loop().create_future()
+        self._robots_inflight[robots_url] = future
+        try:
+            # The wire UA and egress filter ride along — see the RobotsLoader seam doc for
+            # the robots-redirect SSRF rationale.
+            text = await self._robots_loader(robots_url, self.user_agent, self.request_filter)
+            parser: RobotFileParser | None
+            if text is None:
+                parser = None
+            else:
+                parser = RobotFileParser()
+                parser.parse(text.splitlines())
+                # Record the host's ``Crawl-delay`` (for our robots agent) so the rate
+                # limiter can honor it; the netloc key matches ``_last_fetch``. As the
+                # ``min_interval`` parameter doc explains, the delay learned here only
+                # paces the second fetch to the host onward.
+                delay = parser.crawl_delay(self.robots_agent)
+                if delay is not None:
+                    self._crawl_delay[urlsplit(robots_url).netloc] = float(delay)
+            self._robots_cache[robots_url] = parser
+        except BaseException as err:
+            if not future.done():
+                if isinstance(err, asyncio.CancelledError):
+                    future.cancel()  # followers re-elect (see fetch())
+                else:
+                    future.set_exception(err)
+            raise
         else:
-            parser = RobotFileParser()
-            parser.parse(text.splitlines())
-            # Record the host's ``Crawl-delay`` (for our robots agent) so the rate limiter
-            # can honor it; the netloc key matches ``_last_fetch``. As the ``min_interval``
-            # parameter doc explains, the delay learned here only paces the second fetch
-            # to the host onward.
-            delay = parser.crawl_delay(self.robots_agent)
-            if delay is not None:
-                self._crawl_delay[urlsplit(robots_url).netloc] = float(delay)
-        self._robots_cache[robots_url] = parser
-        return parser
+            if not future.done():
+                future.set_result(parser)
+            return parser
+        finally:
+            self._robots_inflight.pop(robots_url, None)
+            # Mark an unawaited exception retrieved, as fetch() does for its future.
+            if future.done() and not future.cancelled():
+                future.exception()
 
     async def can_fetch(self, url: str) -> bool:
         """Whether ``url`` may be fetched under this policy.

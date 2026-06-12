@@ -98,6 +98,19 @@ _MAX_SCROLL_STEPS: int = 20
 # wraps as the public ``RenderError``.
 DEFAULT_NAV_TIMEOUT_MS: float = 30_000.0
 
+# Upper bound (seconds) on every post-navigation in-page evaluation. Playwright applies
+# its default timeout to *actions* (goto, screenshot) but not to ``page.evaluate``, so a
+# page whose JS wedges the renderer main thread after the load event (e.g. an infinite
+# loop in a post-load handler) would otherwise hang the harvest forever when no
+# ``max_total_seconds`` deadline is configured. Generous — real harvest evaluates finish
+# in milliseconds; this exists solely to turn a wedged renderer into a bounded failure.
+EVAL_TIMEOUT_S: float = 30.0
+
+# Tighter bound (seconds) for best-effort stabilization steps (step-scroll, consent
+# detection, motion-disabling CSS): they degrade gracefully when skipped, so a wedged
+# page should not consume the full evaluate budget three times over before failing.
+_BEST_EFFORT_TIMEOUT_S: float = 10.0
+
 # Timeout (ms) guarding wait_for_load_state("networkidle") on pages that never idle.
 # Kept short on purpose: ``goto(wait_until="load")`` has already fired the load event (all
 # synchronous resources fetched), so this only waits out async/lazy chatter (analytics,
@@ -284,15 +297,21 @@ class SharedBrowser:
         exc: BaseException | None,
         tb: TracebackType | None,
     ) -> None:
-        self._closed = True
-        if self._browser is not None:
-            with contextlib.suppress(Exception):
-                await self._browser.close()
-        if self._playwright is not None:
-            with contextlib.suppress(Exception):
-                await self._playwright.stop()
-        self._browser = None
-        self._playwright = None
+        # Serialize with get(): an in-flight first-use launch holds the lock across its
+        # awaits, so teardown waits for it and then closes the browser it produced —
+        # without the lock, a launch racing teardown could assign a fresh browser after
+        # the close ran, leaking a Chromium nobody will ever close (only reachable via
+        # unstructured concurrency; analyze() joins all renders before teardown).
+        async with self._lock:
+            self._closed = True
+            if self._browser is not None:
+                with contextlib.suppress(Exception):
+                    await self._browser.close()
+            if self._playwright is not None:
+                with contextlib.suppress(Exception):
+                    await self._playwright.stop()
+            self._browser = None
+            self._playwright = None
 
     async def get(self) -> Browser:
         """Return the shared `Browser`, launching it on first use.
@@ -389,33 +408,44 @@ class RenderSession:
     # -- context manager --------------------------------------------------
 
     async def __aenter__(self) -> Self:
-        if self._owns_browser:
-            self._playwright = await async_playwright().start()
-            self._browser = await self._playwright.chromium.launch(
-                headless=True, args=list(self._browser_args)
+        # A failure anywhere below (Chromium not installed, sandbox refusal, bad
+        # browser_args, context/route/page errors) propagates out of __aenter__, and
+        # context-manager semantics then never run __aexit__ — so without the cleanup
+        # in the except, an already-started Playwright driver (a node subprocess) and/or
+        # launched browser would leak on every failed attempt.
+        try:
+            if self._owns_browser:
+                self._playwright = await async_playwright().start()
+                self._browser = await self._playwright.chromium.launch(
+                    headless=True, args=list(self._browser_args)
+                )
+            assert self._browser is not None  # external browser, or just launched above
+            # ``user_agent=None`` is Playwright's own default (stock headless-Chromium UA),
+            # so a configured UA overrides it and ``None`` passes through unchanged.
+            # ``service_workers="block"`` is unconditional: service workers are irrelevant
+            # to color harvesting, and by default their requests bypass ``context.route`` —
+            # an unrouted path the egress filter would never see. Blocking registration
+            # removes that path entirely.
+            self._context = await self._browser.new_context(
+                viewport={"width": self._viewport.width, "height": self._viewport.height},
+                device_scale_factor=self._viewport.device_scale_factor,
+                color_scheme=_COLOR_SCHEME[self._theme],
+                user_agent=self._user_agent,
+                service_workers="block",
             )
-        assert self._browser is not None  # external browser, or just launched above
-        # ``user_agent=None`` is Playwright's own default (stock headless-Chromium UA), so a
-        # configured UA overrides it and ``None`` passes through unchanged.
-        # ``service_workers="block"`` is unconditional: service workers are irrelevant to
-        # color harvesting, and by default their requests bypass ``context.route`` — an
-        # unrouted path the egress filter would never see. Blocking registration removes
-        # that path entirely.
-        self._context = await self._browser.new_context(
-            viewport={"width": self._viewport.width, "height": self._viewport.height},
-            device_scale_factor=self._viewport.device_scale_factor,
-            color_scheme=_COLOR_SCHEME[self._theme],
-            user_agent=self._user_agent,
-            service_workers="block",
-        )
-        # Egress filtering is opt-in: install the interceptors only when a filter exists, so
-        # the default (None) path has zero routing overhead. WebSocket handshakes are not
-        # seen by ``context.route``, so they get their own route that refuses to connect
-        # (see _refuse_web_socket).
-        if self._request_filter is not None:
-            await self._context.route("**/*", _route_handler(self._request_filter))
-            await self._context.route_web_socket("**/*", _refuse_web_socket)
-        self._page = await self._context.new_page()
+            # Egress filtering is opt-in: install the interceptors only when a filter
+            # exists, so the default (None) path has zero routing overhead. WebSocket
+            # handshakes are not seen by ``context.route``, so they get their own route
+            # that refuses to connect (see _refuse_web_socket).
+            if self._request_filter is not None:
+                await self._context.route("**/*", _route_handler(self._request_filter))
+                await self._context.route_web_socket("**/*", _refuse_web_socket)
+            self._page = await self._context.new_page()
+        except BaseException:
+            # __aexit__ releases exactly what this session owns and tolerates the partial
+            # state (None handles; external browsers are never closed).
+            await self.__aexit__(None, None, None)
+            raise
         return self
 
     async def __aexit__(
@@ -490,9 +520,13 @@ class RenderSession:
 
         await self._disable_motion(page)
 
-        # Step-scrolling is best-effort (triggers lazy content).
+        # Step-scrolling is best-effort (triggers lazy content). ``wait_for`` bounds it:
+        # ``page.evaluate`` has no Playwright timeout, and a wedged renderer must degrade
+        # (skip the scroll), not hang the harvest.
         with contextlib.suppress(Exception):
-            await page.evaluate(_STEP_SCROLL_JS, _MAX_SCROLL_STEPS)
+            await asyncio.wait_for(
+                page.evaluate(_STEP_SCROLL_JS, _MAX_SCROLL_STEPS), _BEST_EFFORT_TIMEOUT_S
+            )
 
         self._consent_rects = await self._detect_consent_rects()
 
@@ -514,7 +548,11 @@ class RenderSession:
         last_error: Exception | None = None
         for _attempt in range(2):
             try:
-                await page.add_style_tag(content=_DISABLE_MOTION_CSS)
+                # Bounded like every post-navigation page call: stabilization must degrade
+                # on a wedged renderer, never hang the harvest.
+                await asyncio.wait_for(
+                    page.add_style_tag(content=_DISABLE_MOTION_CSS), _BEST_EFFORT_TIMEOUT_S
+                )
                 return
             except Exception as exc:  # best-effort: failure is reported via the warning
                 last_error = exc
@@ -528,8 +566,10 @@ class RenderSession:
     async def _detect_consent_rects(self) -> list[Rect]:
         """Return bounding rects of consent/overlay banners without clicking them."""
         try:
-            raw = await self.page.evaluate(_CONSENT_RECTS_JS)
-        except Exception:  # detection is best-effort
+            raw = await asyncio.wait_for(
+                self.page.evaluate(_CONSENT_RECTS_JS), _BEST_EFFORT_TIMEOUT_S
+            )
+        except Exception:  # detection is best-effort (including a wedged-renderer timeout)
             return []
         rects: list[Rect] = []
         if not isinstance(raw, list):

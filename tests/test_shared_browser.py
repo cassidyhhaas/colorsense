@@ -560,3 +560,111 @@ async def test_analyze_end_to_end_with_shared_browser(fixtures_dir: Path) -> Non
     result = await analyze(url, viewport=VIEWPORT, themes=LIGHT_AND_DARK, politeness=file_policy())
     assert set(result.themes) == {Theme.light, Theme.dark}
     assert all(palette.roles.mapping for palette in result.themes.values())
+
+
+# ---------------------------------------------------------------------------
+# Release-review hardening: enter-failure cleanup and teardown/launch race.
+# ---------------------------------------------------------------------------
+
+
+class _GatedLaunchStack(_FakePlaywrightStack):
+    """Launch blocks on an event so a teardown can race an in-flight first get()."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.launch_gate = asyncio.Event()
+        self.launch_entered = asyncio.Event()
+
+    async def launch(self, **kwargs: object) -> _FakeBrowser:
+        self.launch_entered.set()
+        await self.launch_gate.wait()
+        return await super().launch(**kwargs)
+
+
+class _FailingLaunchStack(_FakePlaywrightStack):
+    async def launch(self, **kwargs: object) -> _FakeBrowser:
+        raise RuntimeError("Executable doesn't exist (simulated launch failure)")
+
+
+class _FailingContextBrowser(_FakeBrowser):
+    async def new_context(self, **kwargs: object) -> _FakeContext:
+        raise RuntimeError("new_context failed (simulated)")
+
+
+class _FailingContextStack(_FakePlaywrightStack):
+    async def launch(self, **kwargs: object) -> _FakeBrowser:
+        self.launches += 1
+        browser = _FailingContextBrowser()
+        self.browsers.append(browser)
+        return browser
+
+
+async def test_render_session_enter_failure_stops_started_playwright(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # A launch failure inside __aenter__ propagates without __aexit__ ever running, so
+    # the just-started Playwright driver (a node subprocess in real life) leaked on every
+    # failed attempt unless __aenter__ cleans up what it started before re-raising.
+    stack = _FailingLaunchStack()
+    monkeypatch.setattr(render_mod, "async_playwright", stack)
+
+    with pytest.raises(RuntimeError, match="Executable doesn't exist"):
+        await RenderSession(Theme.light, VIEWPORT).__aenter__()
+
+    assert stack.starts == 1
+    assert stack.stops == 1  # the started driver is stopped, not leaked
+
+
+async def test_render_session_enter_failure_after_launch_closes_browser(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Failing later (new_context) must release BOTH the launched browser and the driver
+    # on the owned-browser path.
+    stack = _FailingContextStack()
+    monkeypatch.setattr(render_mod, "async_playwright", stack)
+
+    with pytest.raises(RuntimeError, match="new_context failed"):
+        await RenderSession(Theme.light, VIEWPORT).__aenter__()
+
+    assert stack.browsers[0].closes == 1
+    assert stack.stops == 1
+
+
+async def test_render_session_enter_failure_never_closes_external_browser(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # On the external-browser path the session owns only its context: a setup failure
+    # must not close the caller's browser.
+    browser = _FailingContextBrowser()
+
+    with pytest.raises(RuntimeError, match="new_context failed"):
+        await RenderSession(Theme.light, VIEWPORT, browser=browser).__aenter__()  # type: ignore[arg-type]
+
+    assert browser.closes == 0
+
+
+async def test_shared_browser_teardown_waits_for_inflight_launch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # __aexit__ must serialize with get(): without the lock, a get() suspended in
+    # chromium.launch could assign and return a fresh browser AFTER teardown closed
+    # everything — a Chromium nobody would ever close.
+    stack = _GatedLaunchStack()
+    monkeypatch.setattr(render_mod, "async_playwright", stack)
+
+    shared = SharedBrowser()
+    get_task = asyncio.ensure_future(shared.get())
+    await asyncio.wait_for(stack.launch_entered.wait(), 5)  # get() holds the lock in launch
+
+    exit_task = asyncio.ensure_future(shared.__aexit__(None, None, None))
+    for _ in range(5):
+        await asyncio.sleep(0)
+    assert not exit_task.done()  # teardown is parked on the lock, not racing ahead
+
+    stack.launch_gate.set()
+    browser = await get_task
+    await exit_task
+
+    assert browser is stack.browsers[0]
+    assert stack.browsers[0].closes == 1  # the in-flight launch's browser was closed
+    assert stack.stops == 1

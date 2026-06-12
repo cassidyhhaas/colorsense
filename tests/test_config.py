@@ -256,3 +256,88 @@ def test_invalid_config_raises_clear_error(tmp_path: Path) -> None:
     # Must be a clear validation error, never a bare KeyError.
     assert not isinstance(excinfo.value, KeyError)
     assert "component_classifier" in str(excinfo.value)
+
+
+def _bundled_raw() -> dict:  # type: ignore[type-arg]
+    import yaml
+
+    raw = yaml.safe_load(
+        (Path(__file__).parents[1] / "src/colorsense/data/palette_config.yaml").read_text()
+    )
+    assert isinstance(raw, dict)
+    return raw
+
+
+@pytest.mark.parametrize(
+    ("path", "value", "expected_fragment"),
+    [
+        # A negative prior would survive normalization and reach reconcile's ``** alpha``
+        # pooling, where a negative base under a fractional exponent yields a COMPLEX
+        # number — must fail at load, not deep in the math.
+        (
+            ("token_vocabulary", "role_to_usage_prior", "interactive"),
+            {"interactive": -1.0, "surface": 2.0},
+            "must be >= 0",
+        ),
+        # T=0 divides by zero at classify time; T<0 silently INVERTS the ranking.
+        (("component_classifier", "softmax_temperature"), 0.0, "softmax_temperature"),
+        (("component_classifier", "softmax_temperature"), -1.0, "softmax_temperature"),
+        (("component_classifier", "min_component_prob"), 1.5, "min_component_prob"),
+        # Groupless pattern: detect_scale reads match.group(1) — previously an IndexError
+        # only when a numbered token first appeared.
+        (
+            ("token_vocabulary", "scale_detection", "number_pattern"),
+            r"(?:^|[-_/.])\d{1,3}$",
+            "capture group",
+        ),
+        # Invalid regex must be a load-time error too.
+        (("token_vocabulary", "scale_detection", "number_pattern"), "(", "number_pattern"),
+        (("token_vocabulary", "scale_detection", "base_weight"), 0.0, "base_weight"),
+        (("token_vocabulary", "known_system_confidence_boost"), -0.1, "greater than or equal"),
+    ],
+)
+def test_pathological_numeric_config_rejected_at_load(
+    tmp_path: Path, path: tuple[str, ...], value: object, expected_fragment: str
+) -> None:
+    """Numeric knobs are range-validated at load (release-review hardening).
+
+    ``config_path=`` is public API: a hand-authored YAML must fail loudly at load with
+    the offending key named, never crash later (ZeroDivisionError/IndexError/complex
+    numbers in reconcile) or silently corrupt results (negative softmax temperature).
+    """
+    import yaml
+
+    raw = _bundled_raw()
+    target: dict = raw  # type: ignore[type-arg]
+    for key in path[:-1]:
+        target = target[key]
+    target[path[-1]] = value
+    bad = tmp_path / "pathological.yaml"
+    bad.write_text(yaml.safe_dump(raw), encoding="utf-8")
+    with pytest.raises(ValidationError) as excinfo:
+        load_config(bad)
+    assert expected_fragment in str(excinfo.value)
+
+
+def test_scale_base_weight_required_and_loaded(config: Config) -> None:
+    """The scale classifier's base weight comes from the YAML, not code."""
+    assert config.token_vocabulary.scale_detection.base_weight == 3.0
+
+
+def test_relational_pattern_without_base_group_rejected(tmp_path: Path) -> None:
+    """A relational pattern missing the documented ``base`` group fails at load.
+
+    ``match_relational`` skips matches without a ``base`` group, so such a pattern was
+    previously a rule that silently never rerouted anything.
+    """
+    import yaml
+
+    raw = _bundled_raw()
+    raw["token_vocabulary"]["relational_modifiers"].append(
+        {"pattern": "^on-", "type": "foreground", "weight": 3.0}
+    )
+    bad = tmp_path / "no_base_group.yaml"
+    bad.write_text(yaml.safe_dump(raw), encoding="utf-8")
+    with pytest.raises(ValidationError) as excinfo:
+        load_config(bad)
+    assert "base" in str(excinfo.value)

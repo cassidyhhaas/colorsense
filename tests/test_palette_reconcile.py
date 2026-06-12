@@ -560,3 +560,23 @@ def test_used_but_undeclared_threshold_boundary() -> None:
 
     undeclared_hexes = {d.color.hex for d in divergence if d.note == "used but undeclared"}
     assert undeclared_hexes == {_color(above).hex}
+
+
+def test_subthreshold_rendered_declared_color_is_not_reported_unused() -> None:
+    """'declared ... unused in render' is tested against the PRE-prune inventory.
+
+    A declared color that genuinely rendered — just below every category's prune
+    threshold — must not be misreported as unused (release-review fix: usage entries are
+    post-prune, so they alone cannot answer "did this render?").
+    """
+    declared = "#e11d48"
+    usage = UsagePalette(mapping={UsageCategory.surface: (_entry("#ffffff", 1.0),)})
+    tokens = [_token("--brand", declared, {UsageCategory.surface: 1.0})]
+
+    # Fallback path (no inventory): the pruned-away color looks unused.
+    _, fallback_div = reconcile(usage, tokens)
+    assert any("unused in render" in item.note for item in fallback_div)
+
+    # With the full measured inventory containing the rendered color: no unused report.
+    _, divergence = reconcile(usage, tokens, measured_colors=[_color("#ffffff"), _color(declared)])
+    assert not any("unused in render" in item.note for item in divergence)

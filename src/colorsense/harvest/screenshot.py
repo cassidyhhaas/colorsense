@@ -11,6 +11,7 @@ fixed max-color count, computed over the masked, downscaled image.
 
 from __future__ import annotations
 
+import asyncio
 import io
 import warnings
 from typing import Literal, TypedDict, cast
@@ -20,6 +21,7 @@ from PIL import Image
 from playwright.async_api import Page
 
 from colorsense.color.primitives import parse_css_color
+from colorsense.harvest.render import EVAL_TIMEOUT_S
 from colorsense.models import Color, Rect, ScreenshotBin
 
 # Capture full-page screenshots as high-quality JPEG rather than PNG. The image is only
@@ -46,20 +48,31 @@ _MIN_BIN_FRACTION: float = 0.005
 # downscaling, and themes render concurrently, so an attacker-controlled tall *or wide*
 # page (e.g. 100,000px in either direction) could force hundreds of MB-GBs of RAM. The
 # caps are far above any genuine page (real captures are a few thousand px each way) yet
-# bound a single channel to ~20k x ~10k worst case. Pages within both caps are captured
-# ``full_page=True`` exactly as before; an oversized page falls back to a top-left-anchored
-# clip with each dimension clamped to its cap, so the harvest still succeeds, bounded.
+# bound a single channel to ~20k x ~10k worst case. Pages within the caps AND the decode
+# budget below are captured ``full_page=True`` exactly as before; an oversized page falls
+# back to a top-left-anchored clip clamped to the caps and then shrunk (height first —
+# oversized pages are overwhelmingly tall, and width carries the layout) until the clip
+# fits the decode budget at the session's device scale factor, so the harvest still
+# succeeds, bounded, at any supported scale factor.
 _MAX_CAPTURE_HEIGHT_PX: int = 20_000
 _MAX_CAPTURE_WIDTH_PX: int = 10_000
 
-# Decompression-bomb guard for decoding the captured screenshot. ``Image.open`` lazily
-# parses only the header, so the declared dimensions are checked against this cap *before*
-# ``.convert("RGB")`` triggers full pixel decoding; an oversized image raises
-# ``_OversizedCaptureError`` instead of silently allocating gigabytes. Sized to admit the
-# clipped full-page capture above with ~2x device-scale headroom. Deliberately a local
-# per-decode check, not a process-wide ``Image.MAX_IMAGE_PIXELS`` mutation: a library must
-# not overwrite host-process Pillow state on import.
+# Decompression-bomb guard for decoding the captured screenshot, counted in DEVICE pixels
+# (Playwright captures at ``device_scale_factor`` scale): the capture clip above is
+# pre-shrunk so ``(w * dsf) * (h * dsf)`` stays within this budget, making this check a
+# pure backstop for captures whose decoded dimensions disagree with the document-size
+# probe. ``Image.open`` lazily parses only the header, so the declared dimensions are
+# checked against this cap *before* ``.convert("RGB")`` triggers full pixel decoding; an
+# oversized image raises ``_OversizedCaptureError`` instead of silently allocating
+# gigabytes. Deliberately a local per-decode check, not a process-wide
+# ``Image.MAX_IMAGE_PIXELS`` mutation: a library must not overwrite host-process Pillow
+# state on import.
 _MAX_DECODE_PIXELS: int = 90_000_000
+
+# Safety margin applied when fitting the capture clip into the decode budget: Chromium
+# rounds the clip to whole device pixels, so an exactly-budget-sized clip could decode a
+# hair over the cap and trip the backstop.
+_DECODE_BUDGET_MARGIN: float = 0.98
 
 
 class _OversizedCaptureError(Exception):
@@ -110,20 +123,27 @@ async def harvest_screenshot(
     exceed the decode pixel cap (surfaced by ``harvest_page`` as ``RenderError``).
     """
     # Bound capture dimensions: a pathologically tall or wide (e.g. attacker-controlled)
-    # page would decode into a huge array + keep-mask before any downscaling. Pages within
-    # both caps are captured full-page exactly as before; an oversized page falls back to a
-    # top-left-anchored clip with each dimension clamped to its cap.
-    size = cast(_DocumentSize, await page.evaluate(_DOCUMENT_SIZE_JS))
-    if size["height"] > _MAX_CAPTURE_HEIGHT_PX or size["width"] > _MAX_CAPTURE_WIDTH_PX:
+    # page would decode into a huge array + keep-mask before any downscaling. The clip is
+    # clamped to the CSS-pixel caps and then shrunk (height first) until it fits the
+    # decode budget at this device scale factor — the screenshot decodes at DEVICE pixels,
+    # so a CSS-pixel-capped clip alone would still blow the budget at dsf >= 2 (or when
+    # both dimension caps bind at once).
+    # Bounded like the DOM/token evaluates (``page.screenshot`` itself carries
+    # Playwright's default action timeout, so only this probe needs an explicit bound).
+    size = cast(
+        _DocumentSize, await asyncio.wait_for(page.evaluate(_DOCUMENT_SIZE_JS), EVAL_TIMEOUT_S)
+    )
+    dsf = max(device_scale_factor, 1.0)  # a sub-1 dsf shrinks the decode; never inflate
+    clip_width = min(size["width"], float(_MAX_CAPTURE_WIDTH_PX))
+    clip_height = min(size["height"], float(_MAX_CAPTURE_HEIGHT_PX))
+    budget_css_px = _MAX_DECODE_PIXELS * _DECODE_BUDGET_MARGIN / (dsf * dsf)
+    if clip_width * clip_height > budget_css_px:
+        clip_height = max(1.0, budget_css_px / clip_width)
+    if clip_width < size["width"] or clip_height < size["height"]:
         raw_bytes = await page.screenshot(
             type=_SCREENSHOT_TYPE,
             quality=_SCREENSHOT_QUALITY,
-            clip={
-                "x": 0,
-                "y": 0,
-                "width": min(size["width"], _MAX_CAPTURE_WIDTH_PX),
-                "height": min(size["height"], _MAX_CAPTURE_HEIGHT_PX),
-            },
+            clip={"x": 0, "y": 0, "width": clip_width, "height": clip_height},
         )
     else:
         raw_bytes = await page.screenshot(
