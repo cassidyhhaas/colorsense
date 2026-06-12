@@ -287,21 +287,26 @@ def test_near_colors_join_across_usage_and_tokens() -> None:
     assert not any(d.color.hex == _color(used_red).hex for d in divergence)
 
 
-def test_token_only_entry_has_zero_area_and_no_components() -> None:
-    # A declared-only color that survives pooling carries area 0.0 and empty components
-    # (there is no measured entry to inherit them from).
-    usage = UsagePalette(mapping={UsageCategory.interactive: (_entry("#2563eb", 0.3),)})
-    token_only = "#10b981"
-    tokens = [_token("--green", token_only, {UsageCategory.interactive: 1.0})]
-    posterior, _ = reconcile(usage, tokens, alpha=0.4)
-
-    injected = next(
-        e
-        for e in posterior.mapping[UsageCategory.interactive]
-        if e.color.hex == _color(token_only).hex
+def test_token_only_color_never_enters_posterior() -> None:
+    # The posterior universe is the measured entries only: a declared color with no
+    # measured match never appears as a posterior entry — even when the category's
+    # measured evidence is weak — so every posterior entry structurally carries measured
+    # area/components. The declared intent surfaces through divergence instead.
+    usage = UsagePalette(
+        mapping={
+            UsageCategory.interactive: (
+                _entry("#2563eb", 1.0, area=0.05, components={ComponentType.link: 1.0}),
+            )
+        }
     )
-    assert injected.area == 0.0
-    assert injected.components == {}
+    token_only = "#10b981"
+    tokens = [_token("--green", token_only, {UsageCategory.interactive: 1.0}, weight=5.0)]
+    posterior, divergence = reconcile(usage, tokens, alpha=0.4)
+
+    entries = posterior.mapping[UsageCategory.interactive]
+    assert {e.color.hex for e in entries} == {_color("#2563eb").hex}
+    assert all(e.components for e in entries)
+    assert any(d.color.hex == _color(token_only).hex and "unused" in d.note for d in divergence)
 
 
 def test_near_identical_tokens_aggregate_into_one_intent_group() -> None:
@@ -386,24 +391,26 @@ def test_pruning_that_empties_category_keeps_argmax_at_one() -> None:
     assert entries[0].probability == 1.0
 
 
-def test_token_only_color_survives_at_default_alpha() -> None:
-    # The alpha=0 test proves token-only colors prune at pure usage; this pins the
-    # opposite: at alpha=0.4 a declared-only color keeps enough pooled mass to survive
-    # when the category's usage evidence is weak (a low-probability usage entry).
-    usage = UsagePalette(mapping={UsageCategory.interactive: (_entry("#2563eb", 0.3),)})
-    token_only = "#10b981"
-    tokens = [_token("--green", token_only, {UsageCategory.interactive: 1.0})]
+def test_dominant_undeclared_color_stays_dominant() -> None:
+    # The 0.4.0 release-review regression: with an EPS-floored intent factor, a single
+    # declared minor color annihilated a 95%-dominant undeclared one (a 95%-white page
+    # whose surface palette contained no white). With 1/K uniform smoothing the missing
+    # intent signal is a bounded penalty: white must remain present AND dominant.
+    usage = UsagePalette(
+        mapping={
+            UsageCategory.surface: (
+                _entry("#ffffff", 0.95, components={ComponentType.page_bg: 1.0}),
+                _entry("#2563eb", 0.05, components={ComponentType.hero_bg: 1.0}),
+            )
+        }
+    )
+    tokens = [_token("--brand", "#2563eb", {UsageCategory.surface: 0.3})]
     posterior, _ = reconcile(usage, tokens, alpha=0.4)
 
-    entries = posterior.mapping[UsageCategory.interactive]
-    hexes = {e.color.hex for e in entries}
-    assert _color(token_only).hex in hexes  # survived pruning
-    assert _color("#2563eb").hex in hexes
-    assert math.isclose(sum(e.probability for e in entries), 1.0, abs_tol=1e-9)
-    # Usage still dominates: the declared-only color survives but does not win.
-    assert _prob_for(posterior, UsageCategory.interactive, "#2563eb") > _prob_for(
-        posterior, UsageCategory.interactive, token_only
-    )
+    p_white = _prob_for(posterior, UsageCategory.surface, "#ffffff")
+    p_blue = _prob_for(posterior, UsageCategory.surface, "#2563eb")
+    assert p_white > p_blue
+    assert p_white > 0.5
 
 
 def test_empty_category_yields_empty_posterior_not_token_flood() -> None:
@@ -425,11 +432,10 @@ def test_empty_category_yields_empty_posterior_not_token_flood() -> None:
     assert unused == {_color(h).hex for h in ("#ff8182", "#a830e8", "#7ae9ff", "#c7e580")}
 
 
-def test_token_only_colors_still_pool_when_category_is_measured() -> None:
-    # The flip side of the gate: when the category HAS measured candidates, token-only
-    # colors stay in the universe — pooling against real usage mass crushes them below
-    # MIN_POSTERIOR_PROB when usage evidence is strong (no entry, no flood), while the
-    # measured entries keep non-empty components.
+def test_unmatched_token_excluded_when_category_is_measured() -> None:
+    # The flip side of the gate: a measured category's posterior holds exactly the
+    # measured entries — an unmatched declared color is structurally excluded (not
+    # merely crushed by pooling), and every surviving entry keeps non-empty components.
     usage = UsagePalette(
         mapping={
             UsageCategory.border: (
@@ -443,7 +449,7 @@ def test_token_only_colors_still_pool_when_category_is_measured() -> None:
 
     entries = posterior.mapping[UsageCategory.border]
     hexes = {e.color.hex for e in entries}
-    assert _color("#ff8182").hex not in hexes  # crushed by pooling, no special-casing
+    assert _color("#ff8182").hex not in hexes  # structurally excluded
     assert hexes == {_color("#d1d9e0").hex, _color("#59636e").hex}
     assert all(e.components for e in entries)
 

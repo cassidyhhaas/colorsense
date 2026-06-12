@@ -263,11 +263,17 @@ For each candidate color in a category, the two probabilities are combined as a
 **weighted geometric mean**:
 
 ```
-posterior ∝ (p_usage + EPS)^(1 − α) × (p_intent + EPS)^α
+posterior ∝ p_usage^(1 − α) × (p_intent + 1/K)^α
 ```
 
-then all candidates are normalized to sum to 1. Reading the formula:
+over the K measured entries in the category, then all candidates are normalized to
+sum to 1. Reading the formula:
 
+- **The candidates are the measured entries only.** Declared intent re-weights colors
+  that actually rendered; a declared color with no measured match never enters the
+  posterior (it surfaces through the divergence report instead). This is what makes the
+  contract guarantee structural: every posterior entry inherits its measured entry's
+  area and non-empty component breakdown.
 - **α (alpha) is the weight on intent**, default 0.4 and clamped to [0, 1]. At `α = 0`
   the intent factor collapses to `x^0 = 1` and the posterior is pure measurement; at
   `α = 1` it's pure declared intent. At 0.4, measurement leads but strong declared intent
@@ -275,31 +281,31 @@ then all candidates are normalized to sum to 1. Reading the formula:
 - **Why a *geometric* mean** (multiplying powers) rather than a weighted average? A
   geometric mean rewards agreement: a color must score in *both* signals to score high,
   and a near-zero on either side drags the product toward zero. A weighted average would
-  let a color with zero measured usage coast on intent alone.
-- **EPS (10⁻⁹) is a floor**, not a fudge: without it a missing signal contributes
-  `0^(power)` and, in log space, `log(0)` — undefined. With it, a missing signal
-  contributes a large-but-finite penalty, and the α boundaries stay clean (at `α = 0` a
-  token-only color's factor is `EPS^0 = 1`, so one-sided colors prune out rather than
-  blowing up).
+  let a barely-rendered color coast on intent alone.
+- **The `1/K` term is uniform smoothing** on the intent side: a color with no token
+  match within ΔE 0.10 still gets the uniform pseudo-intent `1/K`, so lacking a token
+  costs at most a bounded, universe-scaled factor of `(K + 1)^α` (≈1.6× at K = 2, ≈2.6×
+  at K = 10 for the default α) — a penalty, never a veto. An absolute floor (the
+  pre-0.4.0 `EPS = 10⁻⁹`) made the same term a ~4000× multiplier that let one minor
+  declared color erase a 95%-dominant undeclared one from the posterior entirely.
 
 Posterior entries below 0.02 are pruned and survivors renormalized (argmax kept if
-pruning empties the category). Entries that matched a measured color keep its area and
-component breakdown; token-only survivors carry `area = 0` and empty components.
+pruning empties the category). Every entry keeps its measured area and component
+breakdown.
 
 ### The empty-category gate
 
-A category with **no measured usage at all yields an empty posterior — token-only colors
-are not injected.** This is a deliberate asymmetry, and it came from a live failure: with
-zero measurement, every token-only color gets the *same* `EPS^(1−α)` usage factor, so the
-posterior collapses to `intent^α` — a near-uniform spread where everything survives
-pruning. On github.com that meant `usage.border` reported **16 never-rendered theme
-tokens**, every entry with empty components — pure noise presented as measurement. Honest
-emptiness beats intent-only noise. Declared intent for an unmeasured category can still
-surface through the divergence report — but only when the declared color has no
-perceptual match (within 0.10) among measured colors in *any* category; a near-white
-border token on a white-surfaced page reads as "used" and stays silent. When measurement *exists*, token-only colors stay
-in the pool: pooling against real usage mass crushes them naturally unless their intent
-is strong enough to clear the floor.
+A category with **no measured usage at all yields an empty posterior.** Declared-only
+colors never enter any posterior, and the original motivation was a live failure in
+exactly this case: when token-only colors were still injected, zero measurement gave
+every one the *same* floor usage factor, so the posterior collapsed to `intent^α` — a
+near-uniform spread where everything survives pruning. On github.com that meant
+`usage.border` reported **16 never-rendered theme tokens**, every entry with empty
+components — pure noise presented as measurement. Honest emptiness beats intent-only
+noise. Declared intent for an unmeasured category can still surface through the
+divergence report — but only when the declared color has no perceptual match (within
+0.10) among measured colors in *any* category; a near-white border token on a
+white-surfaced page reads as "used" and stays silent.
 
 ### Divergence reporting
 

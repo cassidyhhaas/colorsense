@@ -10,10 +10,16 @@ This module fuses two independent signals about a site's palette, in **usage spa
   [`UsageCategory`][colorsense.UsageCategory]; this is "what the author declared".
 
 The two are combined by **log-linear pooling** (a weighted geometric mean) with weight
-``alpha`` on intent: ``alpha=0`` -> pure usage, ``alpha=1`` -> pure intent. Colors are
-matched across the two sources by nearest-color under two perceptual ΔE radii — the
-tight `DELTA_E_MATCH` for declared-vs-declared and the looser
-`DELTA_E_MATCH_MEASURED` for measured-vs-declared (rationale at each constant).
+``alpha`` on intent: ``alpha=0`` -> pure usage, ``alpha=1`` -> pure intent. The pooling
+universe is the **measured** usage entries only — declared intent re-weights colors that
+actually rendered; a declared color with no measured match never enters the posterior
+(it is reported through divergence instead), which is what keeps the public guarantee
+that every posterior entry carries measured ``area``/``components`` evidence. A missing
+intent signal is uniform-smoothed (``+ 1/K`` over the K candidates), a bounded
+scale-aware penalty rather than a veto. Colors are matched across the two sources by
+nearest-color under two perceptual ΔE radii — the tight `DELTA_E_MATCH` for
+declared-vs-declared and the looser `DELTA_E_MATCH_MEASURED` for measured-vs-declared
+(rationale at each constant).
 
 The output is a posterior [`UsagePalette`][colorsense.UsagePalette] plus a divergence report listing
 declared-but-unused and used-but-undeclared discrepancies. Declared-but-unused items are
@@ -56,10 +62,13 @@ DELTA_E_MATCH: float = 0.08
 #: from (platform-dependent) quantizer blending (see docs/how-it-works.md).
 DELTA_E_MATCH_MEASURED: float = DELTA_E_MATCH_BG
 
-#: Floor added inside the geometric mean so that a missing signal contributes
-#: ``log(EPS)`` (a large finite penalty) rather than ``log(0)`` (undefined). Also makes
-#: the alpha boundaries clean: at ``alpha=0`` intent collapses to ``EPS**0 == 1`` and at
-#: ``alpha=1`` usage collapses similarly, so one-sided colors prune out.
+#: Degenerate-input guard on the USAGE side of the geometric mean only, so a
+#: zero-probability entry contributes ``log(EPS)`` rather than ``log(0)`` (undefined).
+#: Real ``build_usage`` output never carries zero probabilities, so this never shapes
+#: results. The INTENT side deliberately does not use it: a missing intent signal is
+#: uniform-smoothed with ``1/K`` instead (see `_pool_category`) — an EPS-floored intent
+#: factor made "no token match" a ~``(1/EPS)**alpha`` multiplicative veto that erased
+#: dominant undeclared colors from the posterior.
 EPS: float = 1e-9
 
 #: Minimum posterior probability a color must retain to survive pruning. Survivors are
@@ -163,8 +172,9 @@ def reconcile(
 
     Returns a posterior [`UsagePalette`][colorsense.UsagePalette] and a deterministic list of
     [`DivergenceItem`][colorsense.DivergenceItem]. ``alpha`` weights intent vs. usage and is clamped
-    to ``[0, 1]``. Posterior entries carry the matched measured entry's ``area`` and ``components``;
-    token-only colors get ``area=0.0`` and empty ``components``.
+    to ``[0, 1]``. The posterior universe is the measured usage entries, so every posterior entry
+    carries its measured entry's ``area`` and non-empty ``components``; a declared color with no
+    measured match never appears in the posterior and is reported via divergence instead.
     """
     alpha = _clamp_alpha(alpha)
     groups = _aggregate_intent(tokens)
@@ -181,14 +191,11 @@ def reconcile(
 
 @dataclass
 class _PoolCandidate:
-    """One color in a category's pooling universe.
+    """One measured usage entry in a category's pooling universe, with its matched
+    declared-intent share (``0.0`` when no declared group is within
+    `DELTA_E_MATCH_MEASURED`)."""
 
-    ``measured`` is the matched usage entry (supplying ``area`` + ``components``) or
-    ``None`` for a token-only color.
-    """
-
-    measured: UsageEntry | None
-    color: Color
+    measured: UsageEntry
     p_usage: float
     p_intent: float
 
@@ -200,23 +207,20 @@ def _pool_category(
     intents: list[dict[UsageCategory, float]],
     alpha: float,
 ) -> list[UsageEntry]:
-    """Build the color universe for ``category``, pool, prune, renormalize."""
-    usage_entries = usage.mapping.get(category, ())
+    """Pool the category's measured entries against declared intent, prune, renormalize.
 
-    # EMPTY-CATEGORY GATE: a category with no measured usage candidates yields an empty
-    # posterior — token-only colors are NOT injected (with zero measurement the posterior
-    # collapses to ``intent**alpha``, a near-uniform spread where everything survives
-    # pruning; see docs/how-it-works.md). Honest emptiness beats intent-only noise;
-    # declared intent can still surface through the divergence report. When measurement
-    # EXISTS, token-only colors stay in the universe: pooling against real usage mass
-    # crushes them unless intent is strong enough to clear MIN_POSTERIOR_PROB.
+    The pooling universe is the MEASURED entries only: declared intent re-weights colors
+    that actually rendered, and a declared color with no measured match never enters the
+    posterior (it surfaces through divergence instead). This is what makes the public
+    guarantee structural — every posterior entry inherits a measured entry's ``area``
+    and non-empty ``components``. (Injecting token-only colors was also a live failure
+    mode for unmeasured categories: with zero measurement the posterior collapses to
+    ``intent**alpha``, a near-uniform spread where everything survives pruning; see
+    docs/how-it-works.md.)
+    """
+    usage_entries = usage.mapping.get(category, ())
     if not usage_entries:
         return []
-
-    candidates: list[_PoolCandidate] = []
-    # Track which intent groups have already been matched to a usage entry so we
-    # don't double-count them when adding token-only colors.
-    matched_group: list[bool] = [False] * len(groups)
 
     def intent_for(color: Color) -> float:
         best_idx: int | None = None
@@ -230,40 +234,28 @@ def _pool_category(
                 best_idx = gi
         if best_idx is None:
             return 0.0
-        matched_group[best_idx] = True
         return intents[best_idx][category]
 
-    # Usage entries first; they own the representative Color object on a match.
-    for entry in usage_entries:
-        candidates.append(
-            _PoolCandidate(
-                measured=entry,
-                color=entry.color,
-                p_usage=entry.probability,
-                p_intent=intent_for(entry.color),
-            )
+    candidates = [
+        _PoolCandidate(
+            measured=entry,
+            p_usage=entry.probability,
+            p_intent=intent_for(entry.color),
         )
+        for entry in usage_entries
+    ]
 
-    # Token-only colors with mass on this category and not already matched to a usage color.
-    for gi, group in enumerate(groups):
-        if category not in intents[gi] or matched_group[gi]:
-            continue
-        candidates.append(
-            _PoolCandidate(
-                measured=None,
-                color=group.color,
-                p_usage=0.0,
-                p_intent=intents[gi][category],
-            )
-        )
-
-    if not candidates:
-        return []
-
-    # Log-linear pool.
-    unnorm = [(c.p_usage + EPS) ** (1.0 - alpha) * (c.p_intent + EPS) ** alpha for c in candidates]
+    # Log-linear pool. The intent factor is uniform-smoothed (+ 1/K over the K
+    # candidates): lacking a token match then costs at most a bounded, universe-scaled
+    # factor of ``(K + 1) ** alpha`` (~1.6x at K=2, ~2.6x at K=10 for the default
+    # alpha) instead of the unbounded near-veto an absolute floor produces — a 95%-
+    # dominant undeclared color must stay dominant over a minor declared one.
+    smoothing = 1.0 / len(candidates)
+    unnorm = [
+        (c.p_usage + EPS) ** (1.0 - alpha) * (c.p_intent + smoothing) ** alpha for c in candidates
+    ]
     total = sum(unnorm)
-    if total <= 0.0:  # pragma: no cover - guarded by EPS floor
+    if total <= 0.0:  # pragma: no cover - guarded by the EPS/smoothing floors
         return []
     posterior_prob = [u / total for u in unnorm]
 
@@ -282,10 +274,10 @@ def _pool_category(
 
     result = [
         UsageEntry(
-            color=candidates[i].color,
+            color=candidates[i].measured.color,
             probability=posterior_prob[i],
-            area=measured.area if (measured := candidates[i].measured) is not None else 0.0,
-            components=dict(measured.components) if measured is not None else {},
+            area=candidates[i].measured.area,
+            components=dict(candidates[i].measured.components),
         )
         for i in survivors
     ]

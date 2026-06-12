@@ -56,6 +56,22 @@ Other changes riding the redesign:
   release by the `border_presence` family below, which generalizes the vote to every
   element that actually paints a border.)
 
+### Fixed — pre-release review follow-up
+
+- **Reconciliation pooling no longer vetoes undeclared colors.** The log-linear pool's
+  intent factor is now uniform-smoothed (`+ 1/K` over the category's K measured entries)
+  instead of floored at `EPS = 1e-9`: lacking a token match costs a bounded,
+  universe-scaled penalty (`(K + 1)^alpha`, ~1.6x at K=2 for the default `alpha=0.4`)
+  rather than a ~4000x multiplier. Previously, on a partially-tokenized page, one minor
+  declared color could erase a 95%-dominant undeclared color from `usage` entirely (a
+  95%-white page whose surface palette contained no white).
+- **The "`components` is never empty" guarantee is now structural.** The pooling
+  universe is restricted to the measured usage entries; declared-only colors never enter
+  the posterior in any category (previously they were injected and only pruned by a
+  numeric coincidence of `EPS`/`alpha`/`MIN_POSTERIOR_PROB`, and the reconcile docstring
+  contradicted the documented guarantee). Declared-but-unused intent surfaces through
+  `divergence`, as before.
+
 ### Fixed — measurement-layer gaps (live-probe follow-up)
 
 A live acceptance probe of the usage-keyed redesign against github.com exposed
@@ -67,8 +83,7 @@ measurement gaps the fixtures had masked; all are now encoded as offline fixture
   colors (github.com's `usage.border` was 16 never-rendered theme tokens, every entry
   with empty `components`). Honest emptiness beats intent-only noise; declared intent for
   an unmeasured category can still surface through `divergence` (when its color has no
-  perceptual match among measured usage), and token-only colors still pool normally
-  whenever the category has real measurement.
+  perceptual match among measured usage).
 - **`border_presence` feature family** (config YAML): any element whose harvested border
   is genuinely painted (width-gated) now votes `border`. Previously only the `<input>`
   semantic rule voted `border`, so pages without classified inputs measured zero border
