@@ -1,5 +1,5 @@
 {
-  "fit_score": 0.8901,
+  "fit_score": 0.8,
   "has_divergence": true,
   "single_theme": true,
   "theme_structure": {
@@ -31,7 +31,7 @@
           "#ffffff"
         ],
         "secondary": [
-          "#0d1017"
+          "#ffffff"
         ]
       },
       "top_usage_colors": {

@@ -7,6 +7,15 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- Roles view (60/30/10): component evidence is now scored from raw `component_mass`
+  (`log1p`-damped, normalized to the per-bucket maximum across clusters) instead of the
+  normalized `component_mix`. Mix purity carried no cross-cluster magnitude, so a cluster
+  evidenced by a single tiny element could outrank clusters with 100x the vote mass
+  (e.g. a lone badge chip winning `secondary` over the actual page surface). Role
+  rankings and `fit_score` values change; no API change.
+
 ## [0.4.0] - 2026-06-12
 
 Re-keys the public result contract around **usage** (what colors paint surfaces / text /

@@ -27,14 +27,23 @@ def _color(css: str) -> Color:
 def _cluster(
     css: str,
     area: float,
-    mix: dict[ComponentType, float] | None = None,
+    mass: dict[ComponentType, float] | None = None,
     member_count: int = 1,
 ) -> ColorCluster:
+    """Build a cluster from raw component vote ``mass`` (mix derived by normalizing).
+
+    Role scoring reads the raw ``component_mass`` (cross-cluster magnitude matters);
+    ``component_mix`` is carried for model completeness like the inventory does.
+    """
+    mass = mass or {}
+    total = sum(mass.values())
+    mix = {comp: m / total for comp, m in mass.items()} if total > 0 else {}
     return ColorCluster(
         color=_color(css),
         area_weight=area,
         member_count=member_count,
-        component_mix=mix or {},
+        component_mix=mix,
+        component_mass=mass,
     )
 
 
@@ -165,6 +174,59 @@ def test_assign_roles_is_input_order_independent() -> None:
             for (_, a_prob, a_area), (_, e_prob, e_area) in zip(actual, expected, strict=True):
                 assert a_prob == pytest.approx(e_prob, abs=1e-12)
                 assert a_area == e_area
+
+
+def test_tiny_pure_structural_cluster_does_not_win_secondary() -> None:
+    """Regression (disconetwork.com): mix purity without magnitude must not win secondary.
+
+    A single 133x17px amber badge chip was a zero-area cluster with raw card_bg mass
+    ~0.88 but component_mix purity 1.0, which maxed out the old mix-based secondary
+    score and beat the white page surface (area 0.83, raw mass >100). Raw-mass scoring
+    must rank the well-evidenced white surface first.
+    """
+    clusters = [
+        # The page surface: huge area, large raw mass spread over primary + structural.
+        _cluster("#ffffff", 0.83, {ComponentType.page_bg: 60.0, ComponentType.card_bg: 45.0}),
+        # The badge chip: zero area, tiny raw mass, but 100% structural mix purity.
+        _cluster("#f59e0b", 0.0, {ComponentType.card_bg: 0.88}),
+        # Body text, so the set is not degenerate.
+        _cluster("#050505", 0.15, {ComponentType.page_text: 30.0}),
+    ]
+    results, _ = assign_roles(clusters)
+    secondary = results.mapping[PaletteRole.secondary]
+    assert secondary[0].color.hex != "#f59e0b"
+    assert secondary[0].color.hex == "#ffffff"
+
+
+def test_high_mass_diluted_chromatic_beats_low_mass_pure_for_accent() -> None:
+    """Regression (disconetwork.com): accent evidence is magnitude, not mix purity.
+
+    The brand purple's large accent-affine (link) mass was diluted across card_bg /
+    page_text in its mix, while a minor green was link-pure with a fraction of the
+    mass — and won accent under mix-based scoring. With raw mass the purple's far
+    greater accent evidence must win.
+    """
+    clusters = [
+        _cluster("#ffffff", 0.80, {ComponentType.page_bg: 80.0}),
+        # Brand purple: big accent mass, diluted mix (link share only ~1/3).
+        _cluster(
+            "#7c3bed",
+            0.0,
+            {
+                ComponentType.link: 15.0,
+                ComponentType.card_bg: 20.0,
+                ComponentType.page_text: 10.0,
+            },
+        ),
+        # Minor green: link-pure mix but a fraction of the raw accent mass.
+        _cluster("#10b77f", 0.0, {ComponentType.link: 2.0}),
+    ]
+    results, _ = assign_roles(clusters)
+    accent = results.mapping[PaletteRole.accent]
+    # Green pruning out of the accent list entirely also counts as losing.
+    pos = {c.color.hex: i for i, c in enumerate(accent)}
+    assert pos["#7c3bed"] < pos.get("#10b77f", len(accent))
+    assert accent[0].color.hex == "#7c3bed"
 
 
 def test_all_five_roles_present() -> None:

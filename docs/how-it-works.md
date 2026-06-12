@@ -337,11 +337,22 @@ design split mapped to five roles — **primary** (the dominant, usually neutral
 action/brand "pop", ~10%), plus **neutral_light** and **neutral_dark**. Unlike the usage
 view it is *measured-only* — never reconciled against tokens.
 
+Component evidence enters the scores as **raw vote mass, not mix purity**: each
+cluster's `component_mass` is summed into role-affinity buckets (page-bg → primary,
+CTA/link/badge → accent, card/header/nav/footer/hero → secondary), `log1p`-damped (the
+same sub-linear compression the usage view applies, section 5), then divided by the
+largest damped value any cluster has for that bucket — so the best-evidenced cluster per
+bucket scores 1.0 and the rest scale down with their actual evidence. The normalized
+`component_mix` is deliberately not used here: purity carries no cross-cluster
+magnitude, and a cluster whose only evidence was one tiny badge chip (mix purity 1.0,
+raw mass 0.88) used to out-score the real page surface (raw structural mass >100) for
+secondary.
+
 Each cluster gets a score per role from weighted features: primary rewards area,
-neutrality (a smooth `1 − chroma/0.10` signal), and page-background component votes;
+neutrality (a smooth `1 − chroma/0.10` signal), and page-background component evidence;
 accent rewards chroma, contrast against the provisional primary, and action-component
-votes — with only a small area term, so a tiny but vivid CTA can win; secondary rewards
-area and structural-surface votes (the "card exception"); the neutrals score
+evidence — with only a small area term, so a tiny but vivid CTA can win; secondary
+rewards area and structural-surface evidence (the "card exception"); the neutrals score
 `neutrality × lightness` (or `× (1 − lightness)`) with a small area floor. Per role, the
 scores go through a softmax (temperature 0.25), pruning, and renormalization into ranked
 candidates.

@@ -15,6 +15,13 @@ Design notes
   constant defined below.
 * Everything is deterministic: iteration over dicts is sorted, ties are broken by ``hex``
   (smallest wins — the shared `prune_distribution` convention), and there is no randomness.
+* Component evidence is scored from the **raw** ``ColorCluster.component_mass`` (per
+  role-affinity bucket, ``log1p``-damped and normalized to the per-bucket maximum across
+  clusters — see `_normalize_comp_assoc`), *not* the normalized ``component_mix``. Mix
+  purity carries no cross-cluster magnitude: a cluster whose only evidence was one tiny
+  element had mix purity 1.0 and outranked clusters with 100x the vote mass (a single
+  133x17px badge chip won secondary over the actual white page surface). The ``log1p``
+  damping rationale is the usage view's (``palette/usage.py``).
 * The 60/30/10 mental model:
     - **primary**   ~= the dominant neutral surface (~60%) — anchors contrast.
     - **secondary** ~= structural color (~30%) — cards/headers/nav surfaces.
@@ -111,7 +118,12 @@ COMPONENT_AFFINITY: dict[ComponentType, PaletteRole] = {
 
 
 class _Features:
-    """Precomputed per-cluster features (computed once in `assign_roles`)."""
+    """Precomputed per-cluster features (computed once in `assign_roles`).
+
+    ``comp_assoc`` starts as the cluster's **raw** ``component_mass`` aggregated into
+    role-affinity buckets (see `COMPONENT_AFFINITY`); `_normalize_comp_assoc` then maps
+    it into ``[0, 1]`` across the whole cluster set before any scoring reads it.
+    """
 
     __slots__ = ("area", "chroma", "cluster", "comp_assoc", "lightness", "neutrality")
 
@@ -123,17 +135,34 @@ class _Features:
         self.lightness: float = color.lightness
         # Smooth neutrality in [0, 1]; hard is_neutral consulted for the structural term.
         self.neutrality: float = max(0.0, 1.0 - color.chroma / CHROMA_NEUTRAL_SCALE)
-        # Aggregate component_mix weight into role-affinity buckets.
+        # Aggregate raw component_mass into role-affinity buckets (normalized later by
+        # _normalize_comp_assoc).
         assoc: dict[PaletteRole, float] = {role: 0.0 for role in PaletteRole}
-        for comp, weight in cluster.component_mix.items():
+        for comp, mass in cluster.component_mass.items():
             role = COMPONENT_AFFINITY.get(comp)
             if role is not None:
-                assoc[role] += weight
+                assoc[role] += mass
         self.comp_assoc: dict[PaletteRole, float] = assoc
 
     @property
     def color(self) -> Color:
         return self.cluster.color
+
+
+def _normalize_comp_assoc(feats: list[_Features]) -> None:
+    """Map each raw ``comp_assoc`` bucket into ``[0, 1]`` across the cluster set, in place.
+
+    Per role bucket: ``log1p`` each cluster's raw mass (damps element-count magnitude
+    sub-linearly — same rationale as the usage view's ``log1p`` ranking, see
+    ``palette/usage.py``), then divide by the maximum ``log1p`` value across all clusters
+    for that bucket, so the best-evidenced cluster gets 1.0 and ordering is preserved
+    (``log1p`` is monotonic). A bucket whose max is 0 stays all-zero.
+    """
+    for role in PaletteRole:
+        damped = [math.log1p(f.comp_assoc[role]) for f in feats]
+        top = max(damped, default=0.0)
+        for f, value in zip(feats, damped, strict=True):
+            f.comp_assoc[role] = value / top if top > 0.0 else 0.0
 
 
 def _softmax_weights(scores: list[float], temperature: float) -> list[float]:
@@ -222,6 +251,7 @@ def assign_roles(clusters: list[ColorCluster]) -> tuple[RoleResults, float]:
         return RoleResults(mapping={}), 0.0
 
     feats = [_Features(c) for c in clusters]
+    _normalize_comp_assoc(feats)
 
     # Reference for chroma normalization: the most chromatic cluster, floored by CHROMA_REF
     # so an all-neutral set does not divide by ~0 and inflate weak chroma.
