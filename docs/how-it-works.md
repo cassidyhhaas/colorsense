@@ -85,8 +85,7 @@ the classifier code.
 Each declared token name is matched in strict precedence order:
 
 1. **Relational** — names like `--on-primary` or `--card-foreground` match a relational
-   pattern: the token is a *text* color paired with a base surface, classified `text_on`
-   with the base recorded.
+   pattern: the token is a *text* color paired with a base surface, classified `text_on`.
 2. **Name rule** — a direct vocabulary match on the namespace-stripped name
    (`--bs-primary` → `primary` → `brand_primary`; `--border` → `border`; `--gray` →
    `neutral`; and so on), each rule carrying a weight.

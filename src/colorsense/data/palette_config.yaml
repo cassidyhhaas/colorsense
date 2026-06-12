@@ -142,8 +142,8 @@ token_vocabulary:
 
   # --- Relational modifiers: reroute a token to "text-on-<base>". ------------
   # e.g. --primary-foreground / --md-sys-color-on-primary / --card-foreground.
-  # The token's value is a TEXT color paired with the referenced surface; the
-  # pairing is surfaced on the classified token (``text_on_base``) for consumers.
+  # The token's value is a TEXT color paired with the referenced surface, so it
+  # is classified ``text_on`` rather than as a surface/brand color itself.
   relational_modifiers:
     - {pattern: "^on-(?P<base>.+)$",     type: text_on, weight: 4.5}  # Material
     - {pattern: "^(?P<base>.+)-fore$",   type: text_on, weight: 3.0}

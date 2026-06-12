@@ -58,6 +58,19 @@ Other changes riding the redesign:
 
 ### Fixed — pre-release review follow-up
 
+- **Dead data path removed: `ClassifiedToken.text_on_base`.** The relational classifier
+  resolved each `--on-<base>` / `--<base>-foreground` token's base surface to a semantic
+  role and threaded it through the classification tuple and alias inheritance — but
+  nothing consumed it after the 0.4.0 contract change made `ClassifiedToken` internal-only
+  (the public `DesignToken` projection never carried it, and reconciliation's relational
+  divergence pass uses only origin, resolved color, weight, and name). The field, its
+  threading, and the base-role lookup are gone; the relational *classification* itself
+  (`text_on` role, weight, `relational` origin) is unchanged, as is the YAML
+  `relational_modifiers` schema — patterns still capture `base`, since the name match
+  depends on it. The bundled YAML's stale comment claiming the pairing "is surfaced on
+  the classified token for consumers" is corrected. No behavior change (golden snapshots
+  untouched).
+
 - **Dead classifier knobs removed; the config loader now rejects unknown dispatch
   names.** The bundled YAML shipped two knobs the classifier could never act on: the
   `has_focus_ring` interactivity rule (no focus-ring signal exists on harvested elements)
