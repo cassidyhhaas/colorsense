@@ -150,11 +150,6 @@ async def test_min_corner_radius_harvested_and_pill_chips_classify_as_badge(
     assert ComponentType.badge not in tab_dist
 
 
-@pytest.mark.skip(
-    reason="WIP checkpoint: inventory-level assertions to be finalized under the "
-    "per-channel-normalization decision (see session-handoff.md). Harvest-level gradient "
-    "stop assertions are correct; the cta_bg attribution path is being reworked."
-)
 async def test_gradient_cta_stops_harvested_and_vote_both_brand_colors(
     fixtures_dir: Path, config: Config
 ) -> None:
