@@ -7,6 +7,16 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- Screenshot palette now masks out **raster photographic content** (prototype): `<img>`,
+  `<video>`, `<canvas>`, `<picture>`, and elements whose computed `background-image`
+  carries a `url(` token are zeroed out of the area-weighted bins, reusing the same
+  keep-mask mechanism as consent-banner masking, so a site's design colors are not drowned
+  by its photography. CSS gradients (a `background-image` with no `url(`) and inline
+  `<svg>` are deliberately **kept** — they are brand/design content. Media-rect collection
+  is capped (`_MAX_MEDIA_RECTS = 256`, largest-area-first) to bound work on hostile pages.
+
 ## [0.4.1] - 2026-06-13
 
 A palette-quality release (no API change). The 60/30/10 roles view now scores component

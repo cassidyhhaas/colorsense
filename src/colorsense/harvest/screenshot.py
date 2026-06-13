@@ -113,11 +113,16 @@ async def harvest_screenshot(
     page: Page,
     consent_rects: list[Rect],
     device_scale_factor: float,
+    media_rects: list[Rect] | None = None,
 ) -> list[ScreenshotBin]:
     """Capture, mask, and quantize a full-page screenshot into color bins.
 
-    ``consent_rects`` are CSS-pixel rects (from `RenderSession`); they are scaled by
-    ``device_scale_factor`` and zeroed out of the raw screenshot before quantizing.
+    ``consent_rects`` and ``media_rects`` are CSS-pixel rects (from `RenderSession`); both
+    are scaled by ``device_scale_factor`` and zeroed out of the same keep-mask before
+    quantizing. Consent rects suppress cookie/overlay banners; media rects suppress raster
+    photographic content (images/video/canvas/``url()`` backgrounds) so a site's design
+    colors are not drowned by its photography. ``media_rects`` defaults to ``None`` (treated
+    as empty) so existing callers and tests pass through unchanged.
 
     Raises `_OversizedCaptureError` if the captured image's declared dimensions
     exceed the decode pixel cap (surfaced by ``harvest_page`` as ``RenderError``).
@@ -169,9 +174,14 @@ async def harvest_screenshot(
 
     height, width = array.shape[0], array.shape[1]
 
-    # Build a boolean keep-mask; consent regions are excluded from sampling entirely.
+    # Build a boolean keep-mask; consent banners and raster media are both excluded from
+    # sampling entirely. The two rect kinds are masked identically (CSS px -> device px,
+    # clamped to bounds) — only their provenance differs — so a single O(rects) loop over
+    # the concatenation handles both. The loop stays vectorized per rect (a numpy slice
+    # assignment); ``media_rects`` is already capped at the harvest layer
+    # (``_MAX_MEDIA_RECTS``), so the total work is bounded regardless of page contents.
     keep = np.ones((height, width), dtype=bool)
-    for rect in consent_rects:
+    for rect in [*consent_rects, *(media_rects or [])]:
         x0 = max(0, int(rect.x * device_scale_factor))
         y0 = max(0, int(rect.y * device_scale_factor))
         x1 = min(width, int((rect.x + rect.width) * device_scale_factor))

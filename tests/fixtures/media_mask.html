@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Media mask fixture</title>
+<style>
+  html, body { margin: 0; padding: 0; }
+  /* White page so every colored region is attributable. */
+  body { background: #ffffff; }
+
+  /* (a) A large raster photo, set as a url() background (a 1x1 solid-magenta #ff00aa PNG
+     data URI stretched to fill). This MUST be masked out of the palette — its magenta is
+     the "photography" we are excluding. Using a data URI keeps the fixture network-free. */
+  #photo {
+    width: 100%;
+    height: 600px;
+    background-image: url("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z7AKAAOrAapm4fPiAAAAAElFTkSuQmCC");
+    background-size: cover;
+    background-repeat: no-repeat;
+  }
+
+  /* (b) A CSS gradient. background-image carries it, but there is no url() token, so it
+     MUST be KEPT — its blue stops are brand design content. */
+  #gradient {
+    width: 100%;
+    height: 600px;
+    background-image: linear-gradient(#0000ff, #0000cc);
+  }
+
+  /* (c) An inline <svg> wrapper. Inline vector content MUST be KEPT — its green is a
+     brand/logo color. */
+  #logo { width: 100%; height: 600px; }
+  #logo svg { width: 100%; height: 100%; display: block; }
+</style>
+</head>
+<body>
+  <div id="photo"></div>
+  <div id="gradient"></div>
+  <div id="logo">
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" preserveAspectRatio="none">
+      <rect x="0" y="0" width="100" height="100" fill="#00cc00"></rect>
+    </svg>
+  </div>
+</body>
+</html>

@@ -385,6 +385,52 @@ async def test_degenerate_consent_rects_are_ignored() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Media-rect masking (photographic content excluded from the palette)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_media_rect_excludes_photo_region() -> None:
+    # The red band stands in for a raster photo; passed as a media rect it must be zeroed
+    # out of the keep-mask exactly like a consent rect, leaving only the white background.
+    page = _FakePage(doc_width=200.0, doc_height=100.0, image=_BAND_IMAGE)
+    photo_rect = Rect(x=0.0, y=0.0, width=200.0, height=50.0)  # covers the red band
+
+    bins = await harvest_screenshot(page, [], 1.0, [photo_rect])  # type: ignore[arg-type]
+
+    assert [b.color.hex for b in bins] == ["#ffffff"]
+    assert bins[0].area_fraction == pytest.approx(1.0, abs=1e-6)
+
+
+@pytest.mark.asyncio
+async def test_media_rects_default_none_keeps_everything() -> None:
+    # Omitting media_rects entirely (the back-compat default) must sample the whole image:
+    # the red band survives alongside the white background, 50/50.
+    page = _FakePage(doc_width=200.0, doc_height=100.0, image=_BAND_IMAGE)
+
+    bins = await harvest_screenshot(page, [], 1.0)  # type: ignore[arg-type]
+
+    fractions = {b.color.hex: b.area_fraction for b in bins}
+    assert fractions["#ff0000"] == pytest.approx(0.5, abs=1e-6)
+    assert fractions["#ffffff"] == pytest.approx(0.5, abs=1e-6)
+
+
+@pytest.mark.asyncio
+async def test_media_and_consent_rects_mask_together() -> None:
+    # Consent and media rects share one keep-mask: a consent rect over the top half (red)
+    # and a media rect over a strip of the white bottom half both vanish, with the
+    # remaining white dominating.
+    page = _FakePage(doc_width=200.0, doc_height=100.0, image=_BAND_IMAGE)
+    consent_rect = Rect(x=0.0, y=0.0, width=200.0, height=50.0)  # the red band
+    media_rect = Rect(x=0.0, y=50.0, width=200.0, height=10.0)  # a white strip below it
+
+    bins = await harvest_screenshot(page, [consent_rect], 1.0, [media_rect])  # type: ignore[arg-type]
+
+    assert [b.color.hex for b in bins] == ["#ffffff"]
+    assert bins[0].area_fraction == pytest.approx(1.0, abs=1e-6)
+
+
+# ---------------------------------------------------------------------------
 # harvest_page surfaces harvest failures as the public RenderError
 # ---------------------------------------------------------------------------
 
@@ -418,12 +464,14 @@ class _FakeRenderSession:
 
     page: _HarvestFakePage
     consent_rects: list[Any]
+    media_rects: list[Any]
 
     _next_page: _HarvestFakePage  # set by the test before construction
 
     def __init__(self, *_args: Any, **_kwargs: Any) -> None:
         self.page = type(self)._next_page
         self.consent_rects = []
+        self.media_rects = []
 
     async def __aenter__(self) -> _FakeRenderSession:
         return self

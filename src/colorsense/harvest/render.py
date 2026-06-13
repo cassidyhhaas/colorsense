@@ -176,6 +176,57 @@ _CONSENT_RECTS_JS: str = r"""
 """
 
 
+# Upper bound on the number of raster-media rects collected per page. Each rect is zeroed
+# out of the screenshot keep-mask (an O(rects) numpy slice loop), so the cost is bounded by
+# this cap, not the page's element count. A hostile page can synthesize hundreds of
+# thousands of ``<img>`` tags; mirroring the spirit of the DOM/gradient caps in
+# ``harvest/dom.py``, we collect at most this many — far above any genuine page (real sites
+# carry at most a few dozen above-the-fold images) yet a hard bound on attacker-controlled
+# work. The JS ranks candidates largest-area-first before truncating, so the photos most
+# worth masking survive the cap.
+_MAX_MEDIA_RECTS: int = 256
+
+# JS that finds raster *media* elements and returns their bounding rects (CSS px, the same
+# coordinate basis as _CONSENT_RECTS_JS), so photographic content can be masked out of the
+# screenshot palette and a site's design colors aren't drowned by its photography.
+#
+# An element is maskable raster media when it is visible, has non-zero area, AND either:
+#   * its tag is one of img / video / canvas / picture (replaced raster elements), OR
+#   * its computed background-image contains a ``url(`` token (a real raster image).
+#
+# Deliberate exclusions (the whole subtlety — see the prototype brief and SECURITY notes):
+#   * CSS gradients are NOT masked. ``background-image`` also carries ``linear-gradient(...)``
+#     etc.; a gradient-only background-image (no ``url(``) is brand design content (and we
+#     now harvest its stops), so the ``url(`` predicate is what distinguishes a raster image
+#     from a gradient. A background that mixes a gradient AND a ``url(`` image still masks.
+#   * Inline ``<svg>`` is NOT masked: logos/icons/illustrations are vector design content and
+#     often carry the brand color. Note the asymmetry: an ``<img src="logo.svg">`` IS masked
+#     (it is a replaced raster element by tag, regardless of the resource's format) — the
+#     distinction drawn here is inline-vector vs replaced-element, not file extension.
+# Candidates are ranked largest-area-first and truncated to maxRects (passed from Python).
+_MEDIA_RECTS_JS: str = r"""
+(maxRects) => {
+    const rasterTags = new Set(['IMG', 'VIDEO', 'CANVAS', 'PICTURE']);
+    const out = [];
+    for (const el of document.querySelectorAll('*')) {
+        const style = window.getComputedStyle(el);
+        if (style.display === 'none' || style.visibility === 'hidden') continue;
+        const r = el.getBoundingClientRect();
+        if (r.width <= 0 || r.height <= 0) continue;
+        const isRasterTag = rasterTags.has(el.tagName);
+        // A real raster image is set via url(...); a gradient-only background-image has no
+        // url( token and must be kept. (`none` trivially lacks `url(`.)
+        const hasUrlBg = style.backgroundImage.includes('url(');
+        if (!isRasterTag && !hasUrlBg) continue;
+        out.push({x: r.x, y: r.y, w: r.width, h: r.height, area: r.width * r.height});
+    }
+    // Largest-area-first so the photos most worth masking survive the cap.
+    out.sort((a, b) => b.area - a.area);
+    return out.slice(0, maxRects).map((m) => ({x: m.x, y: m.y, w: m.w, h: m.h}));
+}
+"""
+
+
 def normalize_browser_args(browser_args: Sequence[str]) -> tuple[str, ...]:
     """Lightly validate extra Chromium launch arguments and return them as a tuple.
 
@@ -404,6 +455,7 @@ class RenderSession:
         self._context: BrowserContext | None = None
         self._page: Page | None = None
         self._consent_rects: list[Rect] = []
+        self._media_rects: list[Rect] = []
 
     # -- context manager --------------------------------------------------
 
@@ -495,6 +547,16 @@ class RenderSession:
         """Bounding rects of detected consent/overlay banners (for masking)."""
         return list(self._consent_rects)
 
+    @property
+    def media_rects(self) -> list[Rect]:
+        """Bounding rects of detected raster media (images/video/canvas/url() backgrounds).
+
+        Masked out of the screenshot palette so photographic content does not drown a
+        site's design colors. Excludes CSS gradients and inline ``<svg>`` (see
+        `_MEDIA_RECTS_JS`).
+        """
+        return list(self._media_rects)
+
     # -- navigation -------------------------------------------------------
 
     async def goto(self, url: str, *, nav_timeout_ms: float = DEFAULT_NAV_TIMEOUT_MS) -> None:
@@ -502,7 +564,8 @@ class RenderSession:
 
         Performs ``goto(..., wait_until="load")``, a guarded ``networkidle`` wait,
         best-effort motion neutralization (see `_disable_motion`), step-scrolling to
-        trigger lazy content, and consent-region detection. ``networkidle`` is guarded
+        trigger lazy content, and consent-region + raster-media detection. ``networkidle``
+        is guarded
         with a timeout/try-except so ``file://`` pages that never report idle do not hang.
 
         Parameters
@@ -529,6 +592,7 @@ class RenderSession:
             )
 
         self._consent_rects = await self._detect_consent_rects()
+        self._media_rects = await self._detect_media_rects()
 
     @staticmethod
     async def _disable_motion(page: Page) -> None:
@@ -565,10 +629,31 @@ class RenderSession:
 
     async def _detect_consent_rects(self) -> list[Rect]:
         """Return bounding rects of consent/overlay banners without clicking them."""
+        return await self._detect_rects(_CONSENT_RECTS_JS)
+
+    async def _detect_media_rects(self) -> list[Rect]:
+        """Return bounding rects of raster media (images/video/canvas/url() backgrounds).
+
+        Best-effort, like consent detection: a wedged renderer or malformed payload yields
+        no rects rather than failing the harvest. The collected count is bounded by
+        `_MAX_MEDIA_RECTS` (passed into the JS, which truncates largest-area-first) so a
+        page declaring hundreds of thousands of ``<img>`` tags cannot blow up the mask loop.
+        See `_MEDIA_RECTS_JS` for the maskable-vs-kept predicate (gradients and inline
+        ``<svg>`` are deliberately kept).
+        """
+        return await self._detect_rects(_MEDIA_RECTS_JS, _MAX_MEDIA_RECTS)
+
+    async def _detect_rects(self, js: str, *args: object) -> list[Rect]:
+        """Evaluate a rect-returning JS payload and parse it into `Rect`\\ s, best-effort.
+
+        Shared by consent and media detection: both run a bounded in-page pass returning a
+        list of ``{x, y, w, h}`` dicts (CSS px). Any failure — a wedged-renderer timeout, a
+        non-list result, or a hostile page returning malformed entries — degrades to an
+        empty list rather than raising, since masking is a refinement, not a hard
+        requirement of the harvest.
+        """
         try:
-            raw = await asyncio.wait_for(
-                self.page.evaluate(_CONSENT_RECTS_JS), _BEST_EFFORT_TIMEOUT_S
-            )
+            raw = await asyncio.wait_for(self.page.evaluate(js, *args), _BEST_EFFORT_TIMEOUT_S)
         except Exception:  # detection is best-effort (including a wedged-renderer timeout)
             return []
         rects: list[Rect] = []
