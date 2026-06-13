@@ -194,7 +194,10 @@ async def harvest_page(
             # Isolated: forces :hover per element, which would pollute a concurrent screenshot.
             elements = await probe_hover_states(page, elements, selectors)
             screenshot_bins = await harvest_screenshot(
-                page, session.consent_rects, viewport.device_scale_factor
+                page,
+                session.consent_rects,
+                viewport.device_scale_factor,
+                session.media_rects,
             )
     except (
         PlaywrightError,

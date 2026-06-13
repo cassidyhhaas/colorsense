@@ -49,6 +49,7 @@ def _element(
     bg: Color | None,
     text: Color | None = None,
     border: Color | None = None,
+    bg_gradient_stops: tuple[Color, ...] = (),
 ) -> HarvestedElement:
     return HarvestedElement(
         tag="div",
@@ -59,6 +60,7 @@ def _element(
         bg=bg,
         text=text,
         border=border,
+        bg_gradient_stops=bg_gradient_stops,
         is_iframe=False,
         cross_origin=False,
         shadow_host=False,
@@ -76,8 +78,12 @@ def _classified(
     dist: dict[ComponentType, float],
     text: Color | None = None,
     border: Color | None = None,
+    bg_gradient_stops: tuple[Color, ...] = (),
 ) -> ClassifiedElement:
-    return ClassifiedElement(element=_element(bg, text=text, border=border), component_dist=dist)
+    return ClassifiedElement(
+        element=_element(bg, text=text, border=border, bg_gradient_stops=bg_gradient_stops),
+        component_dist=dist,
+    )
 
 
 def test_near_identical_colors_merge() -> None:
@@ -165,6 +171,58 @@ def test_component_mass_keeps_raw_unnormalized_sums() -> None:
     total = sum(mass.values())
     for comp, raw in mass.items():
         assert clusters[0].component_mix[comp] == pytest.approx(raw / total, abs=1e-9)
+
+
+def test_gradient_cta_votes_both_stops_split_evenly() -> None:
+    # A gradient CTA (transparent background-color, two opaque gradient stops) donates
+    # its cta_bg mass to BOTH stops, split evenly — so a purple->blue button makes both
+    # purple and blue candidates without out-voting a solid button (which keeps full mass).
+    transparent = Color(hex="#000000", lightness=0.0, chroma=0.0, hue=0.0, alpha=0.0)
+    purple = _color("#7c3bed")
+    blue = _color("#3c83f6")
+    harvest = _harvest(
+        [
+            ScreenshotBin(color=purple, area_fraction=0.5),
+            ScreenshotBin(color=blue, area_fraction=0.5),
+        ]
+    )
+    classified = [
+        _classified(transparent, {ComponentType.cta_bg: 3.0}, bg_gradient_stops=(purple, blue))
+    ]
+
+    clusters = build_inventory(harvest, classified)
+
+    p = next(c for c in clusters if c.color.hex == "#7c3bed")
+    b = next(c for c in clusters if c.color.hex == "#3c83f6")
+    assert p.component_mass[ComponentType.cta_bg] == pytest.approx(1.5, abs=1e-9)
+    assert b.component_mass[ComponentType.cta_bg] == pytest.approx(1.5, abs=1e-9)
+
+
+def test_gradient_stops_ignored_when_background_color_is_opaque() -> None:
+    # A solid background-color takes precedence: the gradient stops are not voted.
+    solid = _color("#101828")
+    purple = _color("#7c3bed")
+    harvest = _harvest([ScreenshotBin(color=solid, area_fraction=1.0)])
+    classified = [_classified(solid, {ComponentType.card_bg: 1.0}, bg_gradient_stops=(purple,))]
+
+    clusters = build_inventory(harvest, classified)
+
+    assert [c.color.hex for c in clusters] == ["#101828"]
+    assert clusters[0].component_mass[ComponentType.card_bg] == pytest.approx(1.0, abs=1e-9)
+
+
+def test_semi_transparent_bg_vote_is_alpha_scaled() -> None:
+    # A faint tint (bg-primary/10) keeps its intended saturated hex but votes in
+    # proportion to how much it actually paints: mass is scaled by the bg alpha.
+    tint = _color("rgba(124, 59, 237, 0.1)")
+    assert tint.hex == "#7c3bed" and tint.alpha == pytest.approx(0.1)
+    harvest = _harvest([ScreenshotBin(color=_color("#7c3bed"), area_fraction=1.0)])
+    classified = [_classified(tint, {ComponentType.badge: 2.0})]
+
+    clusters = build_inventory(harvest, classified)
+
+    purple = next(c for c in clusters if c.color.hex == "#7c3bed")
+    assert purple.component_mass[ComponentType.badge] == pytest.approx(0.2, abs=1e-9)
 
 
 def test_unmatched_element_creates_zero_area_entry() -> None:

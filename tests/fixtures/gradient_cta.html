@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Gradient CTA — gradient-fill harvesting fixture</title>
+<style>
+  /* Offline stand-in for the disconetwork.com live case: a brand CTA painted with a
+     two-stop gradient (purple -> blue) over a transparent computed background-color.
+     The harvester captures both opaque stops in `bg_gradient_stops` ONLY for clickable
+     pills, so the button's brand colors are not invisible. Negatives pin the gate:
+       - .card    is a clickable, gradient-filled rounded RECTANGLE (a stripe.com-style
+                  decorative card link) -> not a pill -> no stops (decorative flavor);
+       - .divider is a gradient-filled PILL but NOT clickable -> no stops;
+       - .solid   has an opaque background-color -> the gradient is ignored;
+       - .glow    is a decorative radial gradient that fades to transparent -> not a fill.
+
+     Every element is kept TINY on a tall white page, mirroring real disco CTAs (small
+     chips on a large surface). This matters for the inventory assertion: a CTA large
+     enough to form its own screenshot bin would report the rendered *blended* lavender,
+     which would become the cluster representative and absorb the zero-area brand stops.
+     Tiny -> no colored bins form, so #7c3bed and #3c83f6 survive as their own zero-area
+     clusters and carry the CTA's cta_bg mass directly. The decorative gradients use
+     OFF-BRAND colors so the CTA is the only source of brand-colored evidence. */
+  body { margin: 0; background: #ffffff; min-height: 1400px; font-family: sans-serif; }
+  .cta {
+    display: inline-block;
+    border-radius: 9999px;          /* rounded-full -> pill (all four corners) */
+    padding: 3px 9px;
+    height: 12px;                   /* short: wider than tall -> stadium */
+    font-size: 9px;
+    color: #ffffff;
+    background-image: linear-gradient(135deg, #7c3bed, #3c83f6);
+    margin: 8px;
+  }
+  .card {
+    display: inline-block;
+    border-radius: 6px;             /* rounded but square-ish -> NOT a pill */
+    width: 52px;
+    height: 30px;
+    background-image: linear-gradient(135deg, #f97316, #eab308);  /* off-brand decorative */
+    margin: 8px;
+  }
+  .divider {
+    border-radius: 9999px;          /* pill-shaped but not clickable */
+    width: 52px;
+    height: 5px;
+    background-image: linear-gradient(90deg, #64748b, #94a3b8);   /* off-brand decorative */
+    margin: 8px;
+  }
+  .solid {
+    display: inline-block;
+    border-radius: 9999px;
+    padding: 3px 9px;
+    height: 12px;
+    font-size: 9px;
+    color: #ffffff;
+    background-color: #101828;      /* opaque solid wins; gradient must be ignored */
+    background-image: linear-gradient(135deg, #7c3bed, #3c83f6);
+    margin: 8px;
+  }
+  .glow {
+    display: inline-block;
+    border-radius: 9999px;
+    width: 52px;
+    height: 16px;
+    background-image: radial-gradient(circle at 50% 0%, #22c55e, rgba(0, 0, 0, 0));  /* off-brand */
+    margin: 8px;
+  }
+</style>
+</head>
+<body>
+  <a class="cta" href="#start">Go</a>
+  <a class="card" href="#feature"></a>
+  <div class="divider"></div>
+  <a class="solid" href="#docs">Docs</a>
+  <a class="glow" href="#more"></a>
+</body>
+</html>

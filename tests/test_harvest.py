@@ -16,6 +16,7 @@ from colorsense.classify.components import classify_components
 from colorsense.config import Config, load_default_config
 from colorsense.harvest import RenderSession, harvest_page
 from colorsense.models import ComponentType, Harvest, Theme, Viewport
+from colorsense.palette.inventory import build_inventory
 
 VIEWPORT = Viewport(width=1280, height=800, device_scale_factor=1.0)
 
@@ -149,6 +150,51 @@ async def test_min_corner_radius_harvested_and_pill_chips_classify_as_badge(
     assert ComponentType.badge not in tab_dist
 
 
+async def test_gradient_cta_stops_harvested_and_vote_both_brand_colors(
+    fixtures_dir: Path, config: Config
+) -> None:
+    """End-to-end (disconetwork.com shape): a clickable gradient pill harvests its stops.
+
+    The brand button is a clickable pill painting a ``linear-gradient(purple, blue)`` over
+    a transparent ``background-color``; the harvester must capture both stops in
+    ``bg_gradient_stops`` so the button's brand colors are not invisible, and the inventory
+    must attribute its interactive mass to both purple and blue. The negatives pin the
+    interactive-pill gate: a clickable gradient *card* (a rounded rectangle, not a pill —
+    a stripe.com-style decorative card) and a *non-clickable* gradient pill (a divider)
+    both yield no stops, as do a solid background-color and a decorative transparent-fading
+    glow.
+    """
+    harvest = await _harvest(fixtures_dir / "gradient_cta.html", config)
+
+    cta = next(el for el in harvest.elements if "cta" in el.class_tokens)
+    stops = {c.hex for c in cta.bg_gradient_stops}
+    assert stops == {"#7c3bed", "#3c83f6"}
+    assert cta.bg is not None and cta.bg.alpha == 0.0  # gradient is the only fill
+
+    # A clickable but rectangular (non-pill) gradient card is decorative -> no stops.
+    card = next(el for el in harvest.elements if "card" in el.class_tokens)
+    assert card.bg_gradient_stops == ()
+
+    # A pill-shaped but NON-clickable gradient divider -> no stops.
+    divider = next(el for el in harvest.elements if "divider" in el.class_tokens)
+    assert divider.bg_gradient_stops == ()
+
+    # An opaque background-color wins: its gradient is not harvested as a fill.
+    solid = next(el for el in harvest.elements if "solid" in el.class_tokens)
+    assert solid.bg_gradient_stops == ()
+
+    # A decorative glow (fades to rgba(0,0,0,0)) is not a fill.
+    glow = next(el for el in harvest.elements if "glow" in el.class_tokens)
+    assert glow.bg_gradient_stops == ()
+
+    classified = classify_components(harvest.elements, config, VIEWPORT)
+    clusters = build_inventory(harvest, classified)
+    by_hex = {c.color.hex: c for c in clusters}
+    # Both brand stops carry the CTA's interactive (cta_bg) mass.
+    assert ComponentType.cta_bg in by_hex["#7c3bed"].component_mass
+    assert ComponentType.cta_bg in by_hex["#3c83f6"].component_mass
+
+
 async def test_has_text_set_for_direct_text_only(fixtures_dir: Path, config: Config) -> None:
     """``has_text`` is true iff the element has a DIRECT non-whitespace child text node.
 
@@ -252,6 +298,44 @@ async def test_consent_region_masked(fixtures_dir: Path, config: Config) -> None
     assert harvest.screenshot_bins[0].color.hex in {"#ffffff", "#fefefe"}
 
 
+async def test_media_region_masked_gradient_and_svg_kept(
+    fixtures_dir: Path, config: Config
+) -> None:
+    # media_mask.html stacks three full-width 600px bands of equal area:
+    #   (a) a url() background photo in magenta #ff00aa  -> MUST be masked (raster media),
+    #   (b) a CSS linear-gradient in blue                -> MUST be kept (no url() token),
+    #   (c) an inline <svg> filled green #00cc00         -> MUST be kept (vector content).
+    # Masking must suppress the photo's magenta while the gradient blue and the svg green
+    # both remain — the whole point of excluding photography without eating design colors.
+    harvest = await _harvest(fixtures_dir / "media_mask.html", config)
+    assert harvest.screenshot_bins
+
+    def fraction_near(target: tuple[int, int, int], tol: int = 24) -> float:
+        # Quantization nudges exact hexes; sum bins whose RGB is within ``tol`` per channel.
+        total = 0.0
+        for b in harvest.screenshot_bins:
+            r = int(b.color.hex[1:3], 16)
+            g = int(b.color.hex[3:5], 16)
+            bl = int(b.color.hex[5:7], 16)
+            near = all(abs(c - t) <= tol for c, t in zip((r, g, bl), target, strict=True))
+            if near:
+                total += b.area_fraction
+        return total
+
+    photo = fraction_near((255, 0, 170))
+    gradient = fraction_near((0, 0, 220))  # the gradient's blue stops (#0000ff..#0000cc)
+    svg = fraction_near((0, 204, 0))
+
+    # The photo band covered ~1/3 of the page unmasked; masking drives it to near-zero.
+    assert photo < 0.02, (
+        f"photo color not masked: fraction={photo}, "
+        f"bins={[(b.color.hex, round(b.area_fraction, 3)) for b in harvest.screenshot_bins]}"
+    )
+    # The gradient and inline-svg design colors must survive masking.
+    assert gradient > 0.1, f"gradient color wrongly suppressed: fraction={gradient}"
+    assert svg > 0.1, f"svg color wrongly suppressed: fraction={svg}"
+
+
 # ---------------------------------------------------------------------------
 # RenderSession contract
 # ---------------------------------------------------------------------------
@@ -330,6 +414,17 @@ async def test_render_session_exposes_page_and_consent(fixtures_dir: Path) -> No
         assert title == "Consent fixture"
         # A consent banner region was detected for masking.
         assert session.consent_rects, "expected a detected consent region"
+
+
+async def test_render_session_exposes_media_rects(fixtures_dir: Path) -> None:
+    async with RenderSession(Theme.light, VIEWPORT) as session:
+        await session.goto((fixtures_dir / "media_mask.html").as_uri())
+        # The url()-background photo (and only it) was detected as maskable raster media;
+        # the gradient and inline <svg> bands must NOT contribute rects.
+        assert session.media_rects, "expected a detected raster-media region"
+        assert len(session.media_rects) == 1, (
+            f"only the url() photo should be masked, got {len(session.media_rects)} rects"
+        )
 
 
 # ---------------------------------------------------------------------------

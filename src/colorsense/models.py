@@ -152,6 +152,30 @@ class ComponentType(StrEnum):
     third_party = "third_party"
 
 
+def channel_for(component: ComponentType) -> str:
+    """Return the color channel a component's vote mass routes to.
+
+    The routing convention is fixed in code: components whose value ends with
+    ``_text`` — plus ``link``, whose painted color is its typography color, not
+    its (usually transparent) background — are painted by the element's
+    ``color`` (its ``text`` channel), ``border`` by its ``border-color``, and
+    everything else (including ``badge``, ``third_party`` and
+    ``button_secondary``) by its ``background-color`` (its ``bg`` channel).
+
+    This is the single source of truth for channel routing, shared by the
+    component classifier's per-channel normalization
+    (``classify/components.py``) and the inventory's per-channel attribution
+    (``palette/inventory.py``). The two partitions MUST stay identical, so both
+    call this one function — it lives here in the shared-contracts module so
+    neither importer creates a cross-layer dependency.
+    """
+    if component.value.endswith("_text") or component is ComponentType.link:
+        return "text"
+    if component is ComponentType.border:
+        return "border"
+    return "bg"
+
+
 class Theme(StrEnum):
     """Color scheme a site is rendered under."""
 
@@ -248,6 +272,17 @@ class HarvestedElement(BaseModel):
     are fully rounded — the intrinsic signal of a pill/chip (stadium) shape, distinct from
     a card (square-ish corners) and from a one-corner-rounded tab. The component classifier
     uses it (with a ``width > height`` test) to detect badge-shaped elements.
+    ``bg_gradient_stops`` (default empty, set by the harvester) carries the opaque color
+    stops of a gradient that fills a **clickable pill (a CTA)** — the only place a
+    gradient reliably tracks the brand palette. It is populated only when the element is
+    a clickable pill, its computed ``background-color`` paints nothing (``alpha == 0``),
+    and the ``background-image`` gradient has no fully-transparent stop (the last test
+    excludes decorative fades, glow halos, and dot-grid textures, which always fade to
+    transparent). It is how a gradient CTA — whose computed ``background-color`` is
+    transparent — still contributes its brand colors: each stop is an equal member of the
+    fill, so a purple→blue button makes both purple and blue candidates. Gradients on
+    card backgrounds are deliberately excluded (decorative flavor that varies page to
+    page); empty for those, and for solid-background and no-gradient elements.
     """
 
     tag: str
@@ -261,6 +296,7 @@ class HarvestedElement(BaseModel):
     border: Color | None
     input_type: str | None = None
     min_corner_radius: float = 0.0
+    bg_gradient_stops: tuple[Color, ...] = ()
     has_box_shadow: bool = False
     has_text: bool = False
     is_iframe: bool

@@ -12,6 +12,7 @@
         "secondary"
       ],
       "populated_usage": [
+        "border",
         "interactive",
         "surface",
         "text"
@@ -21,7 +22,7 @@
           "#ea580c"
         ],
         "neutral_dark": [
-          "#1a1a1a"
+          "#000000"
         ],
         "neutral_light": [
           "#f1f4f9"
@@ -34,6 +35,9 @@
         ]
       },
       "top_usage_colors": {
+        "border": [
+          "#cbd5e1"
+        ],
         "interactive": [
           "#ea580c"
         ],
