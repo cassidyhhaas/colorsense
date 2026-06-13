@@ -247,6 +247,34 @@ def test_tall_pill_is_not_a_badge_but_excluded_from_cards() -> None:
         assert ComponentType.card_bg not in result.component_dist
 
 
+def test_badge_height_gate_is_inclusive_at_the_boundary() -> None:
+    """The ``h <= badge_max_h_px`` gate is inclusive: a pill exactly at the cap is a badge.
+
+    Pins the boundary (cap is 36px): a 36px pill votes ``badge``; one pixel taller does
+    not. Threshold precision is tested here rather than in the browser fixture, where
+    box-model/font rendering makes an exact harvested height fragile.
+    """
+    cap = CONFIG.component_classifier.geometry.thresholds.badge_max_h_px
+    at = _element(
+        tag="span",
+        bg=_color("#10b77f"),
+        has_text=True,
+        min_corner_radius=9999.0,
+        rect=Rect(x=0.0, y=300.0, width=130.0, height=cap),
+    )
+    over = _element(
+        tag="span",
+        bg=_color("#10b77f"),
+        has_text=True,
+        min_corner_radius=9999.0,
+        rect=Rect(x=0.0, y=300.0, width=130.0, height=cap + 1.0),
+    )
+    [at_result] = classify_components([at], CONFIG, VIEWPORT)
+    [over_result] = classify_components([over], CONFIG, VIEWPORT)
+    assert _argmax(at_result.component_dist) is ComponentType.badge
+    assert ComponentType.badge not in over_result.component_dist
+
+
 def test_low_radius_repeated_surfaces_stay_cards() -> None:
     """A size gate is not used: square-cornered repeated surfaces remain cards.
 
