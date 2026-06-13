@@ -13,8 +13,11 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   (`log1p`-damped, normalized to the per-bucket maximum across clusters) instead of the
   normalized `component_mix`. Mix purity carried no cross-cluster magnitude, so a cluster
   evidenced by a single tiny element could outrank clusters with 100x the vote mass
-  (e.g. a lone badge chip winning `secondary` over the actual page surface). Role
-  rankings and `fit_score` values change; no API change.
+  (e.g. a lone badge chip winning `secondary` over the actual page surface). The
+  `secondary` role additionally excludes the primary-anchor cluster, so the dominant page
+  surface no longer wins both roles and the genuine ~30% structural color (hero/header
+  band) surfaces; a single-color page now reports an empty `secondary`. Role rankings and
+  `fit_score` values change; no API change.
 
 ## [0.4.0] - 2026-06-12
 

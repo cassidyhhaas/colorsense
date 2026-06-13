@@ -357,6 +357,18 @@ rewards area and structural-surface evidence (the "card exception"); the neutral
 scores go through a softmax (temperature 0.25), pruning, and renormalization into ranked
 candidates.
 
+**Secondary is scored relative to the primary anchor**: the provisional primary cluster
+is excluded from the secondary candidate list. The dominant page background accrues
+structural votes (cards, headers, and nav painted in the page color) from sheer element
+count, so under raw-mass scoring it carries both the largest area *and* the largest
+structural evidence — it would otherwise win primary and secondary together, burying the
+real ~30% color (a blue hero band, a dark header). Excluding it lets the genuine second
+layer surface. The per-bucket normalization above is still computed over *all* clusters
+including the primary one; renormalizing over the survivors would let a lone tiny chip
+become the bucket maximum and re-inflate to 1.0, recreating the badge-chip failure. A
+one-color page therefore has an empty secondary list — the honest "no second structural
+layer" answer, which `fit_score` (below) then reflects.
+
 `fit_score` then measures how 60/30/10-like the page actually is: take the top
 candidate's area for primary/secondary/accent, normalize the triple to sum to 1, and
 compare against (0.6, 0.3, 0.1):

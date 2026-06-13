@@ -181,12 +181,18 @@ def test_tiny_pure_structural_cluster_does_not_win_secondary() -> None:
 
     A single 133x17px amber badge chip was a zero-area cluster with raw card_bg mass
     ~0.88 but component_mix purity 1.0, which maxed out the old mix-based secondary
-    score and beat the white page surface (area 0.83, raw mass >100). Raw-mass scoring
-    must rank the well-evidenced white surface first.
+    score and beat every well-evidenced surface. Raw-mass scoring (log1p of in-bucket
+    mass, normalized by the per-bucket max across clusters) ranks the chip far down: a
+    distinct light card surface carrying 40+ structural votes wins secondary instead.
+    The dominant page background is the primary anchor and is excluded from secondary
+    (see ``test_dominant_surface_excluded_from_secondary``), so the structural runner-up
+    is the real second layer here.
     """
     clusters = [
-        # The page surface: huge area, large raw mass spread over primary + structural.
-        _cluster("#ffffff", 0.83, {ComponentType.page_bg: 60.0, ComponentType.card_bg: 45.0}),
+        # The page surface: huge area + the largest primary mass -> primary anchor.
+        _cluster("#ffffff", 0.55, {ComponentType.page_bg: 60.0}),
+        # A distinct light card surface: the genuine second structural layer.
+        _cluster("#e2e8f0", 0.30, {ComponentType.card_bg: 40.0}),
         # The badge chip: zero area, tiny raw mass, but 100% structural mix purity.
         _cluster("#f59e0b", 0.0, {ComponentType.card_bg: 0.88}),
         # Body text, so the set is not degenerate.
@@ -194,8 +200,63 @@ def test_tiny_pure_structural_cluster_does_not_win_secondary() -> None:
     ]
     results, _ = assign_roles(clusters)
     secondary = results.mapping[PaletteRole.secondary]
-    assert secondary[0].color.hex != "#f59e0b"
-    assert secondary[0].color.hex == "#ffffff"
+    assert secondary[0].color.hex == "#e2e8f0"
+    pos = {c.color.hex: i for i, c in enumerate(secondary)}
+    # The chip ranks below the well-evidenced surface (or prunes out entirely).
+    assert pos.get("#f59e0b", len(secondary)) > pos["#e2e8f0"]
+
+
+def test_dominant_surface_excluded_from_secondary() -> None:
+    """Regression (disconetwork.com / ds_site): the primary surface cannot also be secondary.
+
+    The dominant page background accrues structural votes (cards/headers/nav/footer all
+    painted in the page color) from sheer element count, so under raw-mass scoring it
+    carries the largest secondary evidence *and* the largest area — it would win both
+    primary and secondary, burying the actual ~30% structural color. The provisional
+    primary cluster is excluded from secondary candidacy, so a distinct hero/header
+    surface (one element, tiny mass, but a real structural band) wins secondary.
+    """
+    clusters = [
+        # The page surface: large area + structural votes from many repeated elements.
+        _cluster(
+            "#ffffff",
+            0.50,
+            {
+                ComponentType.page_bg: 10.0,
+                ComponentType.card_bg: 3.0,
+                ComponentType.header_bg: 1.0,
+                ComponentType.nav_bg: 1.0,
+                ComponentType.footer_bg: 1.0,
+            },
+        ),
+        # A single chromatic hero band: big area, one element, tiny structural mass.
+        _cluster("#2563eb", 0.33, {ComponentType.hero_bg: 1.0}),
+        # A CTA so the set carries an accent-affine color too.
+        _cluster("#e11d48", 0.10, {ComponentType.cta_bg: 1.0}),
+    ]
+    results, _ = assign_roles(clusters)
+    secondary = results.mapping[PaletteRole.secondary]
+    secondary_hexes = [c.color.hex for c in secondary]
+    # The dominant surface is the primary anchor and never appears in secondary...
+    assert _top(results.mapping, PaletteRole.primary).hex == "#ffffff"
+    assert "#ffffff" not in secondary_hexes
+    # ...so the genuine structural band wins it despite far less raw mass.
+    assert secondary[0].color.hex == "#2563eb"
+
+
+def test_single_cluster_yields_empty_secondary() -> None:
+    """A one-color page has no second structural layer: secondary maps to ().
+
+    The lone cluster is the primary anchor and is excluded from secondary candidacy,
+    leaving secondary empty. This must not raise (``_fit_score`` reads ``cands[0]`` only
+    when the list is non-empty) and the other roles still resolve.
+    """
+    clusters = [_cluster("#ffffff", 1.0, {ComponentType.page_bg: 1.0})]
+    results, fit = assign_roles(clusters)
+    assert results.mapping[PaletteRole.secondary] == ()
+    assert results.mapping[PaletteRole.primary][0].color.hex == "#ffffff"
+    assert set(results.mapping) == set(PaletteRole)
+    assert 0.0 <= fit <= 1.0
 
 
 def test_high_mass_diluted_chromatic_beats_low_mass_pure_for_accent() -> None:

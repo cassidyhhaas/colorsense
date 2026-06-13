@@ -22,6 +22,18 @@ Design notes
   element had mix purity 1.0 and outranked clusters with 100x the vote mass (a single
   133x17px badge chip won secondary over the actual white page surface). The ``log1p``
   damping rationale is the usage view's (``palette/usage.py``).
+* **Secondary is defined relative to the primary anchor**: the provisional primary
+  cluster is excluded from secondary candidacy. The dominant page surface accrues
+  structural votes (cards/headers/nav painted in the page color) from sheer element
+  count, so under per-bucket max normalization it would otherwise win *both* primary and
+  secondary on most real pages — burying the actual ~30% structural color. The
+  per-bucket normalization itself stays computed over **all** clusters (including the
+  primary one); renormalizing over the survivors would let a lone tiny chip become the
+  bucket max and re-inflate to 1.0, recreating the mix-purity failure above. A
+  single-cluster page therefore yields an *empty* secondary candidate list — the honest
+  "no second structural layer detected" answer. Primary, accent, and the neutrals keep
+  all clusters as candidates: the primary surface legitimately belongs in
+  neutral_light/dark, and accent's chroma/contrast terms already handle it.
 * The 60/30/10 mental model:
     - **primary**   ~= the dominant neutral surface (~60%) — anchors contrast.
     - **secondary** ~= structural color (~30%) — cards/headers/nav surfaces.
@@ -244,8 +256,10 @@ def assign_roles(clusters: list[ColorCluster]) -> tuple[RoleResults, float]:
     """Assign clusters to palette roles and compute the 60/30/10 ``fit_score``.
 
     Returns ``(RoleResults, fit_score)``. ``RoleResults.mapping`` is populated for all five
-    palette roles (each a probability-descending candidate list). The empty-cluster case
-    returns ``(RoleResults(mapping={}), 0.0)``.
+    palette roles (each a probability-descending candidate list). Secondary is defined
+    *relative to the primary anchor*: the provisional primary cluster never appears among
+    the secondary candidates (see the module Design notes), so a single-cluster page maps
+    secondary to ``()``. The empty-cluster case returns ``(RoleResults(mapping={}), 0.0)``.
     """
     if not clusters:
         return RoleResults(mapping={}), 0.0
@@ -312,9 +326,15 @@ def assign_roles(clusters: list[ColorCluster]) -> tuple[RoleResults, float]:
         ndark_scores.append(nd_score)
 
     # --- Step 4: per-role softmax -> prune -> renormalize -> rank. ---
+    # Secondary candidacy excludes the provisional primary cluster (see Design notes):
+    # the dominant surface would otherwise win both roles on most pages. The exclusion
+    # happens *after* _normalize_comp_assoc, so the secondary bucket max is still taken
+    # over all clusters — survivors keep their absolute evidence scale.
+    sec_feats = [f for i, f in enumerate(feats) if i != primary_idx]
+    sec_scores = [s for i, s in enumerate(secondary_scores) if i != primary_idx]
     mapping: dict[PaletteRole, tuple[PaletteCandidate, ...]] = {
         PaletteRole.primary: tuple(_build_candidates(feats, primary_scores)),
-        PaletteRole.secondary: tuple(_build_candidates(feats, secondary_scores)),
+        PaletteRole.secondary: tuple(_build_candidates(sec_feats, sec_scores)),
         PaletteRole.accent: tuple(_build_candidates(feats, accent_scores)),
         PaletteRole.neutral_light: tuple(_build_candidates(feats, nlight_scores)),
         PaletteRole.neutral_dark: tuple(_build_candidates(feats, ndark_scores)),
