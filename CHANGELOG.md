@@ -9,13 +9,27 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
-- Screenshot palette now masks out **raster photographic content** (prototype): `<img>`,
-  `<video>`, `<canvas>`, `<picture>`, and elements whose computed `background-image`
-  carries a `url(` token are zeroed out of the area-weighted bins, reusing the same
-  keep-mask mechanism as consent-banner masking, so a site's design colors are not drowned
-  by its photography. CSS gradients (a `background-image` with no `url(`) and inline
-  `<svg>` are deliberately **kept** — they are brand/design content. Media-rect collection
-  is capped (`_MAX_MEDIA_RECTS = 256`, largest-area-first) to bound work on hostile pages.
+- **Gradient call-to-action colors are now captured.** A button painted with a CSS gradient
+  (`background-image: linear-gradient(...)`) has a transparent computed `background-color`,
+  so its brand colors used to be invisible to the palette. The harvester now records the
+  gradient's opaque color stops for clickable, pill-shaped CTAs — decorative gradient panels
+  and dividers are left out — and attributes them to the palette. Semi-transparent
+  backgrounds now also count in proportion to their opacity, so a faint tint no longer votes
+  its fully-saturated color at full strength.
+
+- **Element colors are attributed per channel.** The component classifier now turns each
+  element's evidence into a distribution one color channel at a time — text, background, and
+  border — instead of in a single pool, so an element's own colors no longer compete. A
+  filled, clickable button's strong background vote no longer crowds out the evidence for its
+  border or text color, surfacing border and interactive colors that the previous scoring
+  could starve.
+
+- **Photographic content no longer drowns out design colors.** Raster images — `<img>`,
+  `<video>`, `<canvas>`, `<picture>`, and elements with a `url(...)` background image — are
+  masked out of the area-weighted screenshot palette, the same way cookie-consent banners
+  already were, so a product photo's colors don't outweigh a site's actual design palette.
+  CSS gradients and inline `<svg>` are deliberately kept, since they are brand and design
+  content.
 
 ## [0.4.1] - 2026-06-13
 

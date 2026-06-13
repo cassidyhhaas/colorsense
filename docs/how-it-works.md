@@ -43,6 +43,12 @@ Hidden, zero-area, and `aria-hidden` elements are excluded. One subtlety: a bord
 is only reported when the element actually paints a border (`border-top-width > 0`) —
 the computed border color resolves for *every* element regardless of width, so an ungated
 read would report a meaningless (usually black) "border color" on virtually everything.
+A related subtlety covers gradient buttons: a call-to-action painted with a CSS gradient
+(`background-image: linear-gradient(...)`) has a *transparent* computed `background-color`,
+so reading only that would miss its brand colors. When a clickable, pill-shaped element's
+only fill is such a gradient, the script also records the gradient's opaque color stops —
+the button's real brand colors — while leaving decorative gradient panels and non-clickable
+dividers out, so they don't masquerade as buttons.
 
 **Declared design tokens** (`harvest/tokens.py`). The CSSOM is enumerated for CSS custom
 properties (`--*`) across all same-origin stylesheets (cross-origin sheets throw on
@@ -64,8 +70,12 @@ cross-origin; the one thing it cannot see is purely JS-driven hover (a class tog
 (as high-quality JPEG — the image is about to be downscaled and quantized anyway, so
 PNG's lossless fidelity would be thrown away; capture dimensions are capped so a
 pathologically tall or wide page is clipped rather than decoded into gigabytes). The
-detected consent-banner rectangles are zeroed out of a boolean keep-mask, so a cookie
-banner cannot pollute the palette. The image is then downscaled to at most 256 px on its
+detected consent-banner rectangles — together with the bounding boxes of raster
+photographic content (`<img>`, `<video>`, `<canvas>`, and elements with a `url(...)`
+background image) — are zeroed out of a boolean keep-mask, so neither a cookie banner nor a
+product photo can pollute the palette. CSS gradients and inline `<svg>` are deliberately
+left in: a gradient is brand design, and a logo is usually vector. The image is then
+downscaled to at most 256 px on its
 longest edge (nearest-neighbor, which keeps colors crisp rather than blending them) and
 quantized with Pillow's median-cut algorithm into at most 16 palette buckets. Each bucket
 becomes a `ScreenshotBin`: a color plus the fraction of sampled (non-masked) pixels it
@@ -122,28 +132,44 @@ repetition (three or more siblings sharing a tag and class token, each with a
 shadow/border/background, vote `card_bg` — the card detector, which skips pill shapes so
 repeated chips aren't read as tiny cards), and third-party origin signals. Then
 multiplicative suppressors apply (`aria-hidden` and hidden elements are zeroed;
-brand-component votes on third-party widgets are damped to 5%), and finally the surviving
-positive votes go through a softmax at temperature 0.5,
-entries below probability 0.05 are pruned, and the survivors are renormalized.
+brand-component votes on third-party widgets are damped to 5%), and the surviving positive
+votes become the element's probability distribution **one color channel at a time**. An
+element can paint up to three colors — its text, its background, and its border — so the
+votes are first partitioned by the channel each component is measured from: `*_text`
+components and `link` are text-channel votes (a link paints its typography, not its usually
+transparent background), `border` is the border channel, and everything else is a background
+vote. Within each painted channel the votes go through a softmax at temperature 0.5, entries
+below probability 0.05 are pruned, and the survivors are renormalized; the per-channel
+results are then combined, each channel weighted by its share of the element's total vote
+mass. Normalizing per channel keeps an element's own colors from competing with each other:
+a filled, clickable button's strong background (interactive) vote no longer crowds out the
+smaller evidence for its border or text color, so colors a single shared softmax would have
+starved still reach the palette.
 
-Two of those families are worth working through, because their single vote weight was
-calibrated against the softmax explicitly (the YAML keeps a short note next to each
-weight; the full derivation lives here):
+Two of those families are worth working through, because their single vote weight sets how
+large a share of an element's evidence a secondary channel claims (the YAML keeps a short
+note next to each weight; the full derivation lives here):
 
 **Border presence** — any element that genuinely paints a border gets a `border: 2.5`
-vote. With temperature 0.5, a vote `v` contributes `e^(v/0.5)` before normalization:
+vote. Because the border is its own channel, it is never crushed by a strong background vote
+the way it would be in a single shared pool; the 2.5 instead sets how large a share of the
+element's evidence its border color claims, since each channel is weighted by its vote mass:
 
-- A bordered card (`card_bg: 3.0` from its class token) computes
-  `e^6 ≈ 403` vs `e^5 ≈ 148`; the softmax divides each by their sum, so `border` keeps
-  probability `148 / (403 + 148) ≈ 0.27` — comfortably above the 0.05 pruning floor.
-  Same numbers for a bordered text input (`input_bg: 3.0`).
+- A bordered card (`card_bg: 3.0` from its class token) splits its evidence between a
+  background channel carrying 3.0 and a border channel carrying 2.5, so the border keeps
+  about `2.5 / (3.0 + 2.5) ≈ 0.45` of the distribution — comfortably measured. Same split
+  for a bordered text input (`input_bg: 3.0`).
 - A bordered *submit* input accumulates `cta_bg: 7.0` (semantic `input[submit]` 3.5 +
-  clickable 1.5 + the `input[submit|button]` interactivity vote 2.0): `e^14 ≈ 1.2×10⁶`
-  dwarfs `e^5`, so its border share is ~10⁻⁴ and prunes — button-like inputs stay
-  interactive, not borders. A bordered CTA button (`cta_bg ≥ 9`) prunes the same way.
+  clickable 1.5 + the `input[submit|button]` interactivity vote 2.0), so its background
+  (interactive) channel carries 7.0 against the border's 2.5: the interactive evidence
+  dominates at `7.0 / (7.0 + 2.5) ≈ 0.74`, as it should, while the border still keeps a
+  measured `≈ 0.26` instead of vanishing. A bordered CTA button (`cta_bg ≥ 9`) tilts
+  further toward interactive in the same way.
 
-So the single 2.5 weight makes borders on *structural* elements measurable while borders
-on *interactive* elements stay attributed to interactivity. This family exists because of
+So the single 2.5 weight keeps a painted border measurable wherever it appears, while a
+strongly interactive element still keeps the bulk of its evidence on its interactive color
+— the border is attributed in proportion to how much of the element it is, not
+all-or-nothing. This family exists because of
 a real failure: with only the `<input>` rule voting `border`, pages without classified
 inputs measured zero border mass anywhere (github.com's `#d1d9e0` borders were simply
 absent from the result, while never-rendered border *tokens* flooded the category — see
@@ -151,9 +177,10 @@ absent from the result, while never-rendered border *tokens* flooded the categor
 
 **Text presence** — any *non-clickable* element with direct text content gets a
 `page_text: 2.0` vote. A bare `<p>` with no other votes gets `page_text` probability 1.0;
-a text-bearing card (`card_bg: 3.0`) computes `e^6 ≈ 403` vs `e^4 ≈ 55`, so `page_text`
-keeps `55 / (403 + 55) ≈ 0.12` — measured, without displacing `card_bg`. The 2.0 deliberately stays below
-every semantic `*_text` vote (e.g. `body`'s `page_text: 4.0`), so semantic rules dominate
+a text-bearing card splits its evidence between a background channel (`card_bg: 3.0`) and a
+text channel (`page_text: 2.0`), so the text color keeps `2.0 / (3.0 + 2.0) = 0.40` —
+measured, without displacing `card_bg`. The 2.0 deliberately stays below every semantic
+`*_text` vote (e.g. `body`'s `page_text: 4.0`), so semantic rules dominate the text channel
 where they apply. Clickable elements are excluded on purpose: their typography is
 interactive by definition and already routed through the link rules — letting them vote
 `page_text` would leak link colors into the text category. This family also fixed a real
@@ -174,7 +201,12 @@ truth* into `ColorCluster`s:
    color is fully transparent (`alpha == 0` — e.g. the default
    `background-color: transparent`) paints nothing and donates no votes; without that
    gate, every transparent-background element would pile votes onto a phantom black
-   zero-area cluster. Each channel's vote mass is added to the nearest existing entry
+   zero-area cluster. The background channel can carry more than one fill: when a clickable
+   pill's background is a gradient, every harvested stop is attributed, the channel's vote
+   mass split evenly across them (so a two-stop button donates the same total background
+   evidence as a solid one) and each stop's share scaled by its opacity — a faint
+   translucent fill votes its intended color in proportion to how much it actually paints.
+   Each fill's vote mass is added to the nearest existing entry
    within the channel's **join radius** — or, if nothing is close enough, a new entry
    with `area_weight = 0` is created so the semantics aren't lost.
 3. **Cluster.** Entries within ΔE 0.05 of each other are merged transitively
