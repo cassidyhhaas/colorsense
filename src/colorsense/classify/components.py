@@ -366,6 +366,13 @@ def classify_components(
         if element.has_text and not element.clickable:
             _add_votes(accum, cc.text_presence.votes)
 
+        # 4d. Gradient-fill presence: a clickable pill CTA whose fill is a gradient (only
+        # such elements carry ``bg_gradient_stops``; see harvest/dom.py). Votes ``cta_bg``
+        # so the harvested gradient stops receive bg-channel mass rather than being
+        # orphaned by the pill's link vote (see the YAML calibration comment).
+        if element.bg_gradient_stops:
+            _add_votes(accum, cc.gradient_fill_presence.votes)
+
         # 5. Repetition (the card detector).
         if index in repetition_members:
             _add_votes(accum, cc.repetition.votes)

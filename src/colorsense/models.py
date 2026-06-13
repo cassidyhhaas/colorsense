@@ -248,6 +248,17 @@ class HarvestedElement(BaseModel):
     are fully rounded — the intrinsic signal of a pill/chip (stadium) shape, distinct from
     a card (square-ish corners) and from a one-corner-rounded tab. The component classifier
     uses it (with a ``width > height`` test) to detect badge-shaped elements.
+    ``bg_gradient_stops`` (default empty, set by the harvester) carries the opaque color
+    stops of a gradient that fills a **clickable pill (a CTA)** — the only place a
+    gradient reliably tracks the brand palette. It is populated only when the element is
+    a clickable pill, its computed ``background-color`` paints nothing (``alpha == 0``),
+    and the ``background-image`` gradient has no fully-transparent stop (the last test
+    excludes decorative fades, glow halos, and dot-grid textures, which always fade to
+    transparent). It is how a gradient CTA — whose computed ``background-color`` is
+    transparent — still contributes its brand colors: each stop is an equal member of the
+    fill, so a purple→blue button makes both purple and blue candidates. Gradients on
+    card backgrounds are deliberately excluded (decorative flavor that varies page to
+    page); empty for those, and for solid-background and no-gradient elements.
     """
 
     tag: str
@@ -261,6 +272,7 @@ class HarvestedElement(BaseModel):
     border: Color | None
     input_type: str | None = None
     min_corner_radius: float = 0.0
+    bg_gradient_stops: tuple[Color, ...] = ()
     has_box_shadow: bool = False
     has_text: bool = False
     is_iframe: bool

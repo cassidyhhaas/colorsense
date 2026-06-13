@@ -18,7 +18,10 @@ objects:
   whose measured color is **fully transparent** (``alpha == 0``) paints nothing
   and donates no mass — without this gate, every transparent-background element
   (links, paragraphs, wrappers) piles its votes onto a phantom ``#000000``
-  zero-area cluster.
+  zero-area cluster. The bg channel can attribute to more than one color: a gradient CTA
+  (see `_bg_fill_colors`) paints every opaque stop, and the element's bg mass is split
+  evenly across them and scaled by each stop's alpha, so a purple→blue button makes both
+  purple and blue candidates without out-voting a solid one.
 
 Perceptual distance is measured exclusively with
 `colorsense.color.primitives.delta_e` (OKLab ``deltaEOK``), whose units are small;
@@ -41,9 +44,25 @@ from colorsense.models import (
     ColorCluster,
     ComponentType,
     Harvest,
+    HarvestedElement,
 )
 
 __all__ = ["build_inventory"]
+
+
+def _bg_fill_colors(element: HarvestedElement) -> list[Color]:
+    """The color(s) the element's background paints, for bg-channel attribution.
+
+    A solid (opaque) ``background-color`` is the single fill. When it paints nothing
+    (``alpha == 0``) the gradient fill stops take over — a gradient CTA's
+    ``background-color`` is transparent, so its brand colors live only in
+    ``bg_gradient_stops`` (populated for clickable pill CTAs only; see
+    `HarvestedElement`). Returns ``[]`` when the element paints no background at all.
+    """
+    if element.bg is not None and element.bg.alpha > 0.0:
+        return [element.bg]
+    return list(element.bg_gradient_stops)
+
 
 # Maximum OKLab deltaEOK distance at which a classified element's BG channel color is
 # considered "the same painted surface" as an existing entry (typically a screenshot
@@ -165,36 +184,51 @@ def build_inventory(harvest: Harvest, classified: list[ClassifiedElement]) -> li
         for comp, val in ce.component_dist.items():
             sub_dists[_channel_for(comp)][comp] = val
 
-        # Fixed channel order for determinism.
-        for channel, color in (
-            ("bg", ce.element.bg),
-            ("text", ce.element.text),
-            ("border", ce.element.border),
+        # Fixed channel order for determinism. The bg channel can carry more than one
+        # fill color — a gradient CTA paints every opaque stop (see `_bg_fill_colors`) —
+        # so each channel resolves to a list; text/border are always single.
+        for channel, colors in (
+            ("bg", _bg_fill_colors(ce.element)),
+            ("text", [ce.element.text]),
+            ("border", [ce.element.border]),
         ):
             sub_dist = sub_dists[channel]
-            # A fully-transparent channel color (alpha == 0, e.g. the default
+            if not sub_dist:
+                continue
+            # A fully-transparent fill color (alpha == 0, e.g. the default
             # ``background-color: transparent``) paints nothing: attributing its
             # mass would invent a phantom #000000 cluster.
-            if color is None or color.alpha == 0.0 or not sub_dist:
+            fills = [c for c in colors if c is not None and c.alpha > 0.0]
+            if not fills:
                 continue
 
-            best_idx: int | None = None
-            best_dist = _MATCH_BY_CHANNEL[channel]
-            for idx, entry in enumerate(entries):
-                d = delta_e(color, entry.color)
-                if d <= best_dist:
-                    best_dist = d
-                    best_idx = idx
+            # Split the element's channel mass evenly across its fill colors so a
+            # multi-stop gradient is not double-counted (a purple->blue button donates
+            # the same total cta_bg mass as a solid one, half to each stop). On the bg
+            # channel the per-fill share is additionally scaled by the fill's alpha, so a
+            # faint ``bg-primary/10`` tint votes its intended (saturated) hex in
+            # proportion to how much it actually paints; text/border are not alpha-scaled.
+            n = len(fills)
+            for color in fills:
+                weight = (color.alpha if channel == "bg" else 1.0) / n
 
-            if best_idx is None:
-                new_entry = _Entry(color, 0.0)
-                for comp, val in sub_dist.items():
-                    new_entry.component_mix[comp] += val
-                entries.append(new_entry)
-            else:
-                target = entries[best_idx]
-                for comp, val in sub_dist.items():
-                    target.component_mix[comp] += val
+                best_idx: int | None = None
+                best_dist = _MATCH_BY_CHANNEL[channel]
+                for idx, entry in enumerate(entries):
+                    d = delta_e(color, entry.color)
+                    if d <= best_dist:
+                        best_dist = d
+                        best_idx = idx
+
+                if best_idx is None:
+                    new_entry = _Entry(color, 0.0)
+                    for comp, val in sub_dist.items():
+                        new_entry.component_mix[comp] += val * weight
+                    entries.append(new_entry)
+                else:
+                    target = entries[best_idx]
+                    for comp, val in sub_dist.items():
+                        target.component_mix[comp] += val * weight
 
     if not entries:
         return []

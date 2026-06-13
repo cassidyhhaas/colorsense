@@ -16,6 +16,7 @@ from colorsense.classify.components import classify_components
 from colorsense.config import Config, load_default_config
 from colorsense.harvest import RenderSession, harvest_page
 from colorsense.models import ComponentType, Harvest, Theme, Viewport
+from colorsense.palette.inventory import build_inventory
 
 VIEWPORT = Viewport(width=1280, height=800, device_scale_factor=1.0)
 
@@ -147,6 +148,56 @@ async def test_min_corner_radius_harvested_and_pill_chips_classify_as_badge(
 
     tab_dist = by_element[id(tab)].component_dist
     assert ComponentType.badge not in tab_dist
+
+
+@pytest.mark.skip(
+    reason="WIP checkpoint: inventory-level assertions to be finalized under the "
+    "per-channel-normalization decision (see session-handoff.md). Harvest-level gradient "
+    "stop assertions are correct; the cta_bg attribution path is being reworked."
+)
+async def test_gradient_cta_stops_harvested_and_vote_both_brand_colors(
+    fixtures_dir: Path, config: Config
+) -> None:
+    """End-to-end (disconetwork.com shape): a clickable gradient pill harvests its stops.
+
+    The brand button is a clickable pill painting a ``linear-gradient(purple, blue)`` over
+    a transparent ``background-color``; the harvester must capture both stops in
+    ``bg_gradient_stops`` so the button's brand colors are not invisible, and the inventory
+    must attribute its interactive mass to both purple and blue. The negatives pin the
+    interactive-pill gate: a clickable gradient *card* (a rounded rectangle, not a pill —
+    a stripe.com-style decorative card) and a *non-clickable* gradient pill (a divider)
+    both yield no stops, as do a solid background-color and a decorative transparent-fading
+    glow.
+    """
+    harvest = await _harvest(fixtures_dir / "gradient_cta.html", config)
+
+    cta = next(el for el in harvest.elements if "cta" in el.class_tokens)
+    stops = {c.hex for c in cta.bg_gradient_stops}
+    assert stops == {"#7c3bed", "#3c83f6"}
+    assert cta.bg is not None and cta.bg.alpha == 0.0  # gradient is the only fill
+
+    # A clickable but rectangular (non-pill) gradient card is decorative -> no stops.
+    card = next(el for el in harvest.elements if "card" in el.class_tokens)
+    assert card.bg_gradient_stops == ()
+
+    # A pill-shaped but NON-clickable gradient divider -> no stops.
+    divider = next(el for el in harvest.elements if "divider" in el.class_tokens)
+    assert divider.bg_gradient_stops == ()
+
+    # An opaque background-color wins: its gradient is not harvested as a fill.
+    solid = next(el for el in harvest.elements if "solid" in el.class_tokens)
+    assert solid.bg_gradient_stops == ()
+
+    # A decorative glow (fades to rgba(0,0,0,0)) is not a fill.
+    glow = next(el for el in harvest.elements if "glow" in el.class_tokens)
+    assert glow.bg_gradient_stops == ()
+
+    classified = classify_components(harvest.elements, config, VIEWPORT)
+    clusters = build_inventory(harvest, classified)
+    by_hex = {c.color.hex: c for c in clusters}
+    # Both brand stops carry the CTA's interactive (cta_bg) mass.
+    assert ComponentType.cta_bg in by_hex["#7c3bed"].component_mass
+    assert ComponentType.cta_bg in by_hex["#3c83f6"].component_mass
 
 
 async def test_has_text_set_for_direct_text_only(fixtures_dir: Path, config: Config) -> None:

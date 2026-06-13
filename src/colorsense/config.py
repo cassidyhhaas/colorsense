@@ -390,6 +390,7 @@ class ComponentClassifierConfig(BaseModel):
     interactivity: tuple[WhenRule, ...]
     border_presence: PresenceRule
     text_presence: PresenceRule
+    gradient_fill_presence: PresenceRule
     repetition: RepetitionConfig
     third_party: ThirdPartyConfig
     suppressors: dict[str, Suppressor]

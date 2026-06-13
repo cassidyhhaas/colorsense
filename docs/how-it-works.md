@@ -369,8 +369,8 @@ real ~30% color (a blue hero band, a dark header). Excluding it lets the genuine
 layer surface. The per-bucket normalization above is still computed over *all* clusters
 including the primary one; renormalizing over the survivors would let a lone tiny chip
 become the bucket maximum and re-inflate to 1.0, recreating the badge-chip failure. A
-one-color page therefore has an empty secondary list — the honest "no second structural
-layer" answer, which `fit_score` (below) then reflects.
+one-color page therefore has an empty secondary list — there is genuinely no second
+structural layer, which the `fit_score` below then reflects.
 
 `fit_score` then measures how 60/30/10-like the page actually is: take the top
 candidate's area for primary/secondary/accent, normalize the triple to sum to 1, and
@@ -441,7 +441,7 @@ internal A record is exactly the split-horizon shape an attacker would use). The
 predicate's single-flight futures are loop-bound, so each guard instance serves **one
 event loop at a time**: sequential reuse across loops re-binds when idle and keeps the
 verdict cache, while concurrent cross-loop use raises (which the filter seam turns into
-fail-closed aborts). Honest limit, stated in the code too: a URL-string predicate cannot
+fail-closed aborts). One limitation of this is that a URL-string predicate cannot
 fully defeat DNS rebinding — network isolation of the browser environment remains the
 primary control, per `SECURITY.md`.
 

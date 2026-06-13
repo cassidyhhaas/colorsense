@@ -2,7 +2,8 @@
 
 Walks the rendered DOM in-page, capturing for each element its computed ``background-color`` /
 ``color`` / ``border-color`` (parsed to [`Color`][colorsense.Color]), bounding rect, position,
-tag/role/id/class tokens, the input ``type`` attribute (``<input>`` only), and structural flags
+tag/role/id/class tokens, the input ``type`` attribute (``<input>`` only), the opaque stops of
+a gradient that fills it (only for clickable pill CTAs), and structural flags
 (iframe, cross-origin, shadow host, clickable, box shadow, direct text content, vendor match,
 visible, aria-hidden). Hidden, zero-area, or aria-hidden elements are excluded from the returned
 list (their flags are still computed on what is returned).
@@ -31,7 +32,7 @@ from playwright.async_api import Page
 
 from colorsense.color.primitives import parse_css_color
 from colorsense.harvest.render import EVAL_TIMEOUT_S
-from colorsense.models import HarvestedElement, Rect
+from colorsense.models import Color, HarvestedElement, Rect
 
 # Bound on the per-render element payload. Each record below materializes as a pydantic
 # model in the *host* Python process — container limits bound the renderer, not the
@@ -40,6 +41,58 @@ from colorsense.models import HarvestedElement, Rect
 # pages run a few thousand visible elements); over budget, the largest-area elements are
 # kept, since area dominates every downstream signal (screenshot fusion, component votes).
 _MAX_HARVEST_ELEMENTS: int = 10_000
+
+# Bound on the opaque gradient stops kept per element. A real fill gradient has a
+# handful of stops; the cap stops a hostile many-stop gradient on thousands of elements
+# from amplifying the O(n^2) inventory clustering. Far above any genuine gradient.
+_MAX_GRADIENT_STOPS: int = 8
+
+
+def _is_interactive_pill(
+    *, clickable: bool, min_corner_radius: float, width: float, height: float
+) -> bool:
+    """Whether the element is a clickable pill (a CTA), the only place a gradient fill is
+    treated as palette-bearing.
+
+    Only an interactive pill's gradient tracks the brand palette: a site's CTA/pill colors
+    are consistently on-palette, but gradients on *card* backgrounds are decorative flavor
+    that varies page to page (verified across stripe.com pages). ``clickable`` alone is
+    insufficient — decorative gradient cards are often wrapped in links — and pill shape
+    alone is insufficient — non-clickable rounded dividers are pills. Requiring both keeps
+    rounded-full CTAs while rejecting rectangular cards (not pills) and decorative pill
+    dividers (not clickable). The pill test mirrors `classify.components._is_pill`
+    (all four corners fully rounded, wider than tall).
+    """
+    return clickable and height > 0.0 and min_corner_radius >= height / 2.0 and width > height
+
+
+def _gradient_fill_stops(bg: Color | None, raw_colors: Sequence[str]) -> tuple[Color, ...]:
+    """Opaque stops of a gradient that *fills* the element, or ``()``.
+
+    Applied only to elements that pass `_is_interactive_pill` (a CTA). Returns stops only
+    when the gradient is the element's actual background fill: the computed
+    ``background-color`` must paint nothing (``alpha == 0``, so a solid background takes
+    precedence and the gradient is ignored), and the gradient must have **no
+    fully-transparent stop** — decorative fades, glow halos, and dot-grid textures always
+    fade to ``rgba(0, 0, 0, 0)``, so a transparent stop marks the gradient as ornamental
+    rather than a fill. Stops are deduped by hex (a repeated brand color counts once) and
+    capped at `_MAX_GRADIENT_STOPS`.
+    """
+    if bg is not None and bg.alpha > 0.0:
+        return ()
+    stops = [c for c in (parse_css_color(raw) for raw in raw_colors) if c is not None]
+    if not stops or any(stop.alpha == 0.0 for stop in stops):
+        return ()
+    deduped: list[Color] = []
+    seen: set[str] = set()
+    for stop in stops:
+        if stop.hex in seen:
+            continue
+        seen.add(stop.hex)
+        deduped.append(stop)
+        if len(deduped) >= _MAX_GRADIENT_STOPS:
+            break
+    return tuple(deduped)
 
 
 class _RawElement(TypedDict):
@@ -57,6 +110,7 @@ class _RawElement(TypedDict):
     border: str
     input_type: str | None
     min_corner_radius: float
+    bg_image_colors: list[str]
     has_box_shadow: bool
     has_text: bool
     is_iframe: bool
@@ -158,6 +212,20 @@ _COLLECT_DOM_JS: str = r"""
         const borderColor = borderWidth > 0 ? style.borderTopColor : '';
         const hasBoxShadow = style.boxShadow !== 'none';
 
+        // Color stops of a gradient background-image, in source order. Only gradient
+        // layers carry rgb()/rgba() tokens we care about (a url() image has none); the
+        // `gradient` guard skips non-gradient images cheaply. Python applies the fill
+        // gate (background-color transparent + no fully-transparent stop) and the cap —
+        // here we just export the raw computed color tokens (Chromium normalizes every
+        // stop color to rgb()/rgba() form). Capped at 32 to bound the payload against a
+        // pathological many-stop gradient.
+        const bgImage = style.backgroundImage;
+        let bgImageColors = [];
+        if (bgImage && bgImage.includes('gradient')) {
+            const matched = bgImage.match(/rgba?\([^)]*\)/g);
+            if (matched) bgImageColors = matched.slice(0, 32);
+        }
+
         // Smallest of the four computed corner radii in px. A true pill/stadium has
         // ALL FOUR corners fully rounded; the MIN is the radius guaranteed on every
         // corner, so `min >= height/2` means "fully rounded all around" — MAX would
@@ -209,6 +277,7 @@ _COLLECT_DOM_JS: str = r"""
             // no/empty type attribute (the HTML default type is "text").
             input_type: (tag === 'input' && inputType !== '') ? inputType : null,
             min_corner_radius: minCornerRadius,
+            bg_image_colors: bgImageColors,
             has_box_shadow: hasBoxShadow,
             has_text: hasText,
             is_iframe: isIframe,
@@ -263,6 +332,15 @@ async def harvest_elements(
     selectors: list[str] = []
     for raw in raw_elements:
         rect = raw["rect"]
+        bg = parse_css_color(raw["bg"])
+        gradient_stops: tuple[Color, ...] = ()
+        if _is_interactive_pill(
+            clickable=raw["clickable"],
+            min_corner_radius=raw["min_corner_radius"],
+            width=rect["w"],
+            height=rect["h"],
+        ):
+            gradient_stops = _gradient_fill_stops(bg, raw["bg_image_colors"])
         elements.append(
             HarvestedElement(
                 tag=raw["tag"],
@@ -271,11 +349,12 @@ async def harvest_elements(
                 class_tokens=raw["class_tokens"],
                 rect=Rect(x=rect["x"], y=rect["y"], width=rect["w"], height=rect["h"]),
                 position=raw["position"],
-                bg=parse_css_color(raw["bg"]),
+                bg=bg,
                 text=parse_css_color(raw["text"]),
                 border=parse_css_color(raw["border"]),
                 input_type=raw["input_type"],
                 min_corner_radius=raw["min_corner_radius"],
+                bg_gradient_stops=gradient_stops,
                 has_box_shadow=raw["has_box_shadow"],
                 has_text=raw["has_text"],
                 is_iframe=raw["is_iframe"],
