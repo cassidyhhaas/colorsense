@@ -65,10 +65,10 @@ _BUTTONLIKE_INPUT_TYPES = frozenset({"submit", "button", "image", "reset"})
 
 
 def _add_votes(
-    accum: dict[ComponentType, float],
+    vote_totals: dict[ComponentType, float],
     votes: dict[str, float],
 ) -> None:
-    """Add a config vote dict (keyed by component-type strings) into ``accum``.
+    """Add a config vote dict (keyed by component-type strings) into ``vote_totals``.
 
     Keys that are channel sentinels (e.g. ``"ignore"``) or otherwise not valid
     [`ComponentType`][colorsense.ComponentType] members are skipped rather than crashing.
@@ -80,7 +80,7 @@ def _add_votes(
             component = ComponentType(key)
         except ValueError:
             continue
-        accum[component] = accum.get(component, 0.0) + weight
+        vote_totals[component] = vote_totals.get(component, 0.0) + weight
 
 
 def _is_pill(element: HarvestedElement) -> bool:
@@ -254,7 +254,7 @@ def _repetition_member_indices(
 
 
 def _apply_suppressors(
-    accum: dict[ComponentType, float],
+    vote_totals: dict[ComponentType, float],
     element: HarvestedElement,
     config: Config,
 ) -> None:
@@ -270,8 +270,8 @@ def _apply_suppressors(
             elif key == "zero_area_or_hidden":
                 triggered = (not element.visible) or rect.width <= 0.0 or rect.height <= 0.0
             if triggered:
-                for component in accum:
-                    accum[component] *= suppressor.factor
+                for component in vote_totals:
+                    vote_totals[component] *= suppressor.factor
         elif suppressor.applies_to == "brand_components":
             if _is_third_party(element):
                 for raw in config.component_classifier.brand_components:
@@ -279,8 +279,8 @@ def _apply_suppressors(
                         component = ComponentType(raw)
                     except ValueError:
                         continue
-                    if component in accum:
-                        accum[component] *= suppressor.factor
+                    if component in vote_totals:
+                        vote_totals[component] *= suppressor.factor
 
 
 def _softmax_prune_renormalize(
@@ -300,18 +300,24 @@ def _softmax_prune_renormalize(
     # probabilities are shift-invariant, but unshifted exp(vote/T) overflows once a
     # config's vote weights stack high enough relative to its temperature.
     max_vote = max(votes.values())
-    exps = {comp: math.exp((vote - max_vote) / temperature) for comp, vote in votes.items()}
-    total = sum(exps.values())
-    probs = {comp: value / total for comp, value in exps.items()}
+    exp_weights = {
+        component: math.exp((vote - max_vote) / temperature) for component, vote in votes.items()
+    }
+    total = sum(exp_weights.values())
+    probabilities = {component: value / total for component, value in exp_weights.items()}
 
-    survivors = {comp: p for comp, p in probs.items() if p >= min_component_prob}
+    survivors = {
+        component: probability
+        for component, probability in probabilities.items()
+        if probability >= min_component_prob
+    }
     if not survivors:
         # Pruning removed everything: keep the single argmax.
-        argmax = max(probs, key=lambda comp: probs[comp])
+        argmax = max(probabilities, key=lambda component: probabilities[component])
         return {argmax: 1.0}
 
     survivor_total = sum(survivors.values())
-    return {comp: p / survivor_total for comp, p in survivors.items()}
+    return {component: probability / survivor_total for component, probability in survivors.items()}
 
 
 def _recombination_weights(
@@ -331,7 +337,7 @@ def _recombination_weights(
 
 
 def _finalize_distribution(
-    accum: dict[ComponentType, float],
+    vote_totals: dict[ComponentType, float],
     config: Config,
 ) -> dict[ComponentType, float]:
     """Per-channel softmax/prune/renormalize, recombined with channel weights.
@@ -357,27 +363,31 @@ def _finalize_distribution(
     surface / single-channel elements (the large majority) are unchanged; only
     multi-channel elements differ.
     """
-    cc = config.component_classifier
+    classifier_config = config.component_classifier
     # Suppressors have already been applied upstream; they are multiplicative and never
     # produce negatives, so a non-positive vote is just an absent contribution.
-    positive = {comp: vote for comp, vote in accum.items() if vote > 0.0}
+    positive = {component: vote for component, vote in vote_totals.items() if vote > 0.0}
     if not positive:
         return {}
 
     # Partition positive votes by channel (a channel is "painted" iff it has >=1 vote).
     by_channel: dict[str, dict[ComponentType, float]] = {}
-    for comp, vote in positive.items():
-        by_channel.setdefault(channel_for(comp), {})[comp] = vote
+    for component, vote in positive.items():
+        by_channel.setdefault(channel_for(component), {})[component] = vote
 
     weights = _recombination_weights(by_channel)
 
-    final: dict[ComponentType, float] = {}
+    distribution: dict[ComponentType, float] = {}
     for channel, votes in by_channel.items():
-        subdist = _softmax_prune_renormalize(votes, cc.softmax_temperature, cc.min_component_prob)
+        channel_distribution = _softmax_prune_renormalize(
+            votes,
+            classifier_config.softmax_temperature,
+            classifier_config.min_component_prob,
+        )
         channel_weight = weights[channel]
-        for comp, p in subdist.items():
-            final[comp] = channel_weight * p
-    return final
+        for component, probability in channel_distribution.items():
+            distribution[component] = channel_weight * probability
+    return distribution
 
 
 def classify_components(
@@ -393,63 +403,63 @@ def classify_components(
     1280x800 viewport is used so geometry fractions remain computable.
     """
     active_viewport = viewport if viewport is not None else _DEFAULT_VIEWPORT
-    cc = config.component_classifier
-    thresholds = cc.geometry.thresholds
+    classifier_config = config.component_classifier
+    thresholds = classifier_config.geometry.thresholds
 
     repetition_members = _repetition_member_indices(elements, config)
 
     results: list[ClassifiedElement] = []
     for index, element in enumerate(elements):
-        accum: dict[ComponentType, float] = {}
+        vote_totals: dict[ComponentType, float] = {}
 
         # 1. Semantic tags / ARIA roles.
-        for rule in cc.semantic_tags:
+        for rule in classifier_config.semantic_tags:
             if _matches_semantic_tag(rule, element):
-                _add_votes(accum, rule.votes)
+                _add_votes(vote_totals, rule.votes)
 
         # 2. Geometry / position.
-        for geo_rule in cc.geometry.rules:
+        for geo_rule in classifier_config.geometry.rules:
             if _matches_geometry(geo_rule.when, element, thresholds, active_viewport):
-                _add_votes(accum, geo_rule.votes)
+                _add_votes(vote_totals, geo_rule.votes)
 
         # 3. Class / id token substring match.
-        for rule in cc.class_tokens:
+        for rule in classifier_config.class_tokens:
             if _matches_class_token(rule, element):
-                _add_votes(accum, rule.votes)
+                _add_votes(vote_totals, rule.votes)
 
         # 4. Interactivity.
-        for when_rule in cc.interactivity:
+        for when_rule in classifier_config.interactivity:
             if _matches_interactivity(when_rule, element):
-                _add_votes(accum, when_rule.votes)
+                _add_votes(vote_totals, when_rule.votes)
 
         # 4b. Border presence: the harvester width-gates ``border``, so non-None
         # means the element genuinely paints one (see the YAML calibration comment).
         if element.border is not None:
-            _add_votes(accum, cc.border_presence.votes)
+            _add_votes(vote_totals, classifier_config.border_presence.votes)
 
         # 4c. Text presence: direct (non-descendant) text content on a NON-clickable
         # element. Clickable elements are excluded — their typography is interactive
         # by definition and already routed via the link rules (see the YAML comment).
         if element.has_text and not element.clickable:
-            _add_votes(accum, cc.text_presence.votes)
+            _add_votes(vote_totals, classifier_config.text_presence.votes)
 
         # 5. Repetition (the card detector).
         if index in repetition_members:
-            _add_votes(accum, cc.repetition.votes)
+            _add_votes(vote_totals, classifier_config.repetition.votes)
 
         # 6. Origin / third-party.
         if element.is_iframe:
-            _add_votes(accum, cc.third_party.votes_iframe)
+            _add_votes(vote_totals, classifier_config.third_party.votes_iframe)
         if element.cross_origin:
-            _add_votes(accum, cc.third_party.votes_cross_origin)
+            _add_votes(vote_totals, classifier_config.third_party.votes_cross_origin)
         if element.shadow_host:
-            _add_votes(accum, cc.third_party.votes_shadow_host)
+            _add_votes(vote_totals, classifier_config.third_party.votes_shadow_host)
         if element.vendor_match:
-            _add_votes(accum, cc.third_party.votes_vendor_match)
+            _add_votes(vote_totals, classifier_config.third_party.votes_vendor_match)
 
         # Suppressors, then softmax/prune/renormalize.
-        _apply_suppressors(accum, element, config)
-        component_dist = _finalize_distribution(accum, config)
+        _apply_suppressors(vote_totals, element, config)
+        component_dist = _finalize_distribution(vote_totals, config)
 
         results.append(ClassifiedElement(element=element, component_dist=component_dist))
 

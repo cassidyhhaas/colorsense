@@ -165,30 +165,34 @@ def build_inventory(harvest: Harvest, classified: list[ClassifiedElement]) -> li
 
     # STEP 1b: attribute element semantics to the nearest entry (or a new one),
     # routing each component's mass to the channel that actually paints it.
-    for ce in classified:
-        if not ce.component_dist:
+    for classification in classified:
+        if not classification.component_dist:
             continue
 
         # Split the distribution into per-channel sub-distributions.
-        sub_dists: dict[str, dict[ComponentType, float]] = {"bg": {}, "text": {}, "border": {}}
-        for comp, val in ce.component_dist.items():
-            sub_dists[_channel_for(comp)][comp] = val
+        channel_distributions: dict[str, dict[ComponentType, float]] = {
+            "bg": {},
+            "text": {},
+            "border": {},
+        }
+        for component, mass in classification.component_dist.items():
+            channel_distributions[_channel_for(component)][component] = mass
 
         # Fixed channel order for determinism. The bg channel can carry more than one
         # fill color — a gradient CTA paints every opaque stop (see `_bg_fill_colors`) —
         # so each channel resolves to a list; text/border are always single.
         for channel, colors in (
-            ("bg", _bg_fill_colors(ce.element)),
-            ("text", [ce.element.text]),
-            ("border", [ce.element.border]),
+            ("bg", _bg_fill_colors(classification.element)),
+            ("text", [classification.element.text]),
+            ("border", [classification.element.border]),
         ):
-            sub_dist = sub_dists[channel]
-            if not sub_dist:
+            channel_distribution = channel_distributions[channel]
+            if not channel_distribution:
                 continue
             # A fully-transparent fill color (alpha == 0, e.g. the default
             # ``background-color: transparent``) paints nothing: attributing its
             # mass would invent a phantom #000000 cluster.
-            fills = [c for c in colors if c is not None and c.alpha > 0.0]
+            fills = [color for color in colors if color is not None and color.alpha > 0.0]
             if not fills:
                 continue
 
@@ -198,41 +202,41 @@ def build_inventory(harvest: Harvest, classified: list[ClassifiedElement]) -> li
             # channel the per-fill share is additionally scaled by the fill's alpha, so a
             # faint ``bg-primary/10`` tint votes its intended (saturated) hex in
             # proportion to how much it actually paints; text/border are not alpha-scaled.
-            n = len(fills)
+            fill_count = len(fills)
             for color in fills:
-                weight = (color.alpha if channel == "bg" else 1.0) / n
+                weight = (color.alpha if channel == "bg" else 1.0) / fill_count
 
-                best_idx: int | None = None
-                best_dist = _MATCH_BY_CHANNEL[channel]
+                nearest_index: int | None = None
+                nearest_distance = _MATCH_BY_CHANNEL[channel]
                 for idx, entry in enumerate(entries):
-                    d = delta_e(color, entry.color)
-                    if d <= best_dist:
-                        best_dist = d
-                        best_idx = idx
+                    distance = delta_e(color, entry.color)
+                    if distance <= nearest_distance:
+                        nearest_distance = distance
+                        nearest_index = idx
 
-                if best_idx is None:
+                if nearest_index is None:
                     new_entry = _Entry(color, 0.0)
-                    for comp, val in sub_dist.items():
-                        new_entry.component_mix[comp] += val * weight
+                    for component, mass in channel_distribution.items():
+                        new_entry.component_mix[component] += mass * weight
                     entries.append(new_entry)
                 else:
-                    target = entries[best_idx]
-                    for comp, val in sub_dist.items():
-                        target.component_mix[comp] += val * weight
+                    target = entries[nearest_index]
+                    for component, mass in channel_distribution.items():
+                        target.component_mix[component] += mass * weight
 
     if not entries:
         return []
 
     # STEP 2: union-find clustering under DELTA_E_CLUSTER.
-    n = len(entries)
-    parent = list(range(n))
-    for i in range(n):
-        for j in range(i + 1, n):
+    entry_count = len(entries)
+    parent = list(range(entry_count))
+    for i in range(entry_count):
+        for j in range(i + 1, entry_count):
             if delta_e(entries[i].color, entries[j].color) <= DELTA_E_CLUSTER:
                 _union(parent, i, j)
 
     groups: dict[int, list[int]] = defaultdict(list)
-    for i in range(n):
+    for i in range(entry_count):
         groups[_find(parent, i)].append(i)
 
     clusters: list[ColorCluster] = []
@@ -240,28 +244,28 @@ def build_inventory(harvest: Harvest, classified: list[ClassifiedElement]) -> li
         group = [entries[i] for i in members]
 
         # Representative: largest area weight, ties (and all-zero) broken by smallest hex.
-        rep = min(group, key=lambda e: (-e.area_weight, e.color.hex))
-        total_area = sum(e.area_weight for e in group)
+        representative = min(group, key=lambda entry: (-entry.area_weight, entry.color.hex))
+        total_area = sum(entry.area_weight for entry in group)
 
-        summed: dict[ComponentType, float] = defaultdict(float)
-        for e in group:
-            for comp, val in e.component_mix.items():
-                summed[comp] += val
+        summed_mass: dict[ComponentType, float] = defaultdict(float)
+        for entry in group:
+            for component, mass in entry.component_mix.items():
+                summed_mass[component] += mass
 
         mix: dict[ComponentType, float] = {}
-        total = sum(summed.values())
+        total = sum(summed_mass.values())
         if total > 0.0:
-            mix = {comp: val / total for comp, val in summed.items()}
+            mix = {component: mass / total for component, mass in summed_mass.items()}
 
         clusters.append(
             ColorCluster(
-                color=rep.color,
+                color=representative.color,
                 area_weight=total_area,
                 member_count=len(group),
                 component_mix=mix,
-                component_mass=dict(summed),
+                component_mass=dict(summed_mass),
             )
         )
 
-    clusters.sort(key=lambda c: (-c.area_weight, c.color.hex))
+    clusters.sort(key=lambda cluster: (-cluster.area_weight, cluster.color.hex))
     return clusters

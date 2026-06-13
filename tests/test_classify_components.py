@@ -835,10 +835,10 @@ def test_finalize_distribution_does_not_overflow_on_large_votes() -> None:
     Unshifted exp(vote/T) overflows around vote/T > 709; probabilities are
     mathematically shift-invariant, so the winner and its share are unchanged.
     """
-    accum = {ComponentType.cta_bg: 5_000.0, ComponentType.link: 4_999.0}
-    probs = _finalize_distribution(accum, CONFIG)
-    assert math.isclose(sum(probs.values()), 1.0, rel_tol=1e-9)
-    assert probs[ComponentType.cta_bg] > probs.get(ComponentType.link, 0.0)
+    vote_totals = {ComponentType.cta_bg: 5_000.0, ComponentType.link: 4_999.0}
+    probabilities = _finalize_distribution(vote_totals, CONFIG)
+    assert math.isclose(sum(probabilities.values()), 1.0, rel_tol=1e-9)
+    assert probabilities[ComponentType.cta_bg] > probabilities.get(ComponentType.link, 0.0)
 
 
 # ---------------------------------------------------------------------------
@@ -891,14 +891,14 @@ def test_single_channel_element_is_byte_identical_to_global_softmax() -> None:
 
     # A multi-vote single-channel element (all bg): a bordered-less ``.card`` with text-
     # presence excluded, so card_bg + page_text? page_text is text-channel, so use a card
-    # with several bg-channel votes only — a repetition-free card vs a hand-rolled accum.
-    accum = {
+    # with several bg-channel votes only — a repetition-free card vs hand-rolled vote totals.
+    vote_totals = {
         ComponentType.card_bg: 3.0,
         ComponentType.hero_bg: 1.5,
         ComponentType.page_bg: 0.5,
     }
-    assert all(channel_for(c) == "bg" for c in accum)
-    assert _finalize_distribution(accum, CONFIG) == _single_pool_softmax(accum)
+    assert all(channel_for(c) == "bg" for c in vote_totals)
+    assert _finalize_distribution(vote_totals, CONFIG) == _single_pool_softmax(vote_totals)
 
 
 def test_multichannel_element_paints_both_channels_unstarved() -> None:
