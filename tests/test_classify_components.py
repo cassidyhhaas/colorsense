@@ -10,6 +10,7 @@ from colorsense.classify.components import (
     _finalize_distribution,
     _matches_interactivity,
     _matches_semantic_tag,
+    _softmax_prune_renormalize,
     classify_components,
 )
 from colorsense.config import VoteRule, WhenRule, load_default_config
@@ -19,6 +20,7 @@ from colorsense.models import (
     HarvestedElement,
     Rect,
     Viewport,
+    channel_for,
 )
 
 CONFIG = load_default_config()
@@ -536,11 +538,13 @@ def test_role_banner_is_header_bg() -> None:
 
 
 def test_input_submit_semantic_rule() -> None:
-    """An <input type=submit> is cta_bg-dominant.
+    """An <input type=submit> is cta_bg-dominant, not an input-background source.
 
-    cta_bg collects input[submit] 3.5 + clickable 1.5 + input[submit|button] 2.0 = 7.0,
-    crushing the bare-input input_bg 3.0 below the prune floor — a submit button is a
-    CTA, not an input-background source.
+    cta_bg collects input[submit] 3.5 + clickable 1.5 + input[submit|button] 2.0 = 7.0
+    in the bg channel, crushing the bare-input input_bg 3.0 below the prune floor — a
+    submit button is a CTA. The generic clickable rule also votes ``link`` 1.0, which is
+    alone in the text channel and so survives per-channel normalization; cta_bg owns the
+    far heavier bg channel and stays the overall argmax.
     """
     submit = _element(
         tag="input",
@@ -549,7 +553,8 @@ def test_input_submit_semantic_rule() -> None:
         rect=Rect(x=100.0, y=300.0, width=400.0, height=60.0),
     )
     [result] = classify_components([submit], CONFIG, VIEWPORT)
-    assert result.component_dist == {ComponentType.cta_bg: 1.0}
+    assert _argmax(result.component_dist) is ComponentType.cta_bg
+    assert ComponentType.input_bg not in result.component_dist
 
 
 @pytest.mark.parametrize("input_type", ["text", "search", "email", "checkbox", None])
@@ -572,9 +577,11 @@ def test_non_button_input_gets_no_cta_votes(input_type: str | None) -> None:
 def test_clickable_text_input_gets_no_input_submit_button_vote() -> None:
     """A cursor:pointer text input must not pick up the input[submit|button] vote.
 
-    The generic clickable votes (cta_bg 1.5, link 1.0) still apply but are crushed
-    by input_bg 3.0 and pruned; with the spurious semantic 3.5 + interactivity 2.0
-    votes restored, cta_bg would dominate instead.
+    The generic clickable votes (cta_bg 1.5, link 1.0) still apply: cta_bg is crushed by
+    input_bg 3.0 in the bg channel and pruned (so input_bg stays the bg argmax), while the
+    lone text-channel ``link`` vote survives per-channel normalization. With the spurious
+    semantic 3.5 + interactivity 2.0 cta_bg votes restored, cta_bg would dominate the bg
+    channel instead — so the guard is that ``cta_bg`` is absent and ``input_bg`` dominant.
     """
     # Rect kept above small_area so the small-clickable geometry rule stays out of frame.
     box = _element(
@@ -584,7 +591,7 @@ def test_clickable_text_input_gets_no_input_submit_button_vote() -> None:
         rect=Rect(x=100.0, y=300.0, width=400.0, height=60.0),
     )
     [result] = classify_components([box], CONFIG, VIEWPORT)
-    assert result.component_dist == {ComponentType.input_bg: 1.0}
+    assert _argmax(result.component_dist) is ComponentType.input_bg
     assert ComponentType.cta_bg not in result.component_dist
 
 
@@ -676,24 +683,28 @@ def test_class_token_rules_match_element_id() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_finalize_distribution_prune_fallback_keeps_single_argmax() -> None:
-    """When pruning removes every component, the single argmax survives at 1.0.
+def test_softmax_prune_fallback_keeps_single_argmax() -> None:
+    """When pruning removes every component in a pool, its single argmax survives at 1.0.
 
-    Tested directly: engineering 21 sub-threshold softmax probabilities through
-    the public rule set is impractical. Equal votes on all components plus a
-    nudge on cta_bg put every probability below min_component_prob (verified as
-    a precondition so a config change cannot make this vacuous).
+    Exercises the within-channel ``_softmax_prune_renormalize`` fallback directly:
+    engineering sub-threshold softmax probabilities through the public rule set is
+    impractical, and the fallback only fires when *every* probability in a pool drops
+    below ``min_component_prob`` — which needs many near-equal entries, more than any one
+    channel partition holds. Equal votes on all components plus a nudge on cta_bg put every
+    probability below the threshold (verified as a precondition so a config change cannot
+    make this vacuous).
     """
     cc = CONFIG.component_classifier
-    accum = dict.fromkeys(ComponentType, 1.0)
-    accum[ComponentType.cta_bg] = 1.02
+    votes = dict.fromkeys(ComponentType, 1.0)
+    votes[ComponentType.cta_bg] = 1.02
 
     # Precondition: the raw softmax leaves everything below the prune threshold.
-    exps = {comp: math.exp(vote / cc.softmax_temperature) for comp, vote in accum.items()}
+    exps = {comp: math.exp(vote / cc.softmax_temperature) for comp, vote in votes.items()}
     total = sum(exps.values())
     assert max(exps.values()) / total < cc.min_component_prob
 
-    assert _finalize_distribution(accum, CONFIG) == {ComponentType.cta_bg: 1.0}
+    result = _softmax_prune_renormalize(votes, cc.softmax_temperature, cc.min_component_prob)
+    assert result == {ComponentType.cta_bg: 1.0}
 
 
 # ---------------------------------------------------------------------------
@@ -733,19 +744,26 @@ def test_bordered_text_input_keeps_border_component() -> None:
 
 
 def test_bordered_submit_input_stays_cta_dominated() -> None:
-    """A bordered submit input keeps cta_bg dominant; its border mass prunes
-    (YAML calibration: cta_bg 7.0 crushes the 2.5 border vote post-softmax)."""
+    """A bordered submit input stays cta_bg-dominant; its border survives its OWN channel.
+
+    Under per-channel normalization cta_bg (bg channel) and border (border channel) no
+    longer compete: border is alone in the border partition and normalizes to 1.0 there,
+    surviving recombination. cta_bg still dominates the overall distribution because the
+    bg channel carries the larger raw vote mass (variant A) / equal share (variant B).
+    """
     submit = _element(tag="input", input_type="submit", clickable=True, border=_color("#d1d9e0"))
     [result] = classify_components([submit], CONFIG, VIEWPORT)
     assert _argmax(result.component_dist) is ComponentType.cta_bg
-    assert ComponentType.border not in result.component_dist
+    assert result.component_dist.get(ComponentType.border, 0.0) > 0.05
 
 
 def test_bordered_cta_stays_cta_dominated() -> None:
-    """A bordered primary button keeps cta_bg dominant; its border mass prunes.
+    """A bordered primary button stays cta_bg-dominant; its border survives its OWN channel.
 
-    Guard on the family interaction: border_presence must not turn CTAs into
-    border sources (cta votes ~>= 9 crush the 2.5 border vote post-softmax).
+    Per-channel normalization routes border into its own partition, so border_presence
+    no longer competes with the bg-channel cta votes: border normalizes to 1.0 within the
+    border channel and survives, while cta_bg remains the overall argmax (it owns the
+    heavier bg channel).
     """
     cta = _element(
         tag="button",
@@ -755,7 +773,7 @@ def test_bordered_cta_stays_cta_dominated() -> None:
     )
     [result] = classify_components([cta], CONFIG, VIEWPORT)
     assert _argmax(result.component_dist) is ComponentType.cta_bg
-    assert ComponentType.border not in result.component_dist
+    assert result.component_dist.get(ComponentType.border, 0.0) > 0.05
 
 
 def test_repeated_transparent_bg_text_spans_are_not_repetition_cards() -> None:
@@ -821,3 +839,122 @@ def test_finalize_distribution_does_not_overflow_on_large_votes() -> None:
     probs = _finalize_distribution(accum, CONFIG)
     assert math.isclose(sum(probs.values()), 1.0, rel_tol=1e-9)
     assert probs[ComponentType.cta_bg] > probs.get(ComponentType.link, 0.0)
+
+
+# ---------------------------------------------------------------------------
+# Per-channel normalization: independent softmax/prune/renorm per color channel,
+# recombined with channel weights. Single-channel elements are byte-identical to
+# the former global softmax; only multi-channel elements change.
+# ---------------------------------------------------------------------------
+
+
+def _single_pool_softmax(
+    votes: dict[ComponentType, float],
+) -> dict[ComponentType, float]:
+    """Reference single-pool softmax/prune/renorm — the FORMER global computation.
+
+    Computed independently of the implementation so the invariance test below is a
+    genuine cross-check, not a tautology against the code under test.
+    """
+    cc = CONFIG.component_classifier
+    positive = {comp: v for comp, v in votes.items() if v > 0.0}
+    max_vote = max(positive.values())
+    exps = {c: math.exp((v - max_vote) / cc.softmax_temperature) for c, v in positive.items()}
+    total = sum(exps.values())
+    probs = {c: e / total for c, e in exps.items()}
+    survivors = {c: p for c, p in probs.items() if p >= cc.min_component_prob}
+    if not survivors:
+        return {max(probs, key=lambda c: probs[c]): 1.0}
+    sub_total = sum(survivors.values())
+    return {c: p / sub_total for c, p in survivors.items()}
+
+
+def test_single_channel_element_is_byte_identical_to_global_softmax() -> None:
+    """When every positive vote falls in ONE channel, per-channel == the old global softmax.
+
+    The invariant the whole design rests on: single-channel elements (the large majority —
+    plain surfaces, plain text) must be UNCHANGED. Here a plain ``<header>`` (only
+    bg-channel votes) and a plain text ``<p>`` (only the text-channel page_text vote) are
+    each compared against an independently-computed single-pool softmax of their raw votes.
+    """
+    # A plain header: geometry + semantic votes are all bg-channel components.
+    header = _element(tag="header", rect=Rect(x=0.0, y=0.0, width=1280.0, height=80.0))
+    [header_res] = classify_components([header], CONFIG, VIEWPORT)
+    assert all(channel_for(c) == "bg" for c in header_res.component_dist)
+    assert header_res.component_dist == {ComponentType.header_bg: 1.0}
+
+    # A plain text paragraph: a lone text-channel page_text vote.
+    para = _element(tag="p", has_text=True)
+    [para_res] = classify_components([para], CONFIG, VIEWPORT)
+    assert all(channel_for(c) == "text" for c in para_res.component_dist)
+    assert para_res.component_dist == {ComponentType.page_text: 1.0}
+
+    # A multi-vote single-channel element (all bg): a bordered-less ``.card`` with text-
+    # presence excluded, so card_bg + page_text? page_text is text-channel, so use a card
+    # with several bg-channel votes only — a repetition-free card vs a hand-rolled accum.
+    accum = {
+        ComponentType.card_bg: 3.0,
+        ComponentType.hero_bg: 1.5,
+        ComponentType.page_bg: 0.5,
+    }
+    assert all(channel_for(c) == "bg" for c in accum)
+    assert _finalize_distribution(accum, CONFIG) == _single_pool_softmax(accum)
+
+
+def test_multichannel_element_paints_both_channels_unstarved() -> None:
+    """A bordered ``.card`` with direct text feeds BOTH bg and text channels non-trivially.
+
+    Under the former global softmax the bg-channel card_bg vote and the text-channel
+    page_text vote competed; per-channel they each normalize within their own partition,
+    so the text channel is no longer starved. Both channels receive non-trivial mass.
+    """
+    card = _element(tag="div", class_tokens=["card"], border=_color("#d1d9e0"), has_text=True)
+    [result] = classify_components([card], CONFIG, VIEWPORT)
+    dist = result.component_dist
+    bg_mass = sum(v for c, v in dist.items() if channel_for(c) == "bg")
+    text_mass = sum(v for c, v in dist.items() if channel_for(c) == "text")
+    border_mass = sum(v for c, v in dist.items() if channel_for(c) == "border")
+    assert bg_mass > 0.1
+    assert text_mass > 0.1
+    assert border_mass > 0.1
+    assert math.isclose(bg_mass + text_mass + border_mass, 1.0, rel_tol=1e-9)
+
+
+@pytest.mark.parametrize("variant", ["A", "B"])
+def test_multichannel_distribution_sums_to_one_under_both_variants(
+    variant: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A multi-channel element's distribution sums to ~1.0 under both recombination variants."""
+    monkeypatch.setenv("CS_RECOMBINE", variant)
+    # A bordered submit input spans all three channels: cta_bg/link (bg/text) + border.
+    submit = _element(tag="input", input_type="submit", clickable=True, border=_color("#d1d9e0"))
+    [result] = classify_components([submit], CONFIG, VIEWPORT)
+    channels = {channel_for(c) for c in result.component_dist}
+    assert len(channels) >= 2  # genuinely multi-channel
+    assert math.isclose(sum(result.component_dist.values()), 1.0, rel_tol=1e-9)
+
+
+def test_gradient_pill_attributes_bg_channel_without_the_removed_hack() -> None:
+    """A gradient CTA pill attributes cta_bg (bg channel) with NO gradient_fill_presence hack.
+
+    The removed hack force-fed ``cta_bg: 5.5`` to beat the global softmax. Per-channel, the
+    pill's lone bg-channel vote (``cta_bg: 1.5`` from the clickable rule) is alone in the bg
+    partition and normalizes to 1.0 there, so the gradient fill attributes at full
+    bg-channel strength purely from the channel weight.
+    """
+    transparent = Color(hex="#000000", lightness=0.0, chroma=0.0, hue=0.0, alpha=0.0)
+    pill = _element(
+        tag="a",
+        class_tokens=["rounded-full"],
+        bg=transparent,
+        clickable=True,
+        has_text=True,
+        min_corner_radius=9999.0,
+        rect=Rect(x=100.0, y=100.0, width=160.0, height=32.0),
+        bg_gradient_stops=(_color("#7c3bed"),),
+    )
+    [result] = classify_components([pill], CONFIG, VIEWPORT)
+    # Interactive label still dominant, but the bg-channel cta_bg now carries real mass.
+    assert _argmax(result.component_dist) is ComponentType.link
+    assert result.component_dist.get(ComponentType.cta_bg, 0.0) > 0.05
+    assert math.isclose(sum(result.component_dist.values()), 1.0, rel_tol=1e-9)

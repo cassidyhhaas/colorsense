@@ -348,19 +348,6 @@ component_classifier:
   text_presence:
     votes: {page_text: 2.0}
 
-  # --- Feature family 4d: gradient-fill presence. -----------------------------
-  # Applied to any element with harvested `bg_gradient_stops` — populated ONLY for a
-  # clickable pill (a CTA) whose fill is a gradient over a transparent background-color
-  # (see harvest/dom.py). Such a pill is a filled button: its brand color lives in the
-  # gradient, not a solid `background-color`. Votes `cta_bg` (a bg-channel component) so
-  # the harvested stops actually receive mass — without it the pill's `link` vote (an
-  # `<a>` votes link 4.5, +clickable, +small-clickable -> up to ~7.0) wins the softmax
-  # and routes everything to the white TEXT channel, orphaning the gradient. The 5.5 is
-  # calibrated to roughly tie that link stack so a gradient pill is read as both a filled
-  # CTA (the gradient) and an interactive text element (its label) — both are real.
-  gradient_fill_presence:
-    votes: {cta_bg: 5.5}
-
   # --- Feature family 5: repetition (the card detector). ---------------------
   # Pill/chip-shaped elements are excluded from this detector (a pill is never a card),
   # so repeated status pills / category chips don't satisfy the card heuristic and flood

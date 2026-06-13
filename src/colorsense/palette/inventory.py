@@ -14,7 +14,7 @@ objects:
   measured color: ``*_text`` components and ``link`` route to ``element.text``
   (a link paints its typography), `border`
   to ``element.border``, and everything else to ``element.bg``. This channel
-  routing is a fixed code-level convention (see `_channel_for`). A channel
+  routing is a fixed code-level convention (the shared `models.channel_for`). A channel
   whose measured color is **fully transparent** (``alpha == 0``) paints nothing
   and donates no mass — without this gate, every transparent-background element
   (links, paragraphs, wrappers) piles its votes onto a phantom ``#000000``
@@ -45,6 +45,7 @@ from colorsense.models import (
     ComponentType,
     Harvest,
     HarvestedElement,
+    channel_for,
 )
 
 __all__ = ["build_inventory"]
@@ -91,21 +92,10 @@ _MATCH_BY_CHANNEL: dict[str, float] = {
 }
 
 
-def _channel_for(component: ComponentType) -> str:
-    """Return the color channel a component's vote mass routes to.
-
-    The routing convention is fixed in code: components whose value ends with
-    ``_text`` — plus ``link``, whose painted color is its typography color, not
-    its (usually transparent) background — are painted by the element's
-    ``color`` (its ``text`` channel), `border`
-    by its ``border-color``, and everything else (including ``badge``,
-    ``third_party`` and ``button_secondary``) by its ``background-color``.
-    """
-    if component.value.endswith("_text") or component is ComponentType.link:
-        return "text"
-    if component is ComponentType.border:
-        return "border"
-    return "bg"
+# Channel routing is the shared `models.channel_for` (the single source of truth, used
+# identically by the component classifier's per-channel normalization). Aliased here for
+# the local call sites; the convention itself lives in `models.py`.
+_channel_for = channel_for
 
 
 class _Entry:

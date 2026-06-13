@@ -15,8 +15,13 @@ Scoring pipeline (per element):
 2. Apply multiplicative suppressors (``aria_hidden`` / hidden-or-zero-area zero
    everything; ``third_party_present`` damps the configured brand components on
    third-party widgets).
-3. Softmax the surviving positive votes with ``softmax_temperature``, prune
-   components below ``min_component_prob``, and renormalize the survivors.
+3. Partition the surviving positive votes by color channel
+   (``models.channel_for``) and, INDEPENDENTLY within each painted channel,
+   softmax with ``softmax_temperature``, prune components below
+   ``min_component_prob``, and renormalize the survivors. Recombine the
+   per-channel sub-distributions with channel weights summing to 1.0 so the
+   element distribution still sums to ~1.0. Single-channel elements are
+   byte-identical to a global softmax (see `_finalize_distribution`).
 
 Repetition is approximated at list level: this layer has no real DOM tree, so
 "structurally similar siblings" are detected as elements sharing the same tag
@@ -28,6 +33,7 @@ repetition votes. (Golden case: 4 ``.card`` ``<div>`` siblings -> ``card_bg``.)
 from __future__ import annotations
 
 import math
+import os
 
 from colorsense.config import (
     Config,
@@ -40,6 +46,7 @@ from colorsense.models import (
     ComponentType,
     HarvestedElement,
     Viewport,
+    channel_for,
 )
 
 __all__ = ["classify_components"]
@@ -277,33 +284,28 @@ def _apply_suppressors(
                         accum[component] *= suppressor.factor
 
 
-def _finalize_distribution(
-    accum: dict[ComponentType, float],
-    config: Config,
+def _softmax_prune_renormalize(
+    votes: dict[ComponentType, float],
+    temperature: float,
+    min_component_prob: float,
 ) -> dict[ComponentType, float]:
-    """Softmax positive votes, prune below threshold, and renormalize survivors.
+    """Softmax a pool of positive votes, prune below threshold, renormalize survivors.
 
     The prune/renormalize/argmax-fallback shape mirrors ``palette/_pruning.py``'s
     `prune_distribution`, but deliberately stays local: this ranks ``ComponentType``
     keys, not colors, so the palette helper's hex tie-break convention has no analogue
-    here (and ``classify/`` does not depend on ``palette/``). The argmax fallback is
-    deterministic regardless — ``accum`` is built in config-rule order.
+    here. The argmax fallback is deterministic regardless — ``votes`` preserves
+    config-rule insertion order. ``votes`` must be non-empty and all-positive.
     """
-    cc = config.component_classifier
-    positive = {comp: vote for comp, vote in accum.items() if vote > 0.0}
-    if not positive:
-        return {}
-
     # Max-shifted (matching palette/roles.py's _softmax_weights): mathematically the
     # probabilities are shift-invariant, but unshifted exp(vote/T) overflows once a
     # config's vote weights stack high enough relative to its temperature.
-    temperature = cc.softmax_temperature
-    max_vote = max(positive.values())
-    exps = {comp: math.exp((vote - max_vote) / temperature) for comp, vote in positive.items()}
+    max_vote = max(votes.values())
+    exps = {comp: math.exp((vote - max_vote) / temperature) for comp, vote in votes.items()}
     total = sum(exps.values())
     probs = {comp: value / total for comp, value in exps.items()}
 
-    survivors = {comp: p for comp, p in probs.items() if p >= cc.min_component_prob}
+    survivors = {comp: p for comp, p in probs.items() if p >= min_component_prob}
     if not survivors:
         # Pruning removed everything: keep the single argmax.
         argmax = max(probs, key=lambda comp: probs[comp])
@@ -311,6 +313,84 @@ def _finalize_distribution(
 
     survivor_total = sum(survivors.values())
     return {comp: p / survivor_total for comp, p in survivors.items()}
+
+
+def _recombination_weights(
+    by_channel: dict[str, dict[ComponentType, float]],
+) -> dict[str, float]:
+    """Channel weights (summing to 1.0 across painted channels) for recombination.
+
+    TEMPORARY PROTOTYPE SCAFFOLD — REMOVE once the A/B variant is chosen.
+    Selected by the ``CS_RECOMBINE`` env var (read at call time), defaulting to
+    variant ``"A"`` when unset/unrecognized. Precedent: the ``CS_NO_ALPHA_WEIGHT``
+    eval toggle in the repo's eval rigs. This is an evaluation knob only — there is
+    deliberately no config/YAML field for it.
+
+    * Variant A — vote-mass-share: ``w[channel] = (raw positive votes in channel) /
+      (all raw positive votes)``. Conservative; the channel that accumulated more/
+      stronger raw votes dominates.
+    * Variant B — equal-per-painted-channel: ``w[channel] = 1 / (painted channels)``.
+
+    With a single painted channel both variants return ``{channel: 1.0}``.
+    """
+    variant = os.environ.get("CS_RECOMBINE", "A")
+    if variant == "B":
+        weight = 1.0 / len(by_channel)
+        return {channel: weight for channel in by_channel}
+    # Variant A (default): share of raw positive vote mass.
+    channel_mass = {channel: sum(votes.values()) for channel, votes in by_channel.items()}
+    total_mass = sum(channel_mass.values())
+    return {channel: mass / total_mass for channel, mass in channel_mass.items()}
+
+
+def _finalize_distribution(
+    accum: dict[ComponentType, float],
+    config: Config,
+) -> dict[ComponentType, float]:
+    """Per-channel softmax/prune/renormalize, recombined with channel weights.
+
+    The positive votes are partitioned by color channel (``models.channel_for``, the
+    single source of truth shared with ``palette/inventory.py``; ``classify/`` does not
+    import from ``palette/``). Each painted channel — one with >=1 positive vote — gets
+    its OWN softmax/prune/renormalize sub-distribution summing to 1.0, and the
+    sub-distributions are recombined with channel weights summing to 1.0, so the element
+    distribution still sums to ~1.0.
+
+    The point of per-channel normalization: an element's text-channel and bg-channel votes
+    no longer compete in one global softmax. A filled clickable ``<a>`` (a gradient CTA
+    pill) carries a large ``link`` (text-channel) vote and a small ``cta_bg`` (bg-channel)
+    vote; globally the softmax starved the bg vote, so the pill's fill got ~no attribution.
+    Per-channel, the lone ``cta_bg`` normalizes to 1.0 within the bg partition and the fill
+    attributes at full bg-channel strength.
+
+    INVARIANT — single-channel elements are byte-identical to the former global softmax:
+    when every positive vote falls in ONE channel, ``by_channel`` has one entry, its
+    recombination weight is 1.0 under both variants, and the within-channel
+    softmax/prune/renorm is exactly the old global computation. So plain text / plain
+    surface / single-channel elements (the large majority) are unchanged; only
+    multi-channel elements differ.
+    """
+    cc = config.component_classifier
+    # Suppressors have already been applied upstream; they are multiplicative and never
+    # produce negatives, so a non-positive vote is just an absent contribution.
+    positive = {comp: vote for comp, vote in accum.items() if vote > 0.0}
+    if not positive:
+        return {}
+
+    # Partition positive votes by channel (a channel is "painted" iff it has >=1 vote).
+    by_channel: dict[str, dict[ComponentType, float]] = {}
+    for comp, vote in positive.items():
+        by_channel.setdefault(channel_for(comp), {})[comp] = vote
+
+    weights = _recombination_weights(by_channel)
+
+    final: dict[ComponentType, float] = {}
+    for channel, votes in by_channel.items():
+        subdist = _softmax_prune_renormalize(votes, cc.softmax_temperature, cc.min_component_prob)
+        channel_weight = weights[channel]
+        for comp, p in subdist.items():
+            final[comp] = channel_weight * p
+    return final
 
 
 def classify_components(
@@ -365,13 +445,6 @@ def classify_components(
         # by definition and already routed via the link rules (see the YAML comment).
         if element.has_text and not element.clickable:
             _add_votes(accum, cc.text_presence.votes)
-
-        # 4d. Gradient-fill presence: a clickable pill CTA whose fill is a gradient (only
-        # such elements carry ``bg_gradient_stops``; see harvest/dom.py). Votes ``cta_bg``
-        # so the harvested gradient stops receive bg-channel mass rather than being
-        # orphaned by the pill's link vote (see the YAML calibration comment).
-        if element.bg_gradient_stops:
-            _add_votes(accum, cc.gradient_fill_presence.votes)
 
         # 5. Repetition (the card detector).
         if index in repetition_members:
