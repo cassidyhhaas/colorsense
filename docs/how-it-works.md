@@ -34,10 +34,12 @@ From that one live page, four harvests run:
 
 **Visible DOM elements** (`harvest/dom.py`). An in-page script walks every element and
 records its computed `background-color`, `color`, and `border-color`, its bounding
-rectangle and CSS `position`, its tag / ARIA role / id / class tokens, and structural
-flags: is it clickable, does it have a box shadow, does it have *direct* text content
-(descendant text deliberately doesn't count, or every wrapper of any text would carry the
-flag), is it an iframe / cross-origin / shadow host / known third-party vendor widget.
+rectangle, CSS `position`, and its smallest corner radius (`min_corner_radius`; when it
+reaches half the height all four corners are rounded — a pill/chip shape), its tag / ARIA
+role / id / class tokens, and structural flags: is it
+clickable, does it have a box shadow, does it have *direct* text content (descendant text
+deliberately doesn't count, or every wrapper of any text would carry the flag), is it an
+iframe / cross-origin / shadow host / known third-party vendor widget.
 Hidden, zero-area, and `aria-hidden` elements are excluded. One subtlety: a border color
 is only reported when the element actually paints a border (`border-top-width > 0`) —
 the computed border color resolves for *every* element regardless of width, so an ungated
@@ -115,10 +117,13 @@ Each harvested element is scored into a probability distribution over component 
 (`page_bg`, `header_bg`, `card_bg`, `cta_bg`, `link`, `border`, `page_text`, …,
 `third_party`). The scoring is additive voting across eight feature families — semantic
 tags and ARIA roles, geometry (a full-width element near the top of the viewport votes
-`header_bg`), class/id token substrings (`"navbar"` votes `nav_bg`), interactivity,
-border presence, text presence, repetition (three or more siblings sharing a tag and
-class token, each with a shadow/border/background, vote `card_bg` — the card detector),
-and third-party origin signals. Then multiplicative suppressors apply (`aria-hidden` and
+`header_bg`; a fully-rounded, short, text-bearing pill votes `badge`), class/id token
+substrings (`"navbar"`
+votes `nav_bg`), interactivity, border presence, text presence, repetition (three or more
+siblings sharing a tag and class token, each with a shadow/border/background, vote
+`card_bg` — the card detector, which skips pill shapes so repeated chips aren't read as
+tiny cards), and third-party origin signals. Then multiplicative suppressors apply
+(`aria-hidden` and
 hidden elements are zeroed; brand-component votes on third-party widgets are damped to
 5%), and finally the surviving positive votes go through a softmax at temperature 0.5,
 entries below probability 0.05 are pruned, and the survivors are renormalized.

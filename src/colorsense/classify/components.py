@@ -77,6 +77,35 @@ def _add_votes(
         accum[component] = accum.get(component, 0.0) + weight
 
 
+def _is_pill(element: HarvestedElement) -> bool:
+    """Whether the element is a fully-rounded, elongated **pill/chip** shape.
+
+    Pure shape: all four corners fully rounded (the ``min_corner_radius >= height/2``
+    test) and wider than tall (excluding circles, where ``width == height``). This is
+    intentionally size-agnostic — so the card-detector exclusion ("a stadium shape is
+    never a card") applies at any size — while the badge *rule* layers the size/text gates
+    on top.
+    """
+    height = element.rect.height
+    return (
+        height > 0.0 and element.min_corner_radius >= height / 2.0 and element.rect.width > height
+    )
+
+
+def _paints_fill(element: HarvestedElement) -> bool:
+    """Whether the element paints a visible fill: a non-transparent bg, border, or ring.
+
+    Gates the badge rule so a decorative fully-rounded divider (a ``rounded-full`` bar
+    with a transparent/gradient background and no border) is not mislabeled a badge — a
+    colored chip always paints one of these.
+    """
+    return (
+        (element.bg is not None and element.bg.alpha > 0.0)
+        or element.border is not None
+        or element.has_box_shadow
+    )
+
+
 def _matches_semantic_tag(rule: VoteRule, element: HarvestedElement) -> bool:
     """Return whether a semantic-tag rule matches the element's tag/role/input type.
 
@@ -139,6 +168,13 @@ def _matches_geometry(
         return top >= thresholds.bottom_band and full_width
     if when == "area<=small_area & clickable":
         return area <= thresholds.small_area and element.clickable
+    if when == "pill & paints_fill & has_text & h<=badge_max_h_px":
+        return (
+            _is_pill(element)
+            and _paints_fill(element)
+            and element.has_text
+            and element.rect.height <= thresholds.badge_max_h_px
+        )
     return False
 
 
@@ -172,6 +208,12 @@ def _repetition_member_indices(
     requires_any = set(rep.requires_any)
 
     def satisfies_requires_any(element: HarvestedElement) -> bool:
+        # A pill/chip is never a card, however much it repeats: fully-rounded badges
+        # (status pills, category chips) commonly recur in grids and carry a ring/bg,
+        # which would otherwise satisfy the card heuristic and flood `card_bg` with their
+        # accent colors. They are routed to `badge` by the geometry rule instead.
+        if _is_pill(element):
+            return False
         if not requires_any:
             return True
         if "box_shadow" in requires_any and element.has_box_shadow:

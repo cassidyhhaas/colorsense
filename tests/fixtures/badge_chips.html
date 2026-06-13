@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Badge chips — pill-shape classification fixture</title>
+<style>
+  /* Offline stand-in for the disconetwork.com live case: a row of fully-rounded
+     status pills (rounded-full + tinted background + ring), repeated so they would
+     otherwise trip the repetition card detector. They must classify as `badge`
+     (accent/interactive), not `card_bg`. Several negatives pin the discriminators:
+     a square-cornered card, a circular avatar, a one-corner-rounded tab (the
+     MIN-vs-MAX corner fix), a textless rounded divider, and a tall rounded stat
+     container (over the single-line height gate). */
+  body { margin: 0; background: #ffffff; font-family: sans-serif; }
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    box-sizing: border-box;         /* rendered height == 28px, comfortably < 36px gate */
+    border-radius: 9999px;          /* rounded-full -> pill (all four corners) */
+    padding: 4px 14px;
+    height: 28px;                   /* single text-line, well under badge_max_h_px (36) */
+    background: #7c3bed;            /* brand purple */
+    color: #ffffff;
+    box-shadow: 0 0 0 1px rgba(124, 59, 237, 0.2);  /* the ring */
+    margin: 6px;
+  }
+  .card {
+    border-radius: 8px;            /* square-ish corners -> not a pill */
+    border: 1px solid #e5e7eb;
+    background: #f8fafc;
+    width: 360px;
+    height: 200px;
+    margin: 12px;
+  }
+  .avatar {
+    border-radius: 50%;            /* fully rounded but square -> a circle, not a pill */
+    background: #10b77f;
+    width: 56px;
+    height: 56px;
+    margin: 12px;
+  }
+  .tab {
+    display: inline-flex;
+    align-items: center;
+    /* Only the top-left corner is rounded -> MIN corner radius is 0, so NOT a pill.
+       The old MAX reducer would have false-matched this as a pill. */
+    border-top-left-radius: 9999px;
+    padding: 4px 14px;
+    height: 28px;
+    background: #f59e0b;
+    color: #ffffff;
+    margin: 6px;
+  }
+  .divider {
+    border-radius: 9999px;         /* fully rounded but textless -> not a badge */
+    background: #d1d5db;
+    width: 200px;
+    height: 4px;
+    margin: 12px;
+  }
+  .stat {
+    display: inline-flex;
+    align-items: center;
+    border-radius: 9999px;         /* fully rounded, wide, has text... */
+    padding: 8px 20px;
+    height: 64px;                  /* ...but TALL (> badge_max_h_px) -> not a badge */
+    background: #1f8ded;
+    color: #ffffff;
+    margin: 12px;
+  }
+</style>
+</head>
+<body>
+  <section>
+    <span class="chip">Live</span>
+    <span class="chip">Beta</span>
+    <span class="chip">New</span>
+    <span class="chip">Pro</span>
+  </section>
+  <div class="card">Card one</div>
+  <div class="card">Card two</div>
+  <div class="card">Card three</div>
+  <div class="avatar"></div>
+  <span class="tab">Tab</span>
+  <div class="divider"></div>
+  <div class="stat">42 active</div>
+</body>
+</html>

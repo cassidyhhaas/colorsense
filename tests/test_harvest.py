@@ -12,9 +12,10 @@ from pathlib import Path
 
 import pytest
 
+from colorsense.classify.components import classify_components
 from colorsense.config import Config, load_default_config
 from colorsense.harvest import RenderSession, harvest_page
-from colorsense.models import Harvest, Theme, Viewport
+from colorsense.models import ComponentType, Harvest, Theme, Viewport
 
 VIEWPORT = Viewport(width=1280, height=800, device_scale_factor=1.0)
 
@@ -108,6 +109,44 @@ async def test_border_only_reported_when_painted(fixtures_dir: Path, config: Con
     primary = next(el for el in harvest.elements if "primary-box" in el.class_tokens)
     assert primary.border is None
     assert primary.has_box_shadow is False
+
+
+async def test_min_corner_radius_harvested_and_pill_chips_classify_as_badge(
+    fixtures_dir: Path, config: Config
+) -> None:
+    """End-to-end (disconetwork.com shape): pill chips harvest a min radius and are badges.
+
+    Confirms the harvest populates ``min_corner_radius`` from the live computed style and
+    that the classifier routes the fully-rounded, short, text-bearing chips to ``badge``
+    rather than ``card_bg`` (they repeat with a ring + tinted bg, which would otherwise
+    trip the card detector). The square-cornered cards harvest a tiny radius; the
+    one-corner-rounded tab harvests ``min_corner_radius == 0`` (the MIN reducer rejects a
+    single rounded corner), so neither classifies as a badge.
+    """
+    harvest = await _harvest(fixtures_dir / "badge_chips.html", config)
+
+    chips = [el for el in harvest.elements if "chip" in el.class_tokens]
+    assert len(chips) == 4
+    for chip in chips:
+        # rounded-full resolves to a large px radius, well over half the 28px height.
+        assert chip.min_corner_radius >= chip.rect.height / 2.0
+
+    card = next(el for el in harvest.elements if "card" in el.class_tokens)
+    assert card.min_corner_radius < card.rect.height / 2.0  # 8px vs 200px
+
+    # Only the top-left corner is rounded, so the MIN of the four corners is 0.
+    tab = next(el for el in harvest.elements if "tab" in el.class_tokens)
+    assert tab.min_corner_radius == 0.0
+
+    classified = classify_components(harvest.elements, config, VIEWPORT)
+    by_element = {id(c.element): c for c in classified}
+    for chip in chips:
+        dist = by_element[id(chip)].component_dist
+        assert max(dist, key=lambda comp: dist[comp]) is ComponentType.badge
+        assert ComponentType.card_bg not in dist
+
+    tab_dist = by_element[id(tab)].component_dist
+    assert ComponentType.badge not in tab_dist
 
 
 async def test_has_text_set_for_direct_text_only(fixtures_dir: Path, config: Config) -> None:

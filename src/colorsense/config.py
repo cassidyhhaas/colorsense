@@ -73,6 +73,7 @@ _KNOWN_GEOMETRY_PREDICATES = frozenset(
         "full_width & top<top_band & h>=hero_min_h",
         "top>=bottom_band & full_width",
         "area<=small_area & clickable",
+        "pill & paints_fill & has_text & h<=badge_max_h_px",
     }
 )
 _KNOWN_SUPPRESSORS = frozenset(
@@ -325,6 +326,7 @@ class GeometryThresholds(BaseModel):
     hero_min_h: float
     sticky_top_px: float
     small_area: float
+    badge_max_h_px: float
 
 
 class GeometryConfig(BaseModel):
