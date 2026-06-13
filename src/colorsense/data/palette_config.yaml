@@ -250,12 +250,22 @@ component_classifier:
       hero_min_h: 0.35
       sticky_top_px: 80
       small_area: 0.02      # fraction of viewport area
+      badge_max_h_px: 36    # a badge holds a single line of text; 36px sits in the
+                            # empirical gap between real chips (<=32px) and two-line
+                            # stat containers / toggles (>=40px)
     rules:
       - {when: "full_width & top<top_band & h<short_h", votes: {header_bg: 2.5, nav_bg: 1.5}}
       - {when: "position in (fixed,sticky) & top<sticky_top_px", votes: {nav_bg: 3.0}}
       - {when: "full_width & top<top_band & h>=hero_min_h", votes: {hero_bg: 3.0, hero_text: 1.5}}
       - {when: "top>=bottom_band & full_width", votes: {footer_bg: 2.5}}
       - {when: "area<=small_area & clickable", votes: {link: 1.5, badge: 1.0}}
+      # Badge/chip: a fully-rounded element (all four corners, via the min-corner test),
+      # wider than tall (excludes circles), that paints a fill (bg/border/ring), carries
+      # its own direct text, and is a single text-line tall (<= badge_max_h_px). These are
+      # status pills / category chips carrying an accent tint. The vote (3.0) stays below
+      # the semantic `a`/`button` votes so pill-shaped CTAs remain interactive. Pills are
+      # also excluded from the card detector below.
+      - {when: "pill & paints_fill & has_text & h<=badge_max_h_px", votes: {badge: 3.0}}
 
   # --- Feature family 3: class / id token match (fuzzy substring). -----------
   class_tokens:
@@ -339,6 +349,9 @@ component_classifier:
     votes: {page_text: 2.0}
 
   # --- Feature family 5: repetition (the card detector). ---------------------
+  # Pill/chip-shaped elements are excluded from this detector (a pill is never a card),
+  # so repeated status pills / category chips don't satisfy the card heuristic and flood
+  # `card_bg` with their accent colors — they're routed to `badge` by the geometry rule.
   repetition:
     min_siblings: 3
     requires_any: [box_shadow, border, distinct_bg_from_parent]

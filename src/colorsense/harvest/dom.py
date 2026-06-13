@@ -56,6 +56,7 @@ class _RawElement(TypedDict):
     text: str
     border: str
     input_type: str | None
+    min_corner_radius: float
     has_box_shadow: bool
     has_text: bool
     is_iframe: bool
@@ -157,6 +158,27 @@ _COLLECT_DOM_JS: str = r"""
         const borderColor = borderWidth > 0 ? style.borderTopColor : '';
         const hasBoxShadow = style.boxShadow !== 'none';
 
+        // Smallest of the four computed corner radii in px. A true pill/stadium has
+        // ALL FOUR corners fully rounded; the MIN is the radius guaranteed on every
+        // corner, so `min >= height/2` means "fully rounded all around" — MAX would
+        // false-match a single `rounded-tl-full` corner (a tab/speech-bubble) as a pill.
+        // The `%` branch of resolveRadius is necessary because Chromium returns the
+        // literal "%" string for a percentage radius (e.g. `"50%"`) from
+        // getComputedStyle (empirically confirmed); we resolve it against `r.width`. A
+        // single scalar can't carry CSS's per-axis horizontal/vertical resolution, but
+        // the `width > height` gate downstream makes width-resolution correct for the
+        // wide-short pill targets.
+        const resolveRadius = (value, basis) => {
+            const n = parseFloat(value) || 0;
+            return value.endsWith('%') ? (n / 100) * basis : n;
+        };
+        const minCornerRadius = Math.min(
+            resolveRadius(style.borderTopLeftRadius, r.width),
+            resolveRadius(style.borderTopRightRadius, r.width),
+            resolveRadius(style.borderBottomRightRadius, r.width),
+            resolveRadius(style.borderBottomLeftRadius, r.width),
+        );
+
         // True iff the element has at least one DIRECT child text node with
         // non-whitespace content. Descendant text deliberately does not count:
         // otherwise every ancestor wrapper of any text would carry the flag.
@@ -186,6 +208,7 @@ _COLLECT_DOM_JS: str = r"""
             // Only meaningful on <input>: null for other tags and for inputs with
             // no/empty type attribute (the HTML default type is "text").
             input_type: (tag === 'input' && inputType !== '') ? inputType : null,
+            min_corner_radius: minCornerRadius,
             has_box_shadow: hasBoxShadow,
             has_text: hasText,
             is_iframe: isIframe,
@@ -252,6 +275,7 @@ async def harvest_elements(
                 text=parse_css_color(raw["text"]),
                 border=parse_css_color(raw["border"]),
                 input_type=raw["input_type"],
+                min_corner_radius=raw["min_corner_radius"],
                 has_box_shadow=raw["has_box_shadow"],
                 has_text=raw["has_text"],
                 is_iframe=raw["is_iframe"],

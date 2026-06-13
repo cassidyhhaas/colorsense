@@ -15,6 +15,30 @@ Design notes
   constant defined below.
 * Everything is deterministic: iteration over dicts is sorted, ties are broken by ``hex``
   (smallest wins — the shared `prune_distribution` convention), and there is no randomness.
+* Component evidence is scored from the **raw** ``ColorCluster.component_mass`` (per
+  role-affinity bucket, ``log1p``-damped and normalized to the per-bucket maximum across
+  clusters — see `_normalize_comp_assoc`), *not* the normalized ``component_mix``. Mix
+  purity carries no cross-cluster magnitude: a cluster whose only evidence was one tiny
+  element had mix purity 1.0 and outranked clusters with 100x the vote mass (a single
+  133x17px badge chip won secondary over the actual white page surface). The ``log1p``
+  damping rationale is the usage view's (``palette/usage.py``).
+* **Secondary is defined relative to the primary anchor**: the provisional primary
+  cluster is excluded from secondary candidacy. The dominant page surface accrues
+  structural votes (cards/headers/nav painted in the page color) from sheer element
+  count, so under per-bucket max normalization it would otherwise win *both* primary and
+  secondary on most real pages — burying the actual ~30% structural color. The
+  per-bucket normalization itself stays computed over **all** clusters (including the
+  primary one); renormalizing over the survivors would let a lone tiny chip become the
+  bucket max and re-inflate to 1.0, recreating the mix-purity failure above. A
+  single-cluster page therefore yields an *empty* secondary candidate list — the honest
+  "no second structural layer detected" answer. Primary, accent, and the neutrals keep
+  all clusters as candidates: the primary surface legitimately belongs in
+  neutral_light/dark, and accent's chroma/contrast terms already handle it.
+* **Primary's page_bg boost is area-gated** (`W_COMP_PRIMARY_AREA_REF`): the same
+  lone-cluster trap reaches primary through the `page_bg` bucket — a tiny chip whose
+  only vote is a near-zero layout-noise `page_bg` normalizes to 1.0 and would collect
+  the full boost. Since `page_bg` is an area claim, scaling the boost by painted area
+  neutralizes the tiny bearer while leaving a genuine high-area surface unaffected.
 * The 60/30/10 mental model:
     - **primary**   ~= the dominant neutral surface (~60%) — anchors contrast.
     - **secondary** ~= structural color (~30%) — cards/headers/nav surfaces.
@@ -56,6 +80,13 @@ CHROMA_REF: float = 0.20
 W_AREA: float = 1.0
 W_NEUTRAL: float = 0.8
 W_COMP_PRIMARY: float = 1.5
+# The comp_primary boost is scaled by painted area, full at/above this fraction.
+# page_bg is an *area* claim, so a cluster bearing it only on a tiny element must not
+# claim the primary surface: without this, a lone chip whose sole vote is a near-zero
+# layout-noise page_bg normalizes to 1.0 under per-bucket max and collects the full
+# boost, evicting the real high-area surface (the primary analogue of the secondary
+# lone-cluster trap — see the Design notes).
+W_COMP_PRIMARY_AREA_REF: float = 0.5
 
 # --- Accent scoring weights (step 3): chroma + contrast + action-components win, even at
 #     low area, so the area term is deliberately small. ---
@@ -111,7 +142,12 @@ COMPONENT_AFFINITY: dict[ComponentType, PaletteRole] = {
 
 
 class _Features:
-    """Precomputed per-cluster features (computed once in `assign_roles`)."""
+    """Precomputed per-cluster features (computed once in `assign_roles`).
+
+    ``comp_assoc`` starts as the cluster's **raw** ``component_mass`` aggregated into
+    role-affinity buckets (see `COMPONENT_AFFINITY`); `_normalize_comp_assoc` then maps
+    it into ``[0, 1]`` across the whole cluster set before any scoring reads it.
+    """
 
     __slots__ = ("area", "chroma", "cluster", "comp_assoc", "lightness", "neutrality")
 
@@ -123,17 +159,34 @@ class _Features:
         self.lightness: float = color.lightness
         # Smooth neutrality in [0, 1]; hard is_neutral consulted for the structural term.
         self.neutrality: float = max(0.0, 1.0 - color.chroma / CHROMA_NEUTRAL_SCALE)
-        # Aggregate component_mix weight into role-affinity buckets.
+        # Aggregate raw component_mass into role-affinity buckets (normalized later by
+        # _normalize_comp_assoc).
         assoc: dict[PaletteRole, float] = {role: 0.0 for role in PaletteRole}
-        for comp, weight in cluster.component_mix.items():
+        for comp, mass in cluster.component_mass.items():
             role = COMPONENT_AFFINITY.get(comp)
             if role is not None:
-                assoc[role] += weight
+                assoc[role] += mass
         self.comp_assoc: dict[PaletteRole, float] = assoc
 
     @property
     def color(self) -> Color:
         return self.cluster.color
+
+
+def _normalize_comp_assoc(feats: list[_Features]) -> None:
+    """Map each raw ``comp_assoc`` bucket into ``[0, 1]`` across the cluster set, in place.
+
+    Per role bucket: ``log1p`` each cluster's raw mass (damps element-count magnitude
+    sub-linearly — same rationale as the usage view's ``log1p`` ranking, see
+    ``palette/usage.py``), then divide by the maximum ``log1p`` value across all clusters
+    for that bucket, so the best-evidenced cluster gets 1.0 and ordering is preserved
+    (``log1p`` is monotonic). A bucket whose max is 0 stays all-zero.
+    """
+    for role in PaletteRole:
+        damped = [math.log1p(f.comp_assoc[role]) for f in feats]
+        top = max(damped, default=0.0)
+        for f, value in zip(feats, damped, strict=True):
+            f.comp_assoc[role] = value / top if top > 0.0 else 0.0
 
 
 def _softmax_weights(scores: list[float], temperature: float) -> list[float]:
@@ -215,13 +268,16 @@ def assign_roles(clusters: list[ColorCluster]) -> tuple[RoleResults, float]:
     """Assign clusters to palette roles and compute the 60/30/10 ``fit_score``.
 
     Returns ``(RoleResults, fit_score)``. ``RoleResults.mapping`` is populated for all five
-    palette roles (each a probability-descending candidate list). The empty-cluster case
-    returns ``(RoleResults(mapping={}), 0.0)``.
+    palette roles (each a probability-descending candidate list). Secondary is defined
+    *relative to the primary anchor*: the provisional primary cluster never appears among
+    the secondary candidates (see the module Design notes), so a single-cluster page maps
+    secondary to ``()``. The empty-cluster case returns ``(RoleResults(mapping={}), 0.0)``.
     """
     if not clusters:
         return RoleResults(mapping={}), 0.0
 
     feats = [_Features(c) for c in clusters]
+    _normalize_comp_assoc(feats)
 
     # Reference for chroma normalization: the most chromatic cluster, floored by CHROMA_REF
     # so an all-neutral set does not divide by ~0 and inflate weak chroma.
@@ -231,7 +287,10 @@ def assign_roles(clusters: list[ColorCluster]) -> tuple[RoleResults, float]:
     # --- Step 2: primary scoring + provisional primary anchor. ---
     primary_scores: list[float] = []
     for f in feats:
-        comp_primary = f.comp_assoc[PaletteRole.primary]
+        # Scale the page_bg boost by painted area (see W_COMP_PRIMARY_AREA_REF): a large
+        # surface reaches the full boost, a tiny chip contributes ~none of it.
+        area_gate = min(1.0, f.area / W_COMP_PRIMARY_AREA_REF)
+        comp_primary = f.comp_assoc[PaletteRole.primary] * area_gate
         score = W_AREA * f.area + W_NEUTRAL * f.neutrality + W_COMP_PRIMARY * comp_primary
         primary_scores.append(score)
 
@@ -282,9 +341,15 @@ def assign_roles(clusters: list[ColorCluster]) -> tuple[RoleResults, float]:
         ndark_scores.append(nd_score)
 
     # --- Step 4: per-role softmax -> prune -> renormalize -> rank. ---
+    # Secondary candidacy excludes the provisional primary cluster (see Design notes):
+    # the dominant surface would otherwise win both roles on most pages. The exclusion
+    # happens *after* _normalize_comp_assoc, so the secondary bucket max is still taken
+    # over all clusters — survivors keep their absolute evidence scale.
+    sec_feats = [f for i, f in enumerate(feats) if i != primary_idx]
+    sec_scores = [s for i, s in enumerate(secondary_scores) if i != primary_idx]
     mapping: dict[PaletteRole, tuple[PaletteCandidate, ...]] = {
         PaletteRole.primary: tuple(_build_candidates(feats, primary_scores)),
-        PaletteRole.secondary: tuple(_build_candidates(feats, secondary_scores)),
+        PaletteRole.secondary: tuple(_build_candidates(sec_feats, sec_scores)),
         PaletteRole.accent: tuple(_build_candidates(feats, accent_scores)),
         PaletteRole.neutral_light: tuple(_build_candidates(feats, nlight_scores)),
         PaletteRole.neutral_dark: tuple(_build_candidates(feats, ndark_scores)),

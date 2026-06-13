@@ -43,6 +43,7 @@ def _element(
     text: Color | None = None,
     border: Color | None = None,
     input_type: str | None = None,
+    min_corner_radius: float = 0.0,
     has_box_shadow: bool = False,
     has_text: bool = False,
     is_iframe: bool = False,
@@ -67,6 +68,7 @@ def _element(
         text=text,
         border=border,
         input_type=input_type,
+        min_corner_radius=min_corner_radius,
         has_box_shadow=has_box_shadow,
         has_text=has_text,
         is_iframe=is_iframe,
@@ -150,6 +152,185 @@ def test_repeated_box_shadow_siblings_get_repetition_votes() -> None:
     results = classify_components(items, CONFIG, VIEWPORT)
     for result in results:
         assert ComponentType.card_bg in result.component_dist
+
+
+def test_pill_chip_is_badge_not_card() -> None:
+    """Regression (disconetwork.com): a fully-rounded, short, text-bearing chip is a badge.
+
+    The site's status/category chips (``inline-flex rounded-full bg-success/10 ring-1``)
+    are tiny pills that repeat in grids — they used to satisfy the repetition card
+    detector (ring -> box_shadow, distinct bg) and flood ``card_bg`` with their accent
+    colors. A pill (all four corners rounded via the min test, wider than tall) that
+    paints a fill, carries text, and is a single text-line tall is routed to ``badge``
+    (which maps to the accent / interactive palette).
+    """
+    chips = [
+        _element(
+            tag="span",
+            class_tokens=["inline-flex", "rounded-full", "badge-chip"],
+            bg=_color("#10b77f"),
+            has_box_shadow=True,  # the ring
+            has_text=True,
+            min_corner_radius=9999.0,  # rounded-full, all four corners
+            rect=Rect(x=float(i * 140), y=400.0, width=130.0, height=28.0),
+        )
+        for i in range(4)
+    ]
+    results = classify_components(chips, CONFIG, VIEWPORT)
+    for result in results:
+        assert _argmax(result.component_dist) is ComponentType.badge
+        # The card detector must NOT fire on these repeated pills.
+        assert ComponentType.card_bg not in result.component_dist
+
+
+def test_one_corner_rounded_is_not_a_pill_or_badge() -> None:
+    """A one-corner-rounded element (a tab/speech-bubble) is not a pill, so not a badge.
+
+    This is the MAX->MIN corner-radius fix: only the top-left corner is fully rounded,
+    so ``min_corner_radius`` is 0 even though the element is short, wide, painted, and
+    text-bearing. The old MAX reducer would have read its one rounded corner as a pill
+    and voted ``badge``; the MIN test (all four corners must be rounded) rejects it.
+    """
+    tab = _element(
+        tag="span",
+        class_tokens=["tab"],
+        bg=_color("#f59e0b"),
+        has_text=True,
+        min_corner_radius=0.0,  # only one corner is rounded
+        rect=Rect(x=10.0, y=300.0, width=120.0, height=28.0),
+    )
+    [result] = classify_components([tab], CONFIG, VIEWPORT)
+    assert ComponentType.badge not in result.component_dist
+
+
+def test_empty_pill_without_text_is_not_a_badge() -> None:
+    """A fully-rounded short pill carrying no direct text is not a badge.
+
+    The ``has_text`` gate keeps decorative chips / divider pills / switch tracks
+    (``rounded-full`` with a painted fill but no text content) out of ``badge``.
+    """
+    track = _element(
+        tag="div",
+        bg=_color("#7c3bed"),
+        has_text=False,
+        min_corner_radius=9999.0,
+        rect=Rect(x=0.0, y=200.0, width=64.0, height=24.0),
+    )
+    [result] = classify_components([track], CONFIG, VIEWPORT)
+    assert ComponentType.badge not in result.component_dist
+
+
+def test_tall_pill_is_not_a_badge_but_excluded_from_cards() -> None:
+    """A tall fully-rounded pill (stat container) is not a badge, yet is still a pure pill.
+
+    The ``h <= badge_max_h_px`` gate keeps two-line stat containers / toggles out of
+    ``badge``. But shape-wise it IS a stadium, so ``_is_pill`` still excludes it from the
+    repetition card detector — it never satisfies the card heuristic. With no badge vote
+    and no card vote, the only votes it gets here are from text/fill presence, so it does
+    not classify as either ``badge`` or ``card_bg``.
+    """
+    stats = [
+        _element(
+            tag="div",
+            class_tokens=["stat"],
+            bg=_color("#1f8ded"),
+            border=_color("#1f8ded"),
+            has_text=True,
+            min_corner_radius=9999.0,  # fully rounded...
+            rect=Rect(x=float(i * 200), y=300.0, width=180.0, height=44.0),  # ...but tall
+        )
+        for i in range(4)
+    ]
+    results = classify_components(stats, CONFIG, VIEWPORT)
+    for result in results:
+        assert ComponentType.badge not in result.component_dist
+        assert ComponentType.card_bg not in result.component_dist
+
+
+def test_badge_height_gate_is_inclusive_at_the_boundary() -> None:
+    """The ``h <= badge_max_h_px`` gate is inclusive: a pill exactly at the cap is a badge.
+
+    Pins the boundary (cap is 36px): a 36px pill votes ``badge``; one pixel taller does
+    not. Threshold precision is tested here rather than in the browser fixture, where
+    box-model/font rendering makes an exact harvested height fragile.
+    """
+    cap = CONFIG.component_classifier.geometry.thresholds.badge_max_h_px
+    at = _element(
+        tag="span",
+        bg=_color("#10b77f"),
+        has_text=True,
+        min_corner_radius=9999.0,
+        rect=Rect(x=0.0, y=300.0, width=130.0, height=cap),
+    )
+    over = _element(
+        tag="span",
+        bg=_color("#10b77f"),
+        has_text=True,
+        min_corner_radius=9999.0,
+        rect=Rect(x=0.0, y=300.0, width=130.0, height=cap + 1.0),
+    )
+    [at_result] = classify_components([at], CONFIG, VIEWPORT)
+    [over_result] = classify_components([over], CONFIG, VIEWPORT)
+    assert _argmax(at_result.component_dist) is ComponentType.badge
+    assert ComponentType.badge not in over_result.component_dist
+
+
+def test_low_radius_repeated_surfaces_stay_cards() -> None:
+    """A size gate is not used: square-cornered repeated surfaces remain cards.
+
+    Guards that the pill exclusion keys on shape (radius vs height), not size — a small
+    repeated card with a modest radius is still a card, and a large one obviously is.
+    """
+    cards = [
+        _element(
+            tag="div",
+            class_tokens=["tile"],
+            bg=_color("#ffffff"),
+            border=_color("#cccccc"),
+            min_corner_radius=8.0,  # rounded corners, nowhere near half the height
+            rect=Rect(x=float(i * 200), y=300.0, width=180.0, height=120.0),
+        )
+        for i in range(4)
+    ]
+    results = classify_components(cards, CONFIG, VIEWPORT)
+    for result in results:
+        assert ComponentType.card_bg in result.component_dist
+        assert ComponentType.badge not in result.component_dist
+
+
+def test_circular_avatar_is_not_a_badge() -> None:
+    """A fully-rounded but square element (an avatar/icon) is not a pill, so not a badge.
+
+    The ``width > height`` leg of the pill test excludes circles: a 56x56 ``rounded-full``
+    avatar reaches radius >= height/2 but is not elongated, so it gets no badge vote.
+    """
+    avatar = _element(
+        tag="div",
+        bg=_color("#1f8ded"),
+        min_corner_radius=28.0,  # 50% of 56
+        rect=Rect(x=10.0, y=10.0, width=56.0, height=56.0),
+    )
+    [result] = classify_components([avatar], CONFIG, VIEWPORT)
+    assert ComponentType.badge not in result.component_dist
+
+
+def test_pill_shaped_cta_stays_interactive() -> None:
+    """A pill-shaped <a> CTA stays dominantly interactive, not a badge.
+
+    The badge vote (3.0) sits below the semantic ``a`` vote, so a fully-rounded, short,
+    text-bearing link keeps its interactive label even though it matches every badge gate.
+    """
+    cta = _element(
+        tag="a",
+        class_tokens=["rounded-full"],
+        bg=_color("#7c3bed"),
+        clickable=True,
+        has_text=True,
+        min_corner_radius=9999.0,
+        rect=Rect(x=100.0, y=100.0, width=160.0, height=32.0),
+    )
+    [result] = classify_components([cta], CONFIG, VIEWPORT)
+    assert _argmax(result.component_dist) is ComponentType.link
 
 
 def test_anchor_is_dominant_link() -> None:

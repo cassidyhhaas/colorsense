@@ -46,7 +46,8 @@ FIT_SCORE_TOL = 0.05
 COLOR_MATCH_TOL = 0.10
 # Probability margin under which the top candidates of a role/category count as
 # co-dominant. Screenshot-derived area weights drift across OSes, so a near-tie's winner
-# is effectively a coin flip there (cards_site roles.secondary sits at 0.511/0.489);
+# is effectively a coin flip there (cards_site roles.secondary sat at 0.511/0.489 under
+# the pre-raw-mass scoring);
 # the digest records ALL co-dominant hexes and the check accepts the actual winner
 # matching any of them, instead of over-pinning one side of the tie.
 NEAR_TIE_MARGIN = 0.05

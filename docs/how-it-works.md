@@ -34,10 +34,11 @@ From that one live page, four harvests run:
 
 **Visible DOM elements** (`harvest/dom.py`). An in-page script walks every element and
 records its computed `background-color`, `color`, and `border-color`, its bounding
-rectangle and CSS `position`, its tag / ARIA role / id / class tokens, and structural
-flags: is it clickable, does it have a box shadow, does it have *direct* text content
-(descendant text deliberately doesn't count, or every wrapper of any text would carry the
-flag), is it an iframe / cross-origin / shadow host / known third-party vendor widget.
+rectangle, CSS `position`, and its smallest corner radius (`min_corner_radius`), its
+tag / ARIA role / id / class tokens, and structural flags: is it clickable, does it have
+a box shadow, does it have *direct* text content (descendant text deliberately doesn't
+count, or every wrapper of any text would carry the flag), is it an
+iframe / cross-origin / shadow host / known third-party vendor widget.
 Hidden, zero-area, and `aria-hidden` elements are excluded. One subtlety: a border color
 is only reported when the element actually paints a border (`border-top-width > 0`) —
 the computed border color resolves for *every* element regardless of width, so an ungated
@@ -115,12 +116,14 @@ Each harvested element is scored into a probability distribution over component 
 (`page_bg`, `header_bg`, `card_bg`, `cta_bg`, `link`, `border`, `page_text`, …,
 `third_party`). The scoring is additive voting across eight feature families — semantic
 tags and ARIA roles, geometry (a full-width element near the top of the viewport votes
-`header_bg`), class/id token substrings (`"navbar"` votes `nav_bg`), interactivity,
-border presence, text presence, repetition (three or more siblings sharing a tag and
-class token, each with a shadow/border/background, vote `card_bg` — the card detector),
-and third-party origin signals. Then multiplicative suppressors apply (`aria-hidden` and
-hidden elements are zeroed; brand-component votes on third-party widgets are damped to
-5%), and finally the surviving positive votes go through a softmax at temperature 0.5,
+`header_bg`; a fully-rounded, short, text-bearing pill votes `badge`), class/id token
+substrings (`"navbar"` votes `nav_bg`), interactivity, border presence, text presence,
+repetition (three or more siblings sharing a tag and class token, each with a
+shadow/border/background, vote `card_bg` — the card detector, which skips pill shapes so
+repeated chips aren't read as tiny cards), and third-party origin signals. Then
+multiplicative suppressors apply (`aria-hidden` and hidden elements are zeroed;
+brand-component votes on third-party widgets are damped to 5%), and finally the surviving
+positive votes go through a softmax at temperature 0.5,
 entries below probability 0.05 are pruned, and the survivors are renormalized.
 
 Two of those families are worth working through, because their single vote weight was
@@ -337,14 +340,37 @@ design split mapped to five roles — **primary** (the dominant, usually neutral
 action/brand "pop", ~10%), plus **neutral_light** and **neutral_dark**. Unlike the usage
 view it is *measured-only* — never reconciled against tokens.
 
+Component evidence enters the scores as **raw vote mass, not mix purity**: each
+cluster's `component_mass` is summed into role-affinity buckets (page-bg → primary,
+CTA/link/badge → accent, card/header/nav/footer/hero → secondary), `log1p`-damped (the
+same sub-linear compression the usage view applies, section 5), then divided by the
+largest damped value any cluster has for that bucket — so the best-evidenced cluster per
+bucket scores 1.0 and the rest scale down with their actual evidence. The normalized
+`component_mix` is deliberately not used here: purity carries no cross-cluster
+magnitude, and a cluster whose only evidence was one tiny badge chip (mix purity 1.0,
+raw mass 0.88) used to out-score the real page surface (raw structural mass >100) for
+secondary.
+
 Each cluster gets a score per role from weighted features: primary rewards area,
-neutrality (a smooth `1 − chroma/0.10` signal), and page-background component votes;
+neutrality (a smooth `1 − chroma/0.10` signal), and page-background component evidence;
 accent rewards chroma, contrast against the provisional primary, and action-component
-votes — with only a small area term, so a tiny but vivid CTA can win; secondary rewards
-area and structural-surface votes (the "card exception"); the neutrals score
+evidence — with only a small area term, so a tiny but vivid CTA can win; secondary
+rewards area and structural-surface evidence (the "card exception"); the neutrals score
 `neutrality × lightness` (or `× (1 − lightness)`) with a small area floor. Per role, the
 scores go through a softmax (temperature 0.25), pruning, and renormalization into ranked
 candidates.
+
+**Secondary is scored relative to the primary anchor**: the provisional primary cluster
+is excluded from the secondary candidate list. The dominant page background accrues
+structural votes (cards, headers, and nav painted in the page color) from sheer element
+count, so under raw-mass scoring it carries both the largest area *and* the largest
+structural evidence — it would otherwise win primary and secondary together, burying the
+real ~30% color (a blue hero band, a dark header). Excluding it lets the genuine second
+layer surface. The per-bucket normalization above is still computed over *all* clusters
+including the primary one; renormalizing over the survivors would let a lone tiny chip
+become the bucket maximum and re-inflate to 1.0, recreating the badge-chip failure. A
+one-color page therefore has an empty secondary list — the honest "no second structural
+layer" answer, which `fit_score` (below) then reflects.
 
 `fit_score` then measures how 60/30/10-like the page actually is: take the top
 candidate's area for primary/secondary/accent, normalize the triple to sum to 1, and

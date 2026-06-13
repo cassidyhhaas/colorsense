@@ -242,6 +242,12 @@ class HarvestedElement(BaseModel):
     with a non-empty ``type``; ``None`` means "not an input, or no ``type`` attribute
     declared" (the HTML default type is ``text``, but the harvester reports the absence
     rather than inferring it).
+    ``min_corner_radius`` follows the same precedent (default ``0.0``, always set by the
+    harvester): the smallest of the four computed corner radii in CSS pixels (percentage
+    radii resolved against width). ``min_corner_radius >= height/2`` means all four corners
+    are fully rounded — the intrinsic signal of a pill/chip (stadium) shape, distinct from
+    a card (square-ish corners) and from a one-corner-rounded tab. The component classifier
+    uses it (with a ``width > height`` test) to detect badge-shaped elements.
     """
 
     tag: str
@@ -254,6 +260,7 @@ class HarvestedElement(BaseModel):
     text: Color | None
     border: Color | None
     input_type: str | None = None
+    min_corner_radius: float = 0.0
     has_box_shadow: bool = False
     has_text: bool = False
     is_iframe: bool

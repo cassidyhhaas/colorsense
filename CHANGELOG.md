@@ -7,6 +7,29 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- Roles view (60/30/10): component evidence is now scored from raw `component_mass`
+  (`log1p`-damped, normalized to the per-bucket maximum across clusters) instead of the
+  normalized `component_mix`. Mix purity carried no cross-cluster magnitude, so a cluster
+  evidenced by a single tiny element could outrank clusters with 100x the vote mass
+  (e.g. a lone badge chip winning `secondary` over the actual page surface). The
+  `secondary` role additionally excludes the primary-anchor cluster, so the dominant page
+  surface no longer wins both roles and the genuine ~30% structural color (hero/header
+  band) surfaces; a single-color page now reports an empty `secondary`. The same
+  lone-cluster trap on the `page_bg`/primary axis is closed by scaling the primary boost
+  by painted area, so a tiny chip bearing only a near-zero layout-noise `page_bg` vote can
+  no longer evict a high-area surface as the primary. Role rankings and `fit_score` values
+  change; no API change.
+- Component classifier: harvested elements now carry `min_corner_radius` (the smallest of
+  the four computed corner radii), and the classifier uses it to label **pill/chip** shapes
+  as `badge` — a fully-rounded element (all four corners, via the min-corner test), wider
+  than tall, that paints a fill and carries direct text on a single text line (height
+  ≤36px). Pills are excluded from the repetition card detector, so repeated status pills /
+  category chips no longer flood `card_bg` with their accent colors — their colors land in
+  the interactive/accent palette where they belong. The bundled config gains a
+  `badge_max_h_px` geometry threshold.
+
 ## [0.4.0] - 2026-06-12
 
 Re-keys the public result contract around **usage** (what colors paint surfaces / text /
