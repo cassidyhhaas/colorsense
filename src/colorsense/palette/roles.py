@@ -34,6 +34,11 @@ Design notes
   "no second structural layer detected" answer. Primary, accent, and the neutrals keep
   all clusters as candidates: the primary surface legitimately belongs in
   neutral_light/dark, and accent's chroma/contrast terms already handle it.
+* **Primary's page_bg boost is area-gated** (`W_COMP_PRIMARY_AREA_REF`): the same
+  lone-cluster trap reaches primary through the `page_bg` bucket — a tiny chip whose
+  only vote is a near-zero layout-noise `page_bg` normalizes to 1.0 and would collect
+  the full boost. Since `page_bg` is an area claim, scaling the boost by painted area
+  neutralizes the tiny bearer while leaving a genuine high-area surface unaffected.
 * The 60/30/10 mental model:
     - **primary**   ~= the dominant neutral surface (~60%) — anchors contrast.
     - **secondary** ~= structural color (~30%) — cards/headers/nav surfaces.
@@ -75,6 +80,13 @@ CHROMA_REF: float = 0.20
 W_AREA: float = 1.0
 W_NEUTRAL: float = 0.8
 W_COMP_PRIMARY: float = 1.5
+# The comp_primary boost is scaled by painted area, full at/above this fraction.
+# page_bg is an *area* claim, so a cluster bearing it only on a tiny element must not
+# claim the primary surface: without this, a lone chip whose sole vote is a near-zero
+# layout-noise page_bg normalizes to 1.0 under per-bucket max and collects the full
+# boost, evicting the real high-area surface (the primary analogue of the secondary
+# lone-cluster trap — see the Design notes).
+W_COMP_PRIMARY_AREA_REF: float = 0.5
 
 # --- Accent scoring weights (step 3): chroma + contrast + action-components win, even at
 #     low area, so the area term is deliberately small. ---
@@ -275,7 +287,10 @@ def assign_roles(clusters: list[ColorCluster]) -> tuple[RoleResults, float]:
     # --- Step 2: primary scoring + provisional primary anchor. ---
     primary_scores: list[float] = []
     for f in feats:
-        comp_primary = f.comp_assoc[PaletteRole.primary]
+        # Scale the page_bg boost by painted area (see W_COMP_PRIMARY_AREA_REF): a large
+        # surface reaches the full boost, a tiny chip contributes ~none of it.
+        area_gate = min(1.0, f.area / W_COMP_PRIMARY_AREA_REF)
+        comp_primary = f.comp_assoc[PaletteRole.primary] * area_gate
         score = W_AREA * f.area + W_NEUTRAL * f.neutrality + W_COMP_PRIMARY * comp_primary
         primary_scores.append(score)
 
