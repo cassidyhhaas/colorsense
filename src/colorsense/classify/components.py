@@ -33,7 +33,6 @@ repetition votes. (Golden case: 4 ``.card`` ``<div>`` siblings -> ``card_bg``.)
 from __future__ import annotations
 
 import math
-import os
 
 from colorsense.config import (
     Config,
@@ -320,24 +319,12 @@ def _recombination_weights(
 ) -> dict[str, float]:
     """Channel weights (summing to 1.0 across painted channels) for recombination.
 
-    TEMPORARY PROTOTYPE SCAFFOLD — REMOVE once the A/B variant is chosen.
-    Selected by the ``CS_RECOMBINE`` env var (read at call time), defaulting to
-    variant ``"A"`` when unset/unrecognized. Precedent: the ``CS_NO_ALPHA_WEIGHT``
-    eval toggle in the repo's eval rigs. This is an evaluation knob only — there is
-    deliberately no config/YAML field for it.
-
-    * Variant A — vote-mass-share: ``w[channel] = (raw positive votes in channel) /
-      (all raw positive votes)``. Conservative; the channel that accumulated more/
-      stronger raw votes dominates.
-    * Variant B — equal-per-painted-channel: ``w[channel] = 1 / (painted channels)``.
-
-    With a single painted channel both variants return ``{channel: 1.0}``.
+    Vote-mass-share: ``w[channel] = (raw positive votes in channel) / (all raw
+    positive votes)``. The channel that accumulated more/stronger raw votes
+    dominates the recombination, so a faint secondary channel cannot dilute a
+    strongly-evidenced primary one. With a single painted channel this returns
+    ``{channel: 1.0}``.
     """
-    variant = os.environ.get("CS_RECOMBINE", "A")
-    if variant == "B":
-        weight = 1.0 / len(by_channel)
-        return {channel: weight for channel in by_channel}
-    # Variant A (default): share of raw positive vote mass.
     channel_mass = {channel: sum(votes.values()) for channel, votes in by_channel.items()}
     total_mass = sum(channel_mass.values())
     return {channel: mass / total_mass for channel, mass in channel_mass.items()}
@@ -365,7 +352,7 @@ def _finalize_distribution(
 
     INVARIANT — single-channel elements are byte-identical to the former global softmax:
     when every positive vote falls in ONE channel, ``by_channel`` has one entry, its
-    recombination weight is 1.0 under both variants, and the within-channel
+    recombination weight is 1.0, and the within-channel
     softmax/prune/renorm is exactly the old global computation. So plain text / plain
     surface / single-channel elements (the large majority) are unchanged; only
     multi-channel elements differ.

@@ -749,7 +749,7 @@ def test_bordered_submit_input_stays_cta_dominated() -> None:
     Under per-channel normalization cta_bg (bg channel) and border (border channel) no
     longer compete: border is alone in the border partition and normalizes to 1.0 there,
     surviving recombination. cta_bg still dominates the overall distribution because the
-    bg channel carries the larger raw vote mass (variant A) / equal share (variant B).
+    bg channel carries the larger raw vote mass (vote-mass-share recombination).
     """
     submit = _element(tag="input", input_type="submit", clickable=True, border=_color("#d1d9e0"))
     [result] = classify_components([submit], CONFIG, VIEWPORT)
@@ -920,12 +920,8 @@ def test_multichannel_element_paints_both_channels_unstarved() -> None:
     assert math.isclose(bg_mass + text_mass + border_mass, 1.0, rel_tol=1e-9)
 
 
-@pytest.mark.parametrize("variant", ["A", "B"])
-def test_multichannel_distribution_sums_to_one_under_both_variants(
-    variant: str, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """A multi-channel element's distribution sums to ~1.0 under both recombination variants."""
-    monkeypatch.setenv("CS_RECOMBINE", variant)
+def test_multichannel_distribution_sums_to_one() -> None:
+    """A multi-channel element's recombined distribution still sums to ~1.0."""
     # A bordered submit input spans all three channels: cta_bg/link (bg/text) + border.
     submit = _element(tag="input", input_type="submit", clickable=True, border=_color("#d1d9e0"))
     [result] = classify_components([submit], CONFIG, VIEWPORT)
