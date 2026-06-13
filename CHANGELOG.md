@@ -7,6 +7,16 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-06-13
+
+A palette-quality release (no API change). The 60/30/10 roles view now scores component
+evidence by **magnitude** rather than mix purity — a lone tiny element can no longer
+outrank the real page surface — excludes the primary anchor from the `secondary` role,
+and area-gates the primary boost so a tiny chip bearing a near-zero layout-noise `page_bg`
+vote cannot evict a high-area surface. The component classifier gains geometric
+**badge/chip** detection, so status and category pills route their accent colors to the
+interactive/accent palette instead of flooding `card_bg`.
+
 ### Changed
 
 - Roles view (60/30/10): component evidence is now scored from raw `component_mass`
@@ -538,7 +548,8 @@ Initial public release.
 - Bundled, overridable palette configuration (`config_path=` / `load_config`).
 - Fully typed (`py.typed`), Python 3.12+.
 
-[Unreleased]: https://github.com/cassidyhhaas/colorsense/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/cassidyhhaas/colorsense/compare/v0.4.1...HEAD
+[0.4.1]: https://github.com/cassidyhhaas/colorsense/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/cassidyhhaas/colorsense/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/cassidyhhaas/colorsense/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/cassidyhhaas/colorsense/compare/v0.1.0...v0.2.0
