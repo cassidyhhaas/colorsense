@@ -60,9 +60,6 @@ GROUND_TRUTH = EVAL_DIR / "ground_truth.yaml"
 # 0.10) without accepting a genuinely different hue; overridable per site in the YAML.
 DEFAULT_TOLERANCE: float = 0.06
 
-# How many top color-index atoms count as "the dominant theme colors".
-THEME_TOP_K: int = 8
-
 # Background roles, used by the family-bleed check: a text/link/border winner that matches
 # one of these roles' colors has leaked a surface hex into an element-color answer.
 _BG_ROLES = (UsageRole.page, UsageRole.surface, UsageRole.banner)
@@ -84,8 +81,6 @@ class SiteScore:
     category: str
     elements: int
     roles: tuple[RoleScore, ...]
-    theme_present: tuple[str, ...]  # expected theme colors found in the top-K color index
-    theme_missing: tuple[str, ...]  # expected theme colors absent from the top-K
 
 
 def _run_pipeline(harvest: Harvest, viewport: Viewport) -> ThemePalette:
@@ -163,24 +158,11 @@ def _score_site(name: str, spec: dict[str, Any]) -> SiteScore:
             )
         )
 
-    # Theme/brand colors: present anywhere in the top-K of the color-keyed index.
-    theme_expected = _parse_all(spec.get("theme_colors", []))
-    top_atoms = palette.colors[:THEME_TOP_K]
-    theme_present: list[str] = []
-    theme_missing: list[str] = []
-    for raw, color in zip(spec.get("theme_colors", []), theme_expected, strict=True):
-        if any(delta_e(color, atom.color) <= tol for atom in top_atoms):
-            theme_present.append(raw)
-        else:
-            theme_missing.append(raw)
-
     return SiteScore(
         site=name,
         category=spec.get("category", "quality"),
         elements=len(harvest.elements),
         roles=tuple(role_scores),
-        theme_present=tuple(theme_present),
-        theme_missing=tuple(theme_missing),
     )
 
 
@@ -198,12 +180,6 @@ def _print_human(scores: list[SiteScore]) -> None:
             )
             exp = ",".join(r.expected)
             print(f"   {r.role:8} {marks}  winner={r.winner or '-':9} expect={exp}")
-        if site.theme_present or site.theme_missing:
-            print(
-                f"   {'theme':8}     "
-                f"found={','.join(site.theme_present) or '-'} "
-                f"missing={','.join(site.theme_missing) or '-'}"
-            )
 
     # Aggregate over the quality panel only.
     all_roles = [r for s in quality for r in s.roles]
@@ -211,15 +187,11 @@ def _print_human(scores: list[SiteScore]) -> None:
     present = sum(r.present for r in all_roles)
     bled = sum(r.bled for r in all_roles)
     total = len(all_roles)
-    theme_found = sum(len(s.theme_present) for s in quality)
-    theme_total = theme_found + sum(len(s.theme_missing) for s in quality)
     print("\n" + "=" * 60)
     print(f"QUALITY PANEL ({len(quality)} sites, {total} scored roles)")
     print(f"  winner-correct : {won}/{total}  ({100 * won // total if total else 0}%)")
     print(f"  present-anywhere: {present}/{total}  ({100 * present // total if total else 0}%)")
     print(f"  family-bleed    : {bled}  (text/link/border winner == a background hex)")
-    if theme_total:
-        print(f"  theme-colors    : {theme_found}/{theme_total} found in top-{THEME_TOP_K}")
     print("  legend: W=won  .=present-not-won  X=absent  !=bleed")
 
 
@@ -238,8 +210,6 @@ def _as_dict(scores: list[SiteScore]) -> dict[str, Any]:
                 }
                 for r in s.roles
             },
-            "theme_present": list(s.theme_present),
-            "theme_missing": list(s.theme_missing),
         }
         for s in scores
     }
