@@ -181,6 +181,10 @@ def _normalize_comp_assoc(feats: list[_Features]) -> None:
     ``palette/usage.py``), then divide by the maximum ``log1p`` value across all clusters
     for that bucket, so the best-evidenced cluster gets 1.0 and ordering is preserved
     (``log1p`` is monotonic). A bucket whose max is 0 stays all-zero.
+
+    Mutates ``comp_assoc`` in place: after this runs each entry holds the normalized value,
+    not the raw mass. Any caller needing the raw mass must read it *before* normalizing
+    (today only ``assign_roles`` calls this, exactly once).
     """
     for role in PaletteRole:
         damped = [math.log1p(f.comp_assoc[role]) for f in feats]

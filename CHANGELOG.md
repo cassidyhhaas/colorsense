@@ -13,9 +13,9 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   (`background-image: linear-gradient(...)`) has a transparent computed `background-color`,
   so its brand colors used to be invisible to the palette. The harvester now records the
   gradient's opaque color stops for clickable, pill-shaped CTAs — decorative gradient panels
-  and dividers are left out — and attributes them to the palette. Semi-transparent
-  backgrounds now also count in proportion to their opacity, so a faint tint no longer votes
-  its fully-saturated color at full strength.
+  and dividers are left out — and attributes them to the palette. Separately, a
+  semi-transparent *solid* background now counts in proportion to its opacity, so a faint
+  tint no longer votes its fully-saturated color at full strength.
 
 - **Element colors are attributed per channel.** The component classifier now turns each
   element's evidence into a distribution one color channel at a time — text, background, and

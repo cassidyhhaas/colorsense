@@ -46,9 +46,10 @@ read would report a meaningless (usually black) "border color" on virtually ever
 A related subtlety covers gradient buttons: a call-to-action painted with a CSS gradient
 (`background-image: linear-gradient(...)`) has a *transparent* computed `background-color`,
 so reading only that would miss its brand colors. When a clickable, pill-shaped element's
-only fill is such a gradient, the script also records the gradient's opaque color stops —
-the button's real brand colors — while leaving decorative gradient panels and non-clickable
-dividers out, so they don't masquerade as buttons.
+only fill is such a gradient, the script also records the gradient's color stops — the
+button's real brand colors — while leaving out decorative gradient panels, non-clickable
+dividers, and any gradient that fades to a fully-transparent stop (glows and halos always
+do), so none of them masquerade as buttons.
 
 **Declared design tokens** (`harvest/tokens.py`). The CSSOM is enumerated for CSS custom
 properties (`--*`) across all same-origin stylesheets (cross-origin sheets throw on
@@ -71,10 +72,15 @@ cross-origin; the one thing it cannot see is purely JS-driven hover (a class tog
 PNG's lossless fidelity would be thrown away; capture dimensions are capped so a
 pathologically tall or wide page is clipped rather than decoded into gigabytes). The
 detected consent-banner rectangles — together with the bounding boxes of raster
-photographic content (`<img>`, `<video>`, `<canvas>`, and elements with a `url(...)`
-background image) — are zeroed out of a boolean keep-mask, so neither a cookie banner nor a
-product photo can pollute the palette. CSS gradients and inline `<svg>` are deliberately
-left in: a gradient is brand design, and a logo is usually vector. The image is then
+photographic content (`<img>`, `<video>`, `<canvas>`, `<picture>`, and elements with a
+`url(...)` background image) — are zeroed out of a boolean keep-mask, so neither a cookie
+banner nor a product photo can pollute the palette. CSS gradients and inline `<svg>` are
+deliberately left in: a gradient is brand design, and a logo is usually vector. This mask is
+a best-effort *quality* filter, not a guarantee: it catches the ordinary ways a page shows a
+photo, but obscure techniques (a raster painted through `border-image`/`mask-image`, a photo
+embedded inside an inline `<svg>`, or one tiled out of many solid-color elements) can slip
+past it. The cost of a miss is only a slightly noisier palette — the same result you would
+get without the mask — never a broken or unsafe one. The image is then
 downscaled to at most 256 px on its
 longest edge (nearest-neighbor, which keeps colors crisp rather than blending them) and
 quantized with Pillow's median-cut algorithm into at most 16 palette buckets. Each bucket
@@ -126,7 +132,8 @@ Each harvested element is scored into a probability distribution over component 
 (`page_bg`, `header_bg`, `card_bg`, `cta_bg`, `link`, `border`, `page_text`, …,
 `third_party`). The scoring is additive voting across eight feature families — semantic
 tags and ARIA roles, geometry (a full-width element near the top of the viewport votes
-`header_bg`; a fully-rounded, short, text-bearing pill votes `badge`), class/id token
+`header_bg`; a fully-rounded, short, text-bearing pill that paints a fill votes `badge`),
+class/id token
 substrings (`"navbar"` votes `nav_bg`), interactivity, border presence, text presence,
 repetition (three or more siblings sharing a tag and class token, each with a
 shadow/border/background, vote `card_bg` — the card detector, which skips pill shapes so
@@ -159,12 +166,15 @@ element's evidence its border color claims, since each channel is weighted by it
   background channel carrying 3.0 and a border channel carrying 2.5, so the border keeps
   about `2.5 / (3.0 + 2.5) ≈ 0.45` of the distribution — comfortably measured. Same split
   for a bordered text input (`input_bg: 3.0`).
-- A bordered *submit* input accumulates `cta_bg: 7.0` (semantic `input[submit]` 3.5 +
-  clickable 1.5 + the `input[submit|button]` interactivity vote 2.0), so its background
-  (interactive) channel carries 7.0 against the border's 2.5: the interactive evidence
-  dominates at `7.0 / (7.0 + 2.5) ≈ 0.74`, as it should, while the border still keeps a
-  measured `≈ 0.26` instead of vanishing. A bordered CTA button (`cta_bg ≥ 9`) tilts
-  further toward interactive in the same way.
+- A bordered *submit* input paints three channels at once. Its background channel carries
+  `cta_bg: 7.0` (semantic `input[submit]` 3.5 + clickable 1.5 + the `input[submit|button]`
+  interactivity vote 2.0) **plus** `input_bg: 3.0` — every `<input>` also matches the
+  bare-tag rule — for 10.0; the `clickable` rule additionally casts `link: 1.0` on the text
+  channel; and the border adds 2.5. Against the element's total evidence of 13.5 the
+  interactive background dominates at `10.0 / 13.5 ≈ 0.74`, as it should, while the border
+  still keeps a measured `2.5 / 13.5 ≈ 0.19` (and the text channel a slim `1.0 / 13.5 ≈
+  0.07`) instead of vanishing. A bordered CTA button, whose class tokens push its `cta_bg`
+  higher still, tilts further toward interactive in the same way.
 
 So the single 2.5 weight keeps a painted border measurable wherever it appears, while a
 strongly interactive element still keeps the bulk of its evidence on its interactive color
@@ -203,9 +213,13 @@ truth* into `ColorCluster`s:
    gate, every transparent-background element would pile votes onto a phantom black
    zero-area cluster. The background channel can carry more than one fill: when a clickable
    pill's background is a gradient, every harvested stop is attributed, the channel's vote
-   mass split evenly across them (so a two-stop button donates the same total background
-   evidence as a solid one) and each stop's share scaled by its opacity — a faint
-   translucent fill votes its intended color in proportion to how much it actually paints.
+   mass split evenly across them, so a two-stop button donates the same total background
+   evidence as a solid one. (These stops are opaque by construction — a gradient with any
+   fully-transparent stop is treated as decorative and dropped back at harvest.)
+   Independently, the background channel's vote mass is scaled by each fill's *opacity*,
+   which is what matters for a translucent *solid* background: a faint tint such as
+   `bg-primary/10` votes its intended saturated color in proportion to how little it paints,
+   rather than at full strength.
    Each fill's vote mass is added to the nearest existing entry
    within the channel's **join radius** — or, if nothing is close enough, a new entry
    with `area_weight = 0` is created so the semantics aren't lost.
