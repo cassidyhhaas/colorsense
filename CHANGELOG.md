@@ -9,6 +9,25 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- **CTA/action usage roles are ranked by vote mass, not screenshot area.** The `cta` and
+  `action` roles name *element* colors (button fills), not structural surfaces, so they now
+  rank candidate colors by `log1p` of in-role vote mass — the same DOM-derived signal already
+  used for `text`/`link`/`border` — while `page`/`surface`/`banner` keep ranking by screenshot
+  area. This fixes two problems with one change. (1) **Correctness:** the old area ranking let
+  the page background (which out-areas every button) win the `cta`/`action` role outright, so
+  the actual brand CTA was pruned and the role reported the page-background hex — e.g.
+  github.com's `cta` reported its dark page background instead of the green "Sign up" button;
+  the brand CTAs of stripe/supabase/notion/disco and others now surface. White/neutral
+  "ghost" buttons still rank first where they genuinely dominate; the brand colors are no
+  longer dropped. (2) **Determinism:** a brand CTA paints near-zero screenshot area, so which
+  of two hero buttons won the area-ranked role depended on which one Pillow's median-cut
+  quantizer happened to give its own bin — a coin flip that flipped between macOS and Linux
+  (the `ds_site` cta golden was masked with a co-dominant pair to absorb it). Vote mass is
+  computed from the DOM, not rendered pixels, so the winner — the higher-mass primary button —
+  is now identical across operating systems. The `ds_site` cta golden is back to a single hex,
+  verified on macOS and in the Linux Playwright container. No public type changed; the
+  cta/action `property_family` stays `background`.
+
 - **Family-aware color inventory.** Inventory clustering is now **segregated by
   `PropertyFamily`**: background, text, and border colors are attributed and clustered in
   separate pools, and each pool's representative is chosen by what is authoritative for that
@@ -21,8 +40,7 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   The color-keyed `colors` index groups same-hex clusters across families into one atom,
   exact-hex so family-distinct hexes (a near-white border vs the white page) stay separate.
   No public type changed; the measured text/link/border colors are more accurate. Validated
-  on a live multi-site panel (family-bleed eliminated across the panel). The cross-OS
-  `ds_site` cta near-tie is unrelated and remains tracked separately.
+  on a live multi-site panel (family-bleed eliminated across the panel).
 
 - **BREAKING — usage-role payload redesign.** The measured "usage" view was re-cut to
   separate the two axes the old 4-value `UsageCategory` (surface/text/interactive/border)

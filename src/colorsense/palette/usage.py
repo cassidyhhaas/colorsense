@@ -32,20 +32,23 @@ Design notes
   ``third_party`` flows to ``AnalysisResult.third_party_colors`` instead. The inverse
   (`COMPONENT_ROLE`) is built once and asserted to partition every routed component to
   exactly one role.
-* Role-keyed prominence is scored differently per property family, deliberately (worked
-  examples in docs/how-it-works.md):
-    - **background-family roles** (page/surface/banner/cta/action): prominence ∝ the
-      cluster's screenshot ``area_weight``. Area is authoritative for backgrounds — vote
-      counts would let repeated small elements outrank the page background. Only clusters
-      with nonzero vote mass in the role participate; a zero-area cluster scores 0 and
-      prunes naturally unless it is the argmax fallback. (The dedicated ``cta`` role keeps
-      this same formula: a colored CTA's small painted area still survives the
-      `MIN_SHARE` prune within its own role, which the 12-site validation confirmed.)
-    - **text/link/border (text- and border-family roles)**: prominence ∝ ``log1p`` of the
-      cluster's raw in-role vote mass. These paint negligible screenshot area; vote mass
-      ranks them, but only **sub-linearly** — raw (linear) mass let element *count* drown
-      high-confidence single-element evidence. ``log1p`` is monotonic, so within-role
-      *ordering* is unchanged; only the shares compress, while tiny masses still prune.
+* Role-keyed prominence is scored differently for *surface* roles vs *element* roles,
+  deliberately (see `_AREA_RANKED_ROLES`; worked examples in docs/how-it-works.md):
+    - **structural-surface roles** (page/surface/banner): prominence ∝ the cluster's
+      screenshot ``area_weight``. Area is authoritative for surfaces — vote counts would let
+      repeated small elements outrank the page background — and a dominant-area cluster
+      anchors the ranking, so the result is both correct and stable across OSes. Only
+      clusters with nonzero vote mass in the role participate; a zero-area cluster scores 0
+      and prunes naturally unless it is the argmax fallback.
+    - **element-color roles** (cta/action/text/link/border): prominence ∝ ``log1p`` of the
+      cluster's raw in-role vote mass. These paint negligible screenshot area, so area would
+      be wrong twice over — it buries the brand color under the page background (an
+      area-ranked ``cta`` collapses to the page-background hex) and it is OS-non-deterministic
+      (which near-zero-area button forms its own median-cut bin flips across OSes). Vote mass
+      is DOM-derived, so it ranks the real element color — and the primary button over the
+      secondary — correctly and stably. ``log1p`` damps it **sub-linearly** so that element
+      *count* (e.g. many neutral "ghost" buttons) cannot drown a high-confidence brand color;
+      it is monotonic, so within-role *ordering* is unchanged and only the shares compress.
 * Color-keyed ``prominence`` blends area-truth and vote mass (see `_prominence` /
   `PROMINENCE_AREA_WEIGHT`): a first-cut heuristic, monotonic in both, weighted toward
   area so dominant backgrounds rank high while zero-area brand accents are not buried.
@@ -63,7 +66,6 @@ from colorsense.models import (
     ColorCluster,
     ColorUsage,
     ComponentType,
-    PropertyFamily,
     Usage,
     UsageEntry,
     UsagePalette,
@@ -141,6 +143,26 @@ def _build_component_role() -> dict[ComponentType, UsageRole]:
 # Component-type -> usage-role routing (the inverse of `ROLE_COMPONENTS`), built and
 # partition-checked once at import.
 COMPONENT_ROLE: dict[ComponentType, UsageRole] = _build_component_role()
+
+# Roles whose role-keyed prominence is the cluster's screenshot ``area_weight`` rather than
+# its vote mass. These name the structural *surfaces* of a layout — the page canvas, raised
+# surfaces (cards/modals/hero/inputs), and header/nav/footer bands — where the right question
+# is "how much screen does this color cover" and a dominant-area cluster anchors the ranking,
+# so area is both correct and stable.
+#
+# Every OTHER role names an *element* color (cta/action button fills, text, links, borders),
+# ranked by ``log1p`` of in-role vote mass. These paint negligible screenshot area, so area
+# is the wrong signal twice over: (1) it is **incorrect** — the page background out-areas
+# every button, so an area-ranked ``cta``/``action`` collapses to the page-background hex and
+# the actual brand CTA color is pruned below `MIN_SHARE`; (2) it is **non-deterministic** —
+# which of two near-zero-area buttons forms its own median-cut screenshot bin (→ area) flips
+# across OSes on identical input. Vote mass is DOM-derived (computed colors, not rendered
+# pixels), so it is stable across OSes and ranks the brand CTA — and the primary button over
+# the secondary — correctly. (Note the cta/action *property family* stays ``background`` for
+# the ``family_of`` rollups and the color-keyed index; only their *ranking signal* differs.)
+_AREA_RANKED_ROLES: frozenset[UsageRole] = frozenset(
+    {UsageRole.page, UsageRole.surface, UsageRole.banner}
+)
 
 
 def _role_masses_from(
@@ -226,11 +248,11 @@ def build_usage(clusters: list[ColorCluster]) -> UsagePalette:
     # Stable iteration: clusters sorted by (-area_weight, hex), matching inventory order.
     for cluster in sorted(clusters, key=lambda c: (-c.area_weight, c.color.hex)):
         for role, masses in _role_masses(cluster).items():
-            if family_of(role) is PropertyFamily.background:
-                # Area-proportional (see the module docstring's Design notes).
+            if role in _AREA_RANKED_ROLES:
+                # Structural surface: area-proportional (see `_AREA_RANKED_ROLES`).
                 prominence = cluster.area_weight
             else:
-                # Sub-linear in vote mass (see the module docstring's Design notes).
+                # Element color: sub-linear in vote mass (see `_AREA_RANKED_ROLES`).
                 prominence = math.log1p(sum(masses.values()))
             per_role[role].append((cluster, prominence, masses))
 
