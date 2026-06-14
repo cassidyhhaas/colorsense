@@ -1,52 +1,33 @@
 {
-  "fit_score": 0.6156,
   "has_divergence": true,
   "single_theme": true,
   "theme_structure": {
     "light": {
-      "populated_roles": [
-        "accent",
-        "neutral_dark",
-        "neutral_light",
-        "primary",
-        "secondary"
-      ],
       "populated_usage": [
+        "banner",
         "border",
-        "interactive",
+        "cta",
+        "link",
+        "page",
         "surface",
         "text"
       ],
-      "top_role_colors": {
-        "accent": [
-          "#0969da"
-        ],
-        "neutral_dark": [
-          "#000000"
-        ],
-        "neutral_light": [
-          "#ffffff"
-        ],
-        "primary": [
-          "#ffffff"
-        ],
-        "secondary": [
-          "#d3d7da",
-          "#3e4854",
-          "#609a7c",
-          "#000000",
-          "#0969da",
-          "#1f2328",
-          "#1f883d",
-          "#59636e"
-        ]
-      },
+      "top_color_top_role": "surface",
       "top_usage_colors": {
+        "banner": [
+          "#ffffff"
+        ],
         "border": [
           "#d3d7da"
         ],
-        "interactive": [
+        "cta": [
+          "#1f883d"
+        ],
+        "link": [
           "#0969da"
+        ],
+        "page": [
+          "#ffffff"
         ],
         "surface": [
           "#ffffff"

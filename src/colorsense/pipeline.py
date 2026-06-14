@@ -2,8 +2,8 @@
 
 ``analyze`` wires every stage into one typed call: render each requested
 theme (gated by [`PolitenessPolicy`][colorsense.PolitenessPolicy]), classify tokens
-and components, build a color inventory, build the usage-keyed palette view, reconcile
-it against declared token intent, and derive the 60/30/10 roles view — per theme.
+and components, build a color inventory, build the color-keyed index and the role-keyed
+usage projection, and reconcile the latter against declared token intent — per theme.
 Sites that ignore
 ``prefers-color-scheme`` (near-identical light/dark renders)
 are collapsed to a single theme. The whole thing is assembled into a typed
@@ -46,8 +46,7 @@ from colorsense.models import (
 from colorsense.net.politeness import PolitenessPolicy
 from colorsense.palette.inventory import build_inventory
 from colorsense.palette.reconcile import reconcile
-from colorsense.palette.roles import assign_roles
-from colorsense.palette.usage import build_usage
+from colorsense.palette.usage import build_color_index, build_usage
 
 DEFAULT_VIEWPORT = Viewport(width=1280, height=800, device_scale_factor=1.0)
 
@@ -84,9 +83,9 @@ class AnalysisTimeoutError(TimeoutError):
 class _ThemeOutput:
     """Everything derived for one rendered theme.
 
-    The per-theme analysis (usage view, roles view, fit score, divergence, tokens) lives
-    on the [`ThemePalette`][colorsense.ThemePalette] itself; only the cross-theme aggregates
-    ride alongside.
+    The per-theme analysis (color-keyed index, role-keyed usage view, divergence, tokens)
+    lives on the [`ThemePalette`][colorsense.ThemePalette] itself; only the cross-theme
+    aggregates ride alongside.
     """
 
     palette: ThemePalette
@@ -292,7 +291,7 @@ def _reraise_first_leaf(eg: ExceptionGroup[Exception]) -> NoReturn:
 def _analyze_theme(
     harvest: Harvest, config: Config, viewport: Viewport, include_tokens: bool
 ) -> _ThemeOutput:
-    """Run the per-theme classify → inventory → usage → reconcile → roles chain.
+    """Run the per-theme classify → inventory → colors/usage → reconcile chain.
 
     Pure CPU over immutable inputs (no I/O, no shared mutable state); ``analyze`` runs it
     on a worker thread via ``asyncio.to_thread`` to keep the event loop responsive.
@@ -301,6 +300,10 @@ def _analyze_theme(
     classified_elements = classify_components(harvest.elements, config, viewport)
     clusters = build_inventory(harvest, classified_elements)
 
+    # The canonical color-keyed index and the role-keyed projection are both built from
+    # the same clusters (third-party-dominated colors are excluded from the index, just
+    # as they are from the role view; they ride on AnalysisResult.third_party_colors).
+    color_index = build_color_index(clusters)
     measured_usage = build_usage(clusters)
     # The full (pre-prune) inventory colors back the declared-but-unused divergence test,
     # so a declared color that rendered below the usage prune threshold is not
@@ -308,13 +311,10 @@ def _analyze_theme(
     posterior_usage, divergence = reconcile(
         measured_usage, classified_tokens, measured_colors=[c.color for c in clusters]
     )
-    measured_roles, fit_score = assign_roles(clusters)
-
     palette = ThemePalette(
         theme=harvest.theme,
+        colors=color_index,
         usage=posterior_usage,
-        roles=measured_roles,
-        fit_score=fit_score,
         divergence=tuple(divergence),
         tokens=_design_tokens(classified_tokens) if include_tokens else None,
     )

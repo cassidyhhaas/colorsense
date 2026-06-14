@@ -296,9 +296,9 @@ def _softmax_prune_renormalize(
     here. The argmax fallback is deterministic regardless — ``votes`` preserves
     config-rule insertion order. ``votes`` must be non-empty and all-positive.
     """
-    # Max-shifted (matching palette/roles.py's _softmax_weights): mathematically the
-    # probabilities are shift-invariant, but unshifted exp(vote/T) overflows once a
-    # config's vote weights stack high enough relative to its temperature.
+    # Max-shifted softmax: mathematically the probabilities are shift-invariant, but
+    # unshifted exp(vote/T) overflows once a config's vote weights stack high enough
+    # relative to its temperature.
     max_vote = max(votes.values())
     exp_weights = {
         component: math.exp((vote - max_vote) / temperature) for component, vote in votes.items()

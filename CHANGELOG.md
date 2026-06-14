@@ -7,6 +7,46 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- **BREAKING — usage-role payload redesign.** The measured "usage" view was re-cut to
+  separate the two axes the old 4-value `UsageCategory` (surface/text/interactive/border)
+  conflated — *which CSS property paints the color* versus *what kind of element it is*.
+  `UsageCategory` is **deleted** and replaced by the 8-value developer-facing `UsageRole`
+  (`page`, `surface`, `banner`, `cta`, `action`, `text`, `link`, `border`), with a
+  first-class `PropertyFamily` (`background`/`text`/`border`) rollup and a code-level
+  `family_of(role)` mapping. The worst symptom this fixes: link text and CTA button
+  backgrounds no longer share one slot, so "what color are the CTA buttons?" is answerable
+  directly (`usage.mapping[UsageRole.cta]`). The role taxonomy and the colored-CTA-retention
+  behavior were validated against 12 real sites.
+
+  Each `ThemePalette` now carries:
+  - **`colors`** — a new **canonical, color-keyed index**: a `ColorUsage` tuple (each with
+    a `prominence` ranking, `area`, and the `Usage` roles the color appears in — `role`,
+    `property_family`, `weight`, and per-`ComponentType` `components`). Answers "how is each
+    color used?". Third-party-dominated colors are excluded (they remain on
+    `AnalysisResult.third_party_colors`).
+  - **`usage`** — the role-keyed projection (today's `UsagePalette`/`UsageEntry`, re-keyed
+    from `UsageCategory` to `UsageRole`). Answers "which colors paint each role?".
+  - `DivergenceItem.category: UsageCategory` was renamed to `DivergenceItem.role: UsageRole`.
+
+  The **60/30/10 composition view was removed entirely.** Previously a `ThemePalette.roles`
+  (`RoleResults`) mapping plus a `fit_score`, it is a consumer-side re-categorization rather
+  than the library's job, and keeping it let 60/30/10-shaped scoring leak into how the
+  primary views are tuned. `ThemePalette.roles`/`fit_score`, the `RoleResults`,
+  `PaletteRole`, and `PaletteCandidate` types, and `palette/roles.py` are all gone — the
+  per-theme result now focuses on the color-keyed `colors` index and the role-keyed `usage`
+  projection (plus `divergence` and opt-in `tokens`).
+
+  Public API: added `UsageRole`, `PropertyFamily`, `family_of`, `Usage`, `ColorUsage`;
+  removed `UsageCategory`, `RoleResults`, `PaletteRole`, and `PaletteCandidate`. The
+  role-keyed view keeps the existing prominence/prune math; the color-index `prominence` is a
+  documented first-cut
+  blend (`PROMINENCE_AREA_WEIGHT`, area-primary, vote-mass-secondary) worth later empirical
+  tuning. The bundled `palette_config.yaml` token usage priors were remapped from the 4
+  categories to the 8 roles (splitting each old category's mass across the roles it became).
+  Golden snapshots were regenerated.
+
 ## [0.5.0] - 2026-06-13
 
 A palette-quality release. These changes affect the **extracted colors** (golden snapshots

@@ -10,19 +10,19 @@ Extract the rendered color palette of any website as a structured, typed Python 
 **Documentation:** [cassidyhhaas.github.io/colorsense](https://cassidyhhaas.github.io/colorsense/)
 
 colorsense renders a page in a headless browser, harvests its design tokens and computed
-element colors, and classifies them by **usage** — what colors paint the page's surfaces,
-text, interactive elements, and borders — with ranked, scored entries per category, plus a
-derived 60/30/10 roles view (primary/secondary/accent/neutrals). The result is a frozen
-Pydantic model, ready for downstream consumers (including AI models) that need to
-understand a site's color identity.
+element colors, and classifies them by **usage role** — page, surface, banner, cta, action,
+text, link, border — across two complementary indexes: a color-keyed canonical index ("how
+each color is used") and a role-keyed projection ("which colors paint each role"). The
+result is a frozen Pydantic model, ready for downstream consumers (including AI models) that
+need to understand a site's color identity.
 
 ```python
 import asyncio
-from colorsense import Theme, UsageCategory, analyze
+from colorsense import Theme, UsageRole, analyze
 
 result = asyncio.run(analyze("https://example.com"))
-surfaces = result.themes[Theme.light].usage.mapping[UsageCategory.surface]
-print(surfaces[0].color.hex)  # ranked entries; empty tuple when none detected
+ctas = result.themes[Theme.light].usage.mapping[UsageRole.cta]
+print(ctas[0].color.hex)  # ranked entries; empty tuple when none detected
 ```
 
 ## Installation
@@ -47,18 +47,24 @@ from colorsense import analyze
 result = asyncio.run(analyze("https://example.com"))
 
 for theme, palette in result.themes.items():
-    for category, entries in palette.usage.mapping.items():
-        if entries:  # every category is present; empty tuple when none detected
+    # "How is each color used?" — the canonical color-keyed index, ranked by prominence.
+    for color in palette.colors:
+        roles = ", ".join(f"{u.role}={u.weight:.2f}" for u in color.usages)
+        print(theme, color.color.hex, roles)
+    # "Which colors paint each role?" — the role-keyed projection.
+    for role, entries in palette.usage.mapping.items():
+        if entries:  # every role is present; empty tuple when none detected
             best = entries[0]
-            print(theme, category, best.color.hex, best.probability)
+            print(theme, role, best.color.hex, best.probability)
 ```
 
-The **usage view** is the primary output: each category — `surface`, `text`,
-`interactive`, `border` — maps to a probability-ranked tuple of entries; take `[0]` for
-the best pick. `palette.roles` is a derived 60/30/10 interpretation (`primary`,
-`secondary`, `accent`, `neutral_light`, `neutral_dark`) with a `fit_score` describing how
-60/30/10-like the design is. Inside an async application (e.g. a FastAPI endpoint), just
-`result = await analyze(url)`.
+Two complementary views describe usage. `palette.colors` is the **canonical, color-keyed
+index**: each measured `ColorUsage` carries its `prominence` ranking and the `Usage` roles
+it appears in (with a `property_family` rollup: background / text / border).
+`palette.usage.mapping` is the **role-keyed projection**: each `UsageRole` — `page`,
+`surface`, `banner`, `cta`, `action`, `text`, `link`, `border` — maps to a
+probability-ranked tuple of entries; take `[0]` for the best pick. Inside an async
+application (e.g. a FastAPI endpoint), just `result = await analyze(url)`.
 
 See the [usage guide](https://github.com/cassidyhhaas/colorsense/blob/main/docs/usage.md) for the full result schema, options, and fetch policy.
 
@@ -77,12 +83,14 @@ The default output is a human-readable palette summary; `--json` emits the full
 
 ## Features
 
-- **Usage-keyed palette** — what colors paint surfaces, text, interactive elements, and
-  borders, each entry carrying a confidence (`probability`), page-area dominance (`area`),
-  and the component types it came from (`components`). Preserves structure that a
-  60/30/10 taxonomy loses (e.g. a neutral design's gray text/border hierarchy).
-- **Derived 60/30/10 roles view** — five roles with ranked candidates, plus a `fit_score`
-  describing how 60/30/10-like the design is.
+- **Color-keyed index** — every measured color with the usage roles it appears in (and a
+  background/text/border `property_family` rollup), ranked by an overall `prominence`.
+  Answers "how is each color used?".
+- **Role-keyed usage projection** — what colors paint each usage role (page, surface,
+  banner, cta, action, text, link, border), each entry carrying a confidence
+  (`probability`), page-area dominance (`area`), and the component types it came from
+  (`components`). Splitting CTA backgrounds from link text (and the page canvas from raised
+  surfaces and chrome bars) preserves structure a 4-value taxonomy lost.
 - **Typed, serializable results** — `analyze` returns a frozen Pydantic `AnalysisResult`;
   `result.model_dump_json()` round-trips.
 - **OKLCH out of the box** — every `Color` carries an sRGB `hex` plus cached OKLCH

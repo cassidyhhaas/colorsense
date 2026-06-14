@@ -16,7 +16,7 @@ each theme's `ThemePalette`:
   means tokens were requested but no usable color tokens were found — none declared, or
   every declaration filtered as non-color or ignore-classified).
 - **`palette.divergence`** — discrepancies between intent and usage, keyed by
-  `UsageCategory`: **declared but unused** (only *high-intent* tokens — ones classified by
+  `UsageRole`: **declared but unused** (only *high-intent* tokens — ones classified by
   an explicit name rule or relational pattern; unused shades of a numbered color scale,
   alias followers, and fallbacks deliberately do not fire) and prominent rendered colors
   that are **used but undeclared**.
@@ -27,10 +27,10 @@ palette = result.themes[Theme.light]
 for token in palette.tokens or ():
     print(token.name, token.color.hex, token.semantic_role)
 for item in palette.divergence:
-    print(item.category, item.note, item.color.hex)  # e.g. "declared '--brand' unused in render"
+    print(item.role, item.note, item.color.hex)  # e.g. "declared '--brand' unused in render"
 ```
 
-Each divergence item carries the affected `UsageCategory`, the `Color`, and a
+Each divergence item carries the affected `UsageRole`, the `Color`, and a
 human-readable `note`.
 
 ## Custom tuning
@@ -38,9 +38,9 @@ human-readable `note`.
 [`palette_config.yaml`](https://github.com/cassidyhhaas/colorsense/blob/main/src/colorsense/data/palette_config.yaml) ships bundled with the
 package and is loaded automatically. It is the single source of truth for:
 
-- the **token vocabulary** — CSS custom-property names → semantic roles → usage-category
-  priors (how a token's color is expected to be used: surface / text / interactive /
-  border);
+- the **token vocabulary** — CSS custom-property names → semantic roles → usage-role
+  priors (how a token's color is expected to be used, over the 8 roles: page / surface /
+  banner / cta / action / text / link / border);
 - the **component-classifier weights** — how rendered elements are scored into headers,
   cards, CTAs, and so on. Besides the tag/class/geometry/interactivity rule lists, this
   includes two *presence* feature families keyed on structural facts about an element:
@@ -66,14 +66,12 @@ config = load_default_config()
 
 `config_path=` tunes the token vocabulary and the component classifier. The measurement-side
 scoring constants are documented in-code, not part of the YAML: the usage view's pruning
-threshold, component→category routing, and log-damped vote-mass prominence in
-[`palette/usage.py`](https://github.com/cassidyhhaas/colorsense/blob/main/src/colorsense/palette/usage.py) (`MIN_SHARE`, `COMPONENT_USAGE`),
+threshold, the role→component collapse, log-damped vote-mass prominence, and the
+color-index prominence blend in
+[`palette/usage.py`](https://github.com/cassidyhhaas/colorsense/blob/main/src/colorsense/palette/usage.py) (`MIN_SHARE`, `ROLE_COMPONENTS`, `PROMINENCE_AREA_WEIGHT`),
 the per-channel perceptual join radii in
 [`palette/inventory.py`](https://github.com/cassidyhhaas/colorsense/blob/main/src/colorsense/palette/inventory.py) (`DELTA_E_MATCH_BG`,
 `DELTA_E_MATCH_TEXT_BORDER`, `DELTA_E_CLUSTER`),
-the declared/measured token-match radii in
+and the declared/measured token-match radii in
 [`palette/reconcile.py`](https://github.com/cassidyhhaas/colorsense/blob/main/src/colorsense/palette/reconcile.py) (`DELTA_E_MATCH`,
-`DELTA_E_MATCH_MEASURED`),
-and the 60/30/10 role-scoring weights in
-[`palette/roles.py`](https://github.com/cassidyhhaas/colorsense/blob/main/src/colorsense/palette/roles.py) (e.g. `W_AREA`, `SOFTMAX_T`,
-`TARGET_SPLIT`).
+`DELTA_E_MATCH_MEASURED`).

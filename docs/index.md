@@ -3,10 +3,10 @@
 Extract the rendered color palette of any website as a structured, typed Python object.
 
 colorsense renders a page in headless Chromium ([Playwright](https://playwright.dev/python/)),
-harvests its design tokens and computed element colors, and classifies them by **usage** —
-what colors paint the page's surfaces, text, interactive elements, and borders — plus a
-derived 60/30/10 roles view. The usage-keyed palette is the primary result, returned as a
-frozen Pydantic `AnalysisResult`.
+harvests its design tokens and computed element colors, and classifies them by **usage role**
+— page, surface, banner, cta, action, text, link, border — exposed as a color-keyed
+canonical index and a role-keyed projection. The result is a frozen Pydantic
+`AnalysisResult`.
 
 ## Requirements
 
@@ -29,17 +29,18 @@ installing (on Linux, also `playwright install-deps chromium` for the OS librari
 
 ```python
 import asyncio
-from colorsense import Theme, UsageCategory, analyze
+from colorsense import Theme, UsageRole, analyze
 
 result = asyncio.run(analyze("https://example.com"))
 
-surfaces = result.themes[Theme.light].usage.mapping[UsageCategory.surface]
-print(surfaces[0].color.hex)  # ranked entries; empty tuple when none detected
+ctas = result.themes[Theme.light].usage.mapping[UsageRole.cta]
+print(ctas[0].color.hex)  # ranked entries; empty tuple when none detected
 ```
 
-Each usage category — `surface`, `text`, `interactive`, `border` — maps to a
-probability-ranked tuple of entries; take `[0]` for the best pick. A `colorsense` command
-ships too, for a first look with no code:
+Each usage role — `page`, `surface`, `banner`, `cta`, `action`, `text`, `link`, `border` —
+maps to a probability-ranked tuple of entries; take `[0]` for the best pick. The
+color-keyed `palette.colors` index answers the inverse question ("how is each color
+used?"). A `colorsense` command ships too, for a first look with no code:
 
 ```bash
 colorsense https://example.com

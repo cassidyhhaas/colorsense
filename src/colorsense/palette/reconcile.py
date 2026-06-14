@@ -1,13 +1,13 @@
 """Reconcile declared-token intent with measured usage via log-linear pooling.
 
-This module fuses two independent signals about a site's palette, in **usage space**
-([`UsageCategory`][colorsense.UsageCategory]):
+This module fuses two independent signals about a site's palette, in **usage-role space**
+([`UsageRole`][colorsense.UsageRole]):
 
-* **usage** — the measured per-category prominence over rendered *colors* produced by
+* **usage** — the measured per-role prominence over rendered *colors* produced by
   ``build_usage``; this is "what actually rendered".
 * **tokens** — the declared design-token *intent* produced by ``classify_tokens``; each
   token carries a resolved [`Color`][colorsense.Color] and a ``usage_prior`` distribution over
-  [`UsageCategory`][colorsense.UsageCategory]; this is "what the author declared".
+  [`UsageRole`][colorsense.UsageRole]; this is "what the author declared".
 
 The two are combined by **log-linear pooling** (a weighted geometric mean) with weight
 ``alpha`` on intent: ``alpha=0`` -> pure usage, ``alpha=1`` -> pure intent. The pooling
@@ -41,9 +41,9 @@ from colorsense.models import (
     Color,
     DivergenceItem,
     TokenOrigin,
-    UsageCategory,
     UsageEntry,
     UsagePalette,
+    UsageRole,
 )
 from colorsense.palette._pruning import prune_distribution
 from colorsense.palette.inventory import DELTA_E_MATCH_BG
@@ -68,7 +68,7 @@ DELTA_E_MATCH_MEASURED: float = DELTA_E_MATCH_BG
 #: zero-probability entry contributes ``log(EPS)`` rather than ``log(0)`` (undefined).
 #: Real ``build_usage`` output never carries zero probabilities, so this never shapes
 #: results. The INTENT side deliberately does not use it: a missing intent signal is
-#: uniform-smoothed with ``1/K`` instead (see `_pool_category`) — an EPS-floored intent
+#: uniform-smoothed with ``1/K`` instead (see `_pool_role`) — an EPS-floored intent
 #: factor made "no token match" a ~``(1/EPS)**alpha`` multiplicative veto that erased
 #: dominant undeclared colors from the posterior.
 EPS: float = 1e-9
@@ -91,7 +91,7 @@ UNDECLARED_MIN_PROB: float = 0.15
 #: meant to render), ``alias`` followers, and ``fallback`` classifications are excluded
 #: (see docs/how-it-works.md for the token-heavy-site failure that motivated the gate).
 #: The two qualifying origins reach the report by different paths: ``name_rule`` tokens
-#: carry usage priors and report through their intent group's argmax category, while
+#: carry usage priors and report through their intent group's argmax role, while
 #: ``relational`` tokens carry no prior (channel-routed) and report through the
 #: dedicated `_aggregate_relational` pass, attributed to ``text``.
 HIGH_INTENT_ORIGINS: frozenset[TokenOrigin] = frozenset(
@@ -107,15 +107,15 @@ class _IntentGroup:
 
     def __init__(self, color: Color) -> None:
         self.color: Color = color
-        self.intent_raw: dict[UsageCategory, float] = {}
+        self.intent_raw: dict[UsageRole, float] = {}
         self.token_weight: float = 0.0
         self.rep_name: str = ""
         self._rep_weight: float = -math.inf
         self.high_intent: bool = False
 
     def add(self, token: ClassifiedToken) -> None:
-        for category, prior in token.usage_prior.items():
-            self.intent_raw[category] = self.intent_raw.get(category, 0.0) + token.weight * prior
+        for role, prior in token.usage_prior.items():
+            self.intent_raw[role] = self.intent_raw.get(role, 0.0) + token.weight * prior
         self.token_weight += token.weight
         if token.origin in HIGH_INTENT_ORIGINS:
             self.high_intent = True
@@ -123,11 +123,11 @@ class _IntentGroup:
             self._rep_weight = token.weight
             self.rep_name = token.record.name
 
-    def normalized_intent(self) -> dict[UsageCategory, float]:
+    def normalized_intent(self) -> dict[UsageRole, float]:
         total = sum(self.intent_raw.values())
         if total <= 0.0:
             return {}
-        return {category: val / total for category, val in self.intent_raw.items()}
+        return {role: val / total for role, val in self.intent_raw.items()}
 
 
 def _group_by_color(eligible: list[ClassifiedToken]) -> list[_IntentGroup]:
@@ -155,7 +155,7 @@ def _group_by_color(eligible: list[ClassifiedToken]) -> list[_IntentGroup]:
 
 
 def _aggregate_intent(tokens: list[ClassifiedToken]) -> list[_IntentGroup]:
-    """Group declared tokens by color and build per-category intent scores.
+    """Group declared tokens by color and build per-role intent scores.
 
     Only tokens with a resolved color and a non-empty ``usage_prior`` are considered —
     these are the tokens that can shape pooling. Relational and (excluded) status tokens
@@ -171,7 +171,7 @@ def _aggregate_relational(tokens: list[ClassifiedToken]) -> list[_IntentGroup]:
     """Group relational (``--on-primary``-style) tokens for divergence reporting.
 
     Relational classifications always carry an EMPTY ``usage_prior`` (their config row
-    is a channel route, not a category distribution), so they never form intent groups
+    is a channel route, not a role distribution), so they never form intent groups
     and never shape pooling — but they are direct author intent (`HIGH_INTENT_ORIGINS`)
     and must still be able to raise declared-but-unused. The empty-prior filter keeps a
     (hand-constructed) prior-bearing relational token from being reported twice.
@@ -205,8 +205,8 @@ def reconcile(
 ) -> tuple[UsagePalette, list[DivergenceItem]]:
     """Fuse declared intent (``tokens``) with measured ``usage`` by log-linear pooling.
 
-    The pipeline is aggregation (`_aggregate_intent`) → per-category pooling
-    (`_pool_category`) → divergence (`_build_divergence`).
+    The pipeline is aggregation (`_aggregate_intent`) → per-role pooling
+    (`_pool_role`) → divergence (`_build_divergence`).
 
     Returns a posterior [`UsagePalette`][colorsense.UsagePalette] and a deterministic list of
     [`DivergenceItem`][colorsense.DivergenceItem]. ``alpha`` weights intent vs. usage and is clamped
@@ -217,16 +217,16 @@ def reconcile(
     ``measured_colors``, when given, is the FULL measured color inventory (every cluster
     color, pre-prune) used for the declared-but-unused membership test: ``usage`` entries
     are post-prune, so testing against them alone would report a declared color that
-    genuinely rendered — just below every category's prune threshold — as "unused in
+    genuinely rendered — just below every role's prune threshold — as "unused in
     render". ``None`` falls back to the usage entries (all colors that survived pruning).
     """
     alpha = _clamp_alpha(alpha)
     groups = _aggregate_intent(tokens)
-    intents: list[dict[UsageCategory, float]] = [g.normalized_intent() for g in groups]
+    intents: list[dict[UsageRole, float]] = [g.normalized_intent() for g in groups]
 
-    posterior_mapping: dict[UsageCategory, tuple[UsageEntry, ...]] = {}
-    for category in UsageCategory:  # iterate in enum order for determinism
-        posterior_mapping[category] = tuple(_pool_category(category, usage, groups, intents, alpha))
+    posterior_mapping: dict[UsageRole, tuple[UsageEntry, ...]] = {}
+    for role in UsageRole:  # iterate in enum order for determinism
+        posterior_mapping[role] = tuple(_pool_role(role, usage, groups, intents, alpha))
 
     posterior = UsagePalette(mapping=posterior_mapping)
     divergence = _build_divergence(usage, tokens, groups, intents, measured_colors)
@@ -235,7 +235,7 @@ def reconcile(
 
 @dataclass
 class _PoolCandidate:
-    """One measured usage entry in a category's pooling universe, with its matched
+    """One measured usage entry in a role's pooling universe, with its matched
     declared-intent share (``0.0`` when no declared group is within
     `DELTA_E_MATCH_MEASURED`)."""
 
@@ -244,25 +244,25 @@ class _PoolCandidate:
     p_intent: float
 
 
-def _pool_category(
-    category: UsageCategory,
+def _pool_role(
+    role: UsageRole,
     usage: UsagePalette,
     groups: list[_IntentGroup],
-    intents: list[dict[UsageCategory, float]],
+    intents: list[dict[UsageRole, float]],
     alpha: float,
 ) -> list[UsageEntry]:
-    """Pool the category's measured entries against declared intent, prune, renormalize.
+    """Pool the role's measured entries against declared intent, prune, renormalize.
 
     The pooling universe is the MEASURED entries only: declared intent re-weights colors
     that actually rendered, and a declared color with no measured match never enters the
     posterior (it surfaces through divergence instead). This is what makes the public
     guarantee structural — every posterior entry inherits a measured entry's ``area``
     and non-empty ``components``. (Injecting token-only colors was also a live failure
-    mode for unmeasured categories: with zero measurement the posterior collapses to
+    mode for unmeasured roles: with zero measurement the posterior collapses to
     ``intent**alpha``, a near-uniform spread where everything survives pruning; see
     docs/how-it-works.md.)
     """
-    usage_entries = usage.mapping.get(category, ())
+    usage_entries = usage.mapping.get(role, ())
     if not usage_entries:
         return []
 
@@ -270,7 +270,7 @@ def _pool_category(
         best_idx: int | None = None
         best_d = DELTA_E_MATCH_MEASURED
         for gi, group in enumerate(groups):
-            if category not in intents[gi]:
+            if role not in intents[gi]:
                 continue
             d = delta_e(color, group.color)
             if d <= best_d:
@@ -278,7 +278,7 @@ def _pool_category(
                 best_idx = gi
         if best_idx is None:
             return 0.0
-        return intents[best_idx][category]
+        return intents[best_idx][role]
 
     candidates = [
         _PoolCandidate(
@@ -300,7 +300,7 @@ def _pool_category(
     ]
 
     # Normalize, prune, renormalize survivors via the shared step; if pruning empties
-    # the category, the deterministic argmax (ties broken by smallest hex) is kept.
+    # the role, the deterministic argmax (ties broken by smallest hex) is kept.
     kept = prune_distribution(
         candidates,
         unnorm,
@@ -325,7 +325,7 @@ def _build_divergence(
     usage: UsagePalette,
     tokens: list[ClassifiedToken],
     groups: list[_IntentGroup],
-    intents: list[dict[UsageCategory, float]],
+    intents: list[dict[UsageRole, float]],
     measured_colors: Sequence[Color] | None,
 ) -> list[DivergenceItem]:
     """Report declared-but-unused and used-but-undeclared discrepancies.
@@ -337,7 +337,7 @@ def _build_divergence(
     usage_colors: list[Color] = (
         list(measured_colors)
         if measured_colors is not None
-        # Fallback: all measured usage colors that survived per-category pruning.
+        # Fallback: all measured usage colors that survived per-role pruning.
         else [entry.color for entries in usage.mapping.values() for entry in entries]
     )
 
@@ -358,10 +358,10 @@ def _build_divergence(
             continue
         if matches_any_usage(group.color):
             continue
-        argmax_category = max(intent.items(), key=lambda kv: (kv[1], kv[0].value))[0]
+        argmax_role = max(intent.items(), key=lambda kv: (kv[1], kv[0].value))[0]
         items.append(
             DivergenceItem(
-                category=argmax_category,
+                role=argmax_role,
                 color=group.color,
                 note=f"declared '{group.rep_name}' unused in render",
             )
@@ -378,7 +378,7 @@ def _build_divergence(
             continue
         items.append(
             DivergenceItem(
-                category=UsageCategory.text,
+                role=UsageRole.text,
                 color=group.color,
                 note=f"declared '{group.rep_name}' unused in render",
             )
@@ -394,20 +394,20 @@ def _build_divergence(
     def matches_any_token(color: Color) -> bool:
         return any(delta_e(color, tc) <= DELTA_E_MATCH_MEASURED for tc in token_colors)
 
-    seen: set[tuple[UsageCategory, str]] = set()
-    for category, entries in usage.mapping.items():
+    seen: set[tuple[UsageRole, str]] = set()
+    for role, entries in usage.mapping.items():
         for entry in entries:
             if entry.probability < UNDECLARED_MIN_PROB:
                 continue
             if matches_any_token(entry.color):
                 continue
-            key = (category, entry.color.hex)
+            key = (role, entry.color.hex)
             if key in seen:
                 continue
             seen.add(key)
             items.append(
                 DivergenceItem(
-                    category=category,
+                    role=role,
                     color=entry.color,
                     note="used but undeclared",
                 )

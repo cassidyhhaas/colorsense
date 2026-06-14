@@ -39,8 +39,8 @@ second theme roughly doubles the render cost. Pass `themes=LIGHT_AND_DARK` (equi
 theme; `result.metadata` records when that happened.
 
 The first theme in the tuple is "primary": when light/dark renders are near-identical, it
-is the one kept. Everything derived per theme (`usage`, `roles`, `fit_score`,
-`divergence`, `tokens`) lives on that theme's `ThemePalette` in `result.themes`.
+is the one kept. Everything derived per theme (`colors`, `usage`, `divergence`, `tokens`)
+lives on that theme's `ThemePalette` in `result.themes`.
 
 ### Overall deadline
 
@@ -104,9 +104,10 @@ stdout carries data only; warnings and errors go to stderr.
 | `--json` | Emit the full `AnalysisResult` as JSON. stdout is always exactly one valid JSON document: one object for a single URL (`null` if it failed), an array of the successful results for multiple URLs (`[]` if all failed). |
 | `--version` | Print the installed version and exit. |
 
-The default (no `--json`) output prints, per theme, the usage view first — each
-category's entries with hex, probability, and area — then the roles summary with the fit
-score, any divergence, and (under `--tokens`) the declared tokens, in the spirit of
+The default (no `--json`) output prints, per theme, the color-keyed index first (each
+color's prominence and the roles it appears in), then the role-keyed usage view (each
+role's entries with hex, probability, and area), any divergence, and (under `--tokens`) the
+declared tokens, in the spirit of
 [`examples/quickstart.py`](https://github.com/cassidyhhaas/colorsense/blob/main/examples/quickstart.py).
 
 ## The result
@@ -119,49 +120,60 @@ round-trips. The fields most consumers use:
 The payload: each rendered `Theme` mapped to a `ThemePalette` carrying everything derived
 for that theme.
 
-#### `usage` — the primary view
+#### `colors` — the canonical color-keyed index
 
-What colors paint each usage category, reconciled against the site's declared design
-tokens. Walk `palette.usage.mapping[category]` — the mapping always contains every
-`UsageCategory` (`surface`, `text`, `interactive`, `border`), with an empty tuple when
-nothing was detected. Every entry is backed by **measured** rendering evidence: the
-reconciled view only ever re-weights colors that actually rendered in the category, so a
+How each measured color is used. `palette.colors` is a tuple of `ColorUsage`, sorted by
+`prominence` descending (area-truth primary, vote-mass secondary, so dominant backgrounds
+rank high while zero-area brand accents are not buried). Third-party-dominated colors are
+excluded (they ride on `result.third_party_colors`). Each `ColorUsage` carries:
+
+- **`color`** — a `Color` (sRGB `hex` plus cached OKLCH coordinates).
+- **`prominence`** — the overall ranking signal in `[0, 1]`; the list is sorted by it.
+- **`area`** — the raw screenshot area fraction the color covers.
+- **`usages`** — a tuple of `Usage` slots, most-used first, each with the `role`
+  ([`UsageRole`](#usage-the-role-keyed-projection)), its `property_family`
+  (`background` / `text` / `border` — always `family_of(role)`), this color's `weight`
+  among its own usages (slots sum to ~1), and normalized `components` evidence.
+
+```python
+for color in result.themes[theme].colors:
+    roles = ", ".join(f"{u.role}={u.weight:.2f}" for u in color.usages)
+    print(color.color.hex, color.prominence, roles)
+```
+
+#### `usage` — the role-keyed projection
+
+What colors paint each usage role, reconciled against the site's declared design tokens.
+Walk `palette.usage.mapping[role]` — the mapping always contains every `UsageRole`
+(`page`, `surface`, `banner`, `cta`, `action`, `text`, `link`, `border`), with an empty
+tuple when nothing was detected. Every entry is backed by **measured** rendering evidence:
+the reconciled view only ever re-weights colors that actually rendered in the role, so a
 declared color with no measured match never appears as an entry (such intent can surface
 through `divergence`, provided the declared color isn't perceptually matched by measured
-usage in some other category), and `components` is never empty. Each `UsageEntry`
-carries:
+usage in some other role), and `components` is never empty. Each `UsageEntry` carries:
 
 - **`color`** — a `Color`: an sRGB `hex` string plus cached **OKLCH** coordinates
   (`lightness`, `chroma`, `hue`) of the composited color, and the source `alpha`. `hex` is
   what you paint with; the OKLCH coordinates make it easy to derive your own theme-matched
   colors — sort by perceptual lightness, build accessible tints/shades, or compute
   contrast — without re-parsing the hex.
-- **`probability`** — the color's prominence within its category (entries of one category
+- **`probability`** — the color's prominence within its role (entries of one role
   sum to ~1); entries rank by it, so `entries[0]` is the best pick.
 - **`area`** — the raw fraction of page (screenshot) area the color covers, an auditable
   signal alongside the probability.
 - **`components`** — normalized evidence: which `ComponentType`s contributed the color to
-  this category (e.g. `{card_bg: 0.7, modal_bg: 0.3}`).
+  this role (e.g. `{card_bg: 0.7, modal_bg: 0.3}`).
 
 ```python
-from colorsense import UsageCategory
+from colorsense import UsageRole
 
-for entry in result.themes[theme].usage.mapping[UsageCategory.interactive]:
+for entry in result.themes[theme].usage.mapping[UsageRole.cta]:
     print(entry.color.hex, entry.probability, entry.components)
 ```
 
-#### `roles` / `fit_score` — the derived 60/30/10 view
-
-A measured-only 60/30/10 interpretation of the same colors (it is *not* reconciled
-against tokens). `palette.roles.mapping` always contains every `PaletteRole` (`primary`,
-`secondary`, `accent`, `neutral_light`, `neutral_dark`); each `PaletteCandidate` carries
-`color`, `probability`, and `area`. `palette.fit_score` (in `[0, 1]`) describes how
-closely the design matches the canonical 60/30/10 split — a descriptive property of the
-design, not a quality score for the analysis.
-
 #### `divergence`
 
-Declared-vs-rendered discrepancies, keyed by `UsageCategory`: high-intent tokens
+Declared-vs-rendered discrepancies, keyed by `UsageRole`: high-intent tokens
 **declared but unused** in the render, and prominent rendered colors **used but
 undeclared**. See the [advanced guide](advanced.md#design-token-auditing).
 

@@ -17,28 +17,46 @@ class AnalyzeRequest(BaseModel):
 
 
 class EntryOut(BaseModel):
-    """One usage entry (or role candidate), trimmed to what API consumers paint with."""
+    """One role-keyed usage entry, trimmed to what API consumers paint with."""
 
     hex: str
     probability: float
     area: float
 
 
-class ThemeOut(BaseModel):
-    """One analyzed theme: the usage view first, then the derived 60/30/10 roles view.
+class UsageOut(BaseModel):
+    """One usage slot of a color in the color-keyed index: the role, its property family,
+    and this color's share of its own usages."""
 
-    ``usage`` maps usage category (surface/text/interactive/border) -> ranked entries;
-    ``roles`` maps role name -> ranked candidates (best first; empty list when nothing
-    was detected). ``fit_score`` describes how 60/30/10-like the design is.
+    role: str
+    property_family: str
+    weight: float
+
+
+class ColorOut(BaseModel):
+    """One color in the canonical color-keyed index: its hex, overall prominence, and the
+    usage roles it appears in (most-used first)."""
+
+    hex: str
+    prominence: float
+    area: float
+    usages: list[UsageOut]
+
+
+class ThemeOut(BaseModel):
+    """One analyzed theme, mirroring the library payload's two views.
+
+    ``colors`` is the canonical color-keyed index ("how each color is used"); ``usage``
+    maps usage role (page/surface/banner/cta/action/text/link/border) -> ranked entries
+    ("which colors paint each role").
     """
 
+    colors: list[ColorOut]
     usage: dict[str, list[EntryOut]]
-    roles: dict[str, list[EntryOut]]
-    fit_score: float
 
 
 class AnalyzeResponse(BaseModel):
-    """Trimmed response: per-theme usage view plus the derived roles view."""
+    """Trimmed response: per-theme color index and role-keyed usage view."""
 
     url: str
     themes: dict[str, ThemeOut]
@@ -47,29 +65,36 @@ class AnalyzeResponse(BaseModel):
 def shape_response(result: AnalysisResult) -> AnalyzeResponse:
     """Trim the typed result to the response shape.
 
-    The full result carries divergence, component evidence, and OKLCH coordinates —
+    The full result carries divergence, fine component evidence, and OKLCH coordinates —
     valuable to library consumers, noise to a palette API. Keep hex/probability/area per
-    entry, for both the usage view (primary) and the roles view (derived), plus the
-    per-theme fit score. Both UsageEntry and PaletteCandidate expose
-    color/probability/area, so one trimming shape covers them.
+    entry for the role-keyed usage view, plus the color-keyed index trimmed to
+    hex/prominence/area and its usage-role slots.
     """
     themes = {
         theme.value: ThemeOut(
+            colors=[
+                ColorOut(
+                    hex=cu.color.hex,
+                    prominence=cu.prominence,
+                    area=cu.area,
+                    usages=[
+                        UsageOut(
+                            role=u.role.value,
+                            property_family=u.property_family.value,
+                            weight=u.weight,
+                        )
+                        for u in cu.usages
+                    ],
+                )
+                for cu in palette.colors
+            ],
             usage={
-                category.value: [
+                role.value: [
                     EntryOut(hex=e.color.hex, probability=e.probability, area=e.area)
                     for e in entries
                 ]
-                for category, entries in palette.usage.mapping.items()
+                for role, entries in palette.usage.mapping.items()
             },
-            roles={
-                role.value: [
-                    EntryOut(hex=c.color.hex, probability=c.probability, area=c.area)
-                    for c in candidates
-                ]
-                for role, candidates in palette.roles.mapping.items()
-            },
-            fit_score=palette.fit_score,
         )
         for theme, palette in result.themes.items()
     }

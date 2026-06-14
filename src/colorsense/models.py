@@ -3,7 +3,23 @@
 These models are the single shared-contract surface for the pipeline. This file is
 **frozen** by design: downstream code must not modify it. A change to a contract here
 must be made centrally and re-validated against every dependent module, never patched
-locally by a consumer. (Most recent central change: ``HarvestedElement`` gained
+locally by a consumer. (Most recent central change: the **usage-role payload redesign** —
+the old 4-value ``UsageCategory`` (surface/text/interactive/border) was deleted and
+replaced by the 8-value developer-facing ``UsageRole``
+(page/surface/banner/cta/action/text/link/border), plus a first-class ``PropertyFamily``
+(background/text/border) rollup axis and the code-level ``family_of`` mapping. The result
+tree gained a **color-keyed canonical index** (``ColorUsage`` carrying ``Usage`` slots and
+an overall ``prominence``) alongside the re-keyed role-keyed projection (``UsagePalette``
+of ``UsageEntry``). The legacy 60/30/10 view (``RoleResults``/``Composition`` plus its
+``fit_score`` and the ``PaletteRole``/``PaletteCandidate`` taxonomy) was **dropped
+entirely**: it is a consumer-side re-categorization, not the library's job, and keeping it
+let 60/30/10-shaped logic leak into the primary views — so the response now focuses on the
+color-keyed index and the role-keyed projection. ``ThemePalette`` now carries
+``colors``/``usage``/``divergence``/``tokens``; ``DivergenceItem`` re-keyed its
+``category: UsageCategory`` field to ``role: UsageRole`` — re-validated against
+``pipeline``, ``cli``, ``classify.tokens``, ``config``, ``palette.usage``,
+``palette.reconcile``, and the ``examples`` package.
+Previous central change: ``HarvestedElement`` gained
 ``input_type: str | None = None`` — the lowercased ``type`` attribute of an ``<input>``
 element, ``None`` for non-inputs and for inputs with no/empty ``type`` attribute; mirrors
 the ``has_box_shadow``/``has_text`` precedent (defaulted, the DOM harvester always sets
@@ -39,7 +55,9 @@ caller. The frozen classification scratch types (``TokenRecord``, ``ClassifiedTo
 ``TokenOrigin``) are likewise internal: consumers see declared tokens only through the
 public [`DesignToken`][colorsense.DesignToken]. Along with the internal value type ``Rect``,
 they are deliberately excluded from ``__all__``. ``ComponentType`` is **public**: it keys the
-[`UsageEntry`][colorsense.UsageEntry]``.components`` evidence in the result tree.
+fine-grained component evidence in the result tree (both
+[`Usage`][colorsense.Usage]``.components`` on the color-keyed index and
+[`UsageEntry`][colorsense.UsageEntry]``.components`` on the role-keyed projection).
 
 The **public contract** types are enumerated in ``__all__`` below and re-exported from the
 top-level `colorsense` package, which is the canonical import path for consumers.
@@ -56,20 +74,21 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 __all__ = [
     "AnalysisResult",
     "Color",
+    "ColorUsage",
     "ComponentType",
     "DesignToken",
     "DivergenceItem",
-    "PaletteCandidate",
-    "PaletteRole",
-    "RoleResults",
+    "PropertyFamily",
     "RunMetadata",
     "Theme",
     "ThemePalette",
     "TokenSemanticRole",
-    "UsageCategory",
+    "Usage",
     "UsageEntry",
     "UsagePalette",
+    "UsageRole",
     "Viewport",
+    "family_of",
 ]
 
 # ---------------------------------------------------------------------------
@@ -77,32 +96,63 @@ __all__ = [
 # ---------------------------------------------------------------------------
 
 
-class PaletteRole(StrEnum):
-    """A slot in the 60/30/10 palette taxonomy."""
+class PropertyFamily(StrEnum):
+    """Which family of CSS properties paints the color — the rollup axis over roles.
 
-    primary = "primary"
-    secondary = "secondary"
-    accent = "accent"
-    neutral_light = "neutral_light"
-    neutral_dark = "neutral_dark"
+    Coarser than [`UsageRole`][colorsense.UsageRole]: every role belongs to exactly one
+    family (the mapping is [`family_of`][colorsense.family_of]). ``background`` covers
+    ``background-color`` / ``background-image``, ``text`` covers ``color``, and ``border``
+    covers ``border-color``.
+    """
+
+    background = "background"
+    text = "text"
+    border = "border"
 
 
-class UsageCategory(StrEnum):
-    """How a rendered color is used on the page.
+class UsageRole(StrEnum):
+    """Developer-facing usage role — how a rendered color is used on the page.
 
-    The usage taxonomy keys the primary palette view ([`UsagePalette`][colorsense.UsagePalette]):
+    The role taxonomy keys the role-keyed palette projection
+    ([`UsagePalette`][colorsense.UsagePalette]) and labels each
+    [`Usage`][colorsense.Usage] slot of the color-keyed index. It splits the two axes the
+    old 4-value usage taxonomy conflated — *which CSS property paints the color* (the
+    [`PropertyFamily`][colorsense.PropertyFamily] rollup) versus *what kind of element it
+    is* — so that, e.g., link text and CTA button backgrounds no longer share one slot:
 
-    * ``surface`` — backgrounds at every layer: page, header/nav/footer, hero, card,
-      modal, input.
-    * ``text`` — typography at every layer (page/header/nav/footer/hero/card text).
-    * ``interactive`` — links, CTA backgrounds and their text, secondary buttons, badges.
+    * ``page`` — the base canvas (the page background).
+    * ``surface`` — raised content backgrounds: cards, modals, hero, inputs.
+    * ``banner`` — chrome-bar backgrounds: header, nav, footer.
+    * ``cta`` — the primary action background (CTA buttons).
+    * ``action`` — secondary action backgrounds: secondary buttons, badges.
+    * ``text`` — body/heading typography at every layer.
+    * ``link`` — link color (typography of anchors).
     * ``border`` — borders and dividers.
     """
 
+    page = "page"
     surface = "surface"
+    banner = "banner"
+    cta = "cta"
+    action = "action"
     text = "text"
-    interactive = "interactive"
+    link = "link"
     border = "border"
+
+
+def family_of(role: UsageRole) -> PropertyFamily:
+    """Return the [`PropertyFamily`][colorsense.PropertyFamily] a usage role rolls up to.
+
+    A fixed code-level convention (mirroring ``channel_for`` for components): ``text``/``link``
+    are painted by the element's ``color`` (the ``text``
+    family), ``border`` by its ``border-color``, and every other role
+    (``page``/``surface``/``banner``/``cta``/``action``) by a background property.
+    """
+    if role in (UsageRole.text, UsageRole.link):
+        return PropertyFamily.text
+    if role is UsageRole.border:
+        return PropertyFamily.border
+    return PropertyFamily.background
 
 
 class TokenSemanticRole(StrEnum):
@@ -125,8 +175,10 @@ class TokenSemanticRole(StrEnum):
 class ComponentType(StrEnum):
     """Visual component a rendered element belongs to (source of a measured color).
 
-    Public: keys the [`UsageEntry`][colorsense.UsageEntry]``.components`` evidence in the
-    result tree, naming which component types contributed a color to a usage category.
+    Public: keys the fine-grained component evidence in the result tree — both
+    [`Usage`][colorsense.Usage]``.components`` on the color-keyed index and
+    [`UsageEntry`][colorsense.UsageEntry]``.components`` on the role-keyed projection —
+    naming which component types contributed a color to a usage role.
     """
 
     page_bg = "page_bg"
@@ -350,7 +402,7 @@ class TokenOrigin(StrEnum):
 
 
 class ClassifiedToken(BaseModel):
-    """Internal: a token tagged with its semantic role and a prior over usage categories.
+    """Internal: a token tagged with its semantic role and a prior over usage roles.
 
     Not part of the public contract — consumers see declared tokens only through
     [`DesignToken`][colorsense.DesignToken]. ``weight`` is an internal scoring
@@ -362,7 +414,7 @@ class ClassifiedToken(BaseModel):
     record: TokenRecord
     semantic_role: TokenSemanticRole
     weight: float
-    usage_prior: dict[UsageCategory, float] = Field(default_factory=dict)
+    usage_prior: dict[UsageRole, float] = Field(default_factory=dict)
     origin: TokenOrigin = TokenOrigin.fallback
 
 
@@ -394,48 +446,56 @@ class ColorCluster(BaseModel):
     component_mass: dict[ComponentType, float] = Field(default_factory=dict)
 
 
-class PaletteCandidate(BaseModel):
-    """A candidate color for a palette role with a probability and its area share."""
+class Usage(BaseModel):
+    """One usage slot of a color in the color-keyed index ([`ColorUsage`][colorsense.ColorUsage]).
 
-    model_config = ConfigDict(frozen=True)
-
-    color: Color
-    probability: float
-    area: float
-
-
-class RoleResults(BaseModel):
-    """Per-role ranked candidate lists.
-
-    ``mapping`` is guaranteed to contain every [`PaletteRole`][colorsense.PaletteRole]; a role with
-    no detected candidates maps to an empty tuple. This invariant is enforced by an after-validator
-    that backfills any missing roles, so even ``RoleResults()`` and the empty-input path expose all
-    five keys.
+    A color may be used in several roles (e.g. the same gray as ``text`` *and* ``border``);
+    each gets its own ``Usage``. ``role`` is the [`UsageRole`][colorsense.UsageRole] this
+    slot describes and ``property_family`` is its [`PropertyFamily`][colorsense.PropertyFamily]
+    rollup (denormalized — always ``family_of(role)`` — so consumers can group by family
+    without recomputing). ``weight`` is this color's share of *its own* usages — the role's
+    routed mass over the color's total routed mass, so a color's ``weight`` values sum to
+    ~1.0. ``components`` is normalized evidence within this slot: which component types
+    contributed the color to this role (e.g. ``{card_bg: 0.7, modal_bg: 0.3}``), summing to
+    ~1.0 when non-empty.
     """
 
     model_config = ConfigDict(frozen=True)
 
-    mapping: dict[PaletteRole, tuple[PaletteCandidate, ...]] = Field(default_factory=dict)
+    role: UsageRole
+    property_family: PropertyFamily
+    weight: float
+    components: dict[ComponentType, float] = Field(default_factory=dict)
 
-    @model_validator(mode="after")
-    def _backfill_roles(self) -> RoleResults:
-        """Ensure every [`PaletteRole`][colorsense.PaletteRole] is present (``()`` when absent)."""
-        # ``frozen=True`` blocks reassigning ``mapping`` itself, but the dict it points to
-        # is a regular (non-deep-frozen) dict, so in-place backfill is sound.
-        for role in PaletteRole:
-            if role not in self.mapping:
-                self.mapping[role] = ()
-        return self
+
+class ColorUsage(BaseModel):
+    """A measured color and where it is used — the color-keyed canonical inventory atom.
+
+    ``prominence`` is the overall ranking signal blending area-truth (primary) with routed
+    vote mass (secondary), so dominant backgrounds rank high while zero-area brand accents
+    (CTA/link colors) are not buried; the ``colors`` tuple is sorted by it, descending,
+    with a ``hex`` tiebreak. ``area`` is the raw screenshot area fraction the color's
+    cluster covers (an auditable signal, not a probability). ``usages`` lists every
+    [`UsageRole`][colorsense.UsageRole] the color appears in, most-used first
+    (``weight`` descending, ``hex`` tiebreak).
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    color: Color
+    prominence: float
+    area: float
+    usages: tuple[Usage, ...] = Field(default_factory=tuple)
 
 
 class UsageEntry(BaseModel):
-    """One color's standing within a usage category.
+    """One color's standing within a usage role (role-keyed projection).
 
-    ``probability`` is the posterior prominence of this color *within its category*
-    (entries of one category sum to ~1.0). ``area`` is the raw screenshot area fraction
+    ``probability`` is the posterior prominence of this color *within its role*
+    (entries of one role sum to ~1.0). ``area`` is the raw screenshot area fraction
     the color's cluster covers — an auditable signal, not a probability. ``components``
     is normalized evidence: which component types contributed this color to this
-    category (e.g. ``{card_bg: 0.7, modal_bg: 0.3}``), summing to ~1.0 when non-empty.
+    role (e.g. ``{card_bg: 0.7, modal_bg: 0.3}``), summing to ~1.0 when non-empty.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -447,27 +507,26 @@ class UsageEntry(BaseModel):
 
 
 class UsagePalette(BaseModel):
-    """The usage-keyed palette view: what colors paint each usage category.
+    """The role-keyed palette projection: which colors paint each usage role.
 
-    ``mapping`` is guaranteed to contain every [`UsageCategory`][colorsense.UsageCategory]; a
-    category with no detected entries maps to an empty tuple. This invariant is enforced by an
-    after-validator that backfills any missing categories, so even ``UsagePalette()`` and
-    the empty-input path expose all four keys.
+    ``mapping`` is guaranteed to contain every [`UsageRole`][colorsense.UsageRole]; a
+    role with no detected entries maps to an empty tuple. This invariant is enforced by an
+    after-validator that backfills any missing roles, so even ``UsagePalette()`` and
+    the empty-input path expose all eight keys.
     """
 
     model_config = ConfigDict(frozen=True)
 
-    mapping: dict[UsageCategory, tuple[UsageEntry, ...]] = Field(default_factory=dict)
+    mapping: dict[UsageRole, tuple[UsageEntry, ...]] = Field(default_factory=dict)
 
     @model_validator(mode="after")
-    def _backfill_categories(self) -> UsagePalette:
-        """Ensure every [`UsageCategory`][colorsense.UsageCategory] is present (``()`` if
-        absent)."""
+    def _backfill_roles(self) -> UsagePalette:
+        """Ensure every [`UsageRole`][colorsense.UsageRole] is present (``()`` if absent)."""
         # ``frozen=True`` blocks reassigning ``mapping`` itself, but the dict it points to
         # is a regular (non-deep-frozen) dict, so in-place backfill is sound.
-        for category in UsageCategory:
-            if category not in self.mapping:
-                self.mapping[category] = ()
+        for role in UsageRole:
+            if role not in self.mapping:
+                self.mapping[role] = ()
         return self
 
 
@@ -488,13 +547,13 @@ class DesignToken(BaseModel):
 class DivergenceItem(BaseModel):
     """A declared-but-unused or used-but-undeclared palette discrepancy.
 
-    Keyed by [`UsageCategory`][colorsense.UsageCategory] — the usage view is where declared
-    token intent is reconciled against measured usage.
+    Keyed by [`UsageRole`][colorsense.UsageRole] — the role-keyed usage view is where
+    declared token intent is reconciled against measured usage.
     """
 
     model_config = ConfigDict(frozen=True)
 
-    category: UsageCategory
+    role: UsageRole
     color: Color
     note: str
 
@@ -507,13 +566,14 @@ class DivergenceItem(BaseModel):
 class ThemePalette(BaseModel):
     """Everything derived for a single rendered theme.
 
-    * ``usage`` — the **primary view**: the reconciled posterior over usage categories
-      (measured usage pooled with declared token intent).
-    * ``roles`` — a derived, **measured-only** 60/30/10 interpretation of the same
-      clusters; it is no longer reconciled against tokens.
-    * ``fit_score`` — descriptive "how 60/30/10-like is this design" in ``[0, 1]``; not a
-      quality score.
-    * ``divergence`` — declared-vs-measured discrepancies, keyed by usage category.
+    * ``colors`` — the **canonical, color-keyed index**: every measured color
+      ([`ColorUsage`][colorsense.ColorUsage]) with where it is used and an overall
+      ``prominence`` ranking. Answers "how is each color used?". Third-party-dominated
+      colors are excluded (they live on ``AnalysisResult.third_party_colors``).
+    * ``usage`` — the **role-keyed projection** ([`UsagePalette`][colorsense.UsagePalette]):
+      the reconciled posterior over usage roles (measured usage pooled with declared token
+      intent). Answers "which colors paint each role?".
+    * ``divergence`` — declared-vs-measured discrepancies, keyed by usage role.
     * ``tokens`` — declared design tokens, opt-in: ``None`` means tokens were **not
       requested** (``include_tokens=False``, the default); ``()`` means tokens were
       requested but no usable color tokens were found — the page declares no custom
@@ -524,9 +584,8 @@ class ThemePalette(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     theme: Theme
+    colors: tuple[ColorUsage, ...] = Field(default_factory=tuple)
     usage: UsagePalette
-    roles: RoleResults
-    fit_score: float
     divergence: tuple[DivergenceItem, ...] = Field(default_factory=tuple)
     tokens: tuple[DesignToken, ...] | None = None
 
@@ -550,9 +609,8 @@ class RunMetadata(BaseModel):
 class AnalysisResult(BaseModel):
     """The top-level typed result returned by ``analyze``.
 
-    Per-theme analysis (the usage view, the derived 60/30/10 roles view, fit score,
-    divergence, and opt-in tokens) lives on each [`ThemePalette`][colorsense.ThemePalette] in
-    ``themes``.
+    Per-theme analysis (the color-keyed index, the role-keyed usage view, divergence, and
+    opt-in tokens) lives on each [`ThemePalette`][colorsense.ThemePalette] in ``themes``.
 
     This aggregate is **immutable**: it is ``frozen=True`` and its sequence field
     (``third_party_colors``) is a tuple, so neither reassigning an attribute

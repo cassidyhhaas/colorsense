@@ -4,7 +4,7 @@
 #
 # Two config domains:
 #   1. token_vocabulary  — maps CSS custom-property NAMES -> semantic token roles,
-#                          then semantic roles -> 60/30/10 palette-role priors.
+#                          then semantic roles -> usage-role priors.
 #   2. component_classifier — rule-based scorer weights for classifying DOM
 #                          elements by visual COMPONENT (source).
 #
@@ -174,22 +174,33 @@ token_vocabulary:
     base_weight: 3.0
     scale_present_confidence_boost: 1.3
 
-  # --- Semantic token role -> prior distribution over usage categories. -------
+  # --- Semantic token role -> prior distribution over usage roles. ------------
   # *** This is the most consequential table. *** Each row is the prior on HOW a
-  # token's color is used when rendered: surface (backgrounds at any layer),
-  # text (typography), interactive (links/CTAs/buttons/badges), border
-  # (borders/dividers). Distributions need not sum to 1 exactly; loader
-  # normalizes. `_on` / status / ignore channels are not usage categories —
-  # they are reported on the classified token, not used in usage ranking.
+  # token's color is used when rendered, over the 8 developer-facing usage roles:
+  #   page    (base canvas)         surface (cards/modals/hero/inputs)
+  #   banner  (header/nav/footer)   cta     (primary action background)
+  #   action  (secondary buttons/badges)    text (typography)
+  #   link    (link color)          border  (borders/dividers)
+  # Distributions need not sum to 1 exactly; loader normalizes. `_on` / status /
+  # ignore channels are not usage roles — they are reported on the classified
+  # token, not used in usage ranking.
+  #
+  # These priors were derived from the previous 4-category table (surface / text /
+  # interactive / border) by SPLITTING each old category's mass across the roles it
+  # became, preserving author intent — old `surface` -> page/surface/banner, old
+  # `interactive` -> cta/link/action, old `text` -> text, old `border` -> border —
+  # and weighting the split toward the most-likely role for each semantic (e.g. a
+  # brand_primary's interactive mass leans cta>link>action; a brand_secondary's leans
+  # action; surface_base leans page while surface_raised leans surface/banner).
   role_to_usage_prior:
-    brand_primary:   {interactive: 0.5, surface: 0.4, text: 0.1}
-    brand_secondary: {surface: 0.5, interactive: 0.3, border: 0.2}
-    brand_accent:    {interactive: 0.9, surface: 0.1}
-    interactive:     {interactive: 1.0}
-    surface_base:    {surface: 1.0}
-    surface_raised:  {surface: 1.0}
+    brand_primary:   {cta: 0.30, link: 0.15, action: 0.05, surface: 0.20, banner: 0.15, page: 0.05, text: 0.10}
+    brand_secondary: {surface: 0.25, banner: 0.20, page: 0.05, action: 0.15, cta: 0.10, link: 0.05, border: 0.20}
+    brand_accent:    {cta: 0.45, link: 0.30, action: 0.15, surface: 0.07, banner: 0.03}
+    interactive:     {cta: 0.45, link: 0.35, action: 0.20}
+    surface_base:    {page: 0.70, surface: 0.20, banner: 0.10}
+    surface_raised:  {surface: 0.60, banner: 0.30, page: 0.10}
     text_body:       {text: 1.0}
-    neutral:         {surface: 0.4, text: 0.35, border: 0.25}
+    neutral:         {page: 0.20, surface: 0.13, banner: 0.07, text: 0.35, border: 0.25}
     border:          {border: 1.0}
     text_on:         {channel: text_on}     # reported on token, not usage-ranked
     status:          {channel: status}      # excluded from palette, reported separately

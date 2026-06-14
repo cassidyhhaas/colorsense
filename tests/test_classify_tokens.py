@@ -13,7 +13,7 @@ from colorsense.models import (
     TokenOrigin,
     TokenRecord,
     TokenSemanticRole,
-    UsageCategory,
+    UsageRole,
 )
 
 CONFIG = load_default_config()
@@ -43,26 +43,26 @@ def _by_name(classified: list[ClassifiedToken], name: str) -> ClassifiedToken:
     return matches[0]
 
 
-def _argmax_category(prior: dict[UsageCategory, float]) -> UsageCategory:
-    """Return the usage category with the largest probability mass."""
+def _argmax_role(prior: dict[UsageRole, float]) -> UsageRole:
+    """Return the usage role with the largest probability mass."""
     assert prior, "usage_prior is empty"
-    return max(prior, key=lambda category: prior[category])
+    return max(prior, key=lambda role: prior[role])
 
 
-def test_color_primary_is_interactive_dominant() -> None:
-    """--color-primary strips to 'primary' -> brand_primary -> interactive-dominant."""
+def test_color_primary_is_cta_dominant() -> None:
+    """--color-primary strips to 'primary' -> brand_primary -> cta-dominant prior."""
     classified = classify_tokens([_record("--color-primary")], CONFIG)
     token = _by_name(classified, "--color-primary")
     assert token.semantic_role is TokenSemanticRole.brand_primary
     assert token.origin is TokenOrigin.name_rule
-    assert _argmax_category(token.usage_prior) is UsageCategory.interactive
+    assert _argmax_role(token.usage_prior) is UsageRole.cta
 
 
 def test_gray_scale_gets_plain_neutral_prior() -> None:
     """A gray scale token is neutral with the plain YAML prior (no lightness special-case).
 
-    The neutral prior spans surface/text/border — the usage view has no light/dark
-    neutral split, so the resolved lightness no longer reroutes the prior.
+    The neutral prior spans page/surface/banner/text/border (the old surface mass split
+    across the three background roles) — the resolved lightness no longer reroutes it.
     """
     light = parse_css_color("#f3f4f6")
     dark = parse_css_color("#111827")
@@ -80,11 +80,14 @@ def test_gray_scale_gets_plain_neutral_prior() -> None:
         # "gray" is a name rule, which outranks scale detection in the precedence.
         assert token.origin is TokenOrigin.name_rule
         assert set(token.usage_prior) == {
-            UsageCategory.surface,
-            UsageCategory.text,
-            UsageCategory.border,
+            UsageRole.page,
+            UsageRole.surface,
+            UsageRole.banner,
+            UsageRole.text,
+            UsageRole.border,
         }
-        assert _argmax_category(token.usage_prior) is UsageCategory.surface
+        # Text carries the most neutral mass in the remapped prior.
+        assert _argmax_role(token.usage_prior) is UsageRole.text
     # Light and dark resolve to the SAME prior now: no measured-lightness rerouting.
     assert (
         _by_name(classified, "--gray-100").usage_prior
@@ -124,7 +127,7 @@ def test_alias_inherits_brand_accent_with_alias_origin() -> None:
     aliased = _by_name(classified, "--zxqw")
     assert aliased.semantic_role is TokenSemanticRole.brand_accent
     assert aliased.origin is TokenOrigin.alias
-    assert _argmax_category(aliased.usage_prior) is UsageCategory.interactive
+    assert _argmax_role(aliased.usage_prior) is UsageRole.cta
     # The target itself keeps its own (name_rule) origin.
     assert _by_name(classified, "--accent").origin is TokenOrigin.name_rule
 
@@ -144,7 +147,7 @@ def test_chromatic_scale_origin_is_scale() -> None:
     token = _by_name(classified, "--blue-500")
     assert token.semantic_role is TokenSemanticRole.brand_accent
     assert token.origin is TokenOrigin.scale
-    assert _argmax_category(token.usage_prior) is UsageCategory.interactive
+    assert _argmax_role(token.usage_prior) is UsageRole.cta
 
 
 def test_neutral_scale_family_origin_is_scale() -> None:
@@ -189,10 +192,16 @@ def test_usage_prior_table_sanity() -> None:
         ],
         CONFIG,
     )
-    assert _by_name(classified, "--background").usage_prior == {UsageCategory.surface: 1.0}
-    assert _by_name(classified, "--text").usage_prior == {UsageCategory.text: 1.0}
-    assert _by_name(classified, "--border").usage_prior == {UsageCategory.border: 1.0}
-    assert _by_name(classified, "--link").usage_prior == {UsageCategory.interactive: 1.0}
+    # surface_base now leans the page canvas (the old surface mass split across roles).
+    background_prior = _by_name(classified, "--background").usage_prior
+    assert set(background_prior) == {UsageRole.page, UsageRole.surface, UsageRole.banner}
+    assert _argmax_role(background_prior) is UsageRole.page
+    assert _by_name(classified, "--text").usage_prior == {UsageRole.text: 1.0}
+    assert _by_name(classified, "--border").usage_prior == {UsageRole.border: 1.0}
+    # interactive (--link) splits across cta/link/action, cta-dominant.
+    link_prior = _by_name(classified, "--link").usage_prior
+    assert set(link_prior) == {UsageRole.cta, UsageRole.link, UsageRole.action}
+    assert _argmax_role(link_prior) is UsageRole.cta
 
 
 def test_all_nonempty_priors_sum_to_one() -> None:
