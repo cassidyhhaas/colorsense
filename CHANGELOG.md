@@ -9,6 +9,21 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- **Family-aware color inventory.** Inventory clustering is now **segregated by
+  `PropertyFamily`**: background, text, and border colors are attributed and clustered in
+  separate pools, and each pool's representative is chosen by what is authoritative for that
+  family (background by screenshot area, text/border by in-family vote mass). Previously a
+  low-area text or border color could union with a high-area background bin of a
+  near-identical hue and then be *reported as the bin's hex* — so a page-background color
+  could surface in the `border` slot, or a card surface in the `link` slot. Now the
+  `usage`/`colors` views report a real color of the right family (e.g. a site's actual light
+  `--border` gray instead of `#ffffff`; near-black body text instead of the page background).
+  The color-keyed `colors` index groups same-hex clusters across families into one atom,
+  exact-hex so family-distinct hexes (a near-white border vs the white page) stay separate.
+  No public type changed; the measured text/link/border colors are more accurate. Validated
+  on a live multi-site panel (family-bleed eliminated across the panel). The cross-OS
+  `ds_site` cta near-tie is unrelated and remains tracked separately.
+
 - **BREAKING — usage-role payload redesign.** The measured "usage" view was re-cut to
   separate the two axes the old 4-value `UsageCategory` (surface/text/interactive/border)
   conflated — *which CSS property paints the color* versus *what kind of element it is*.
