@@ -13,10 +13,13 @@
       ],
       "populated_usage": [
         "border",
-        "interactive",
+        "cta",
+        "link",
+        "page",
         "surface",
         "text"
       ],
+      "top_color_top_role": "surface",
       "top_role_colors": {
         "accent": [
           "#0969da"
@@ -38,8 +41,14 @@
         "border": [
           "#dcdfe2"
         ],
-        "interactive": [
+        "cta": [
+          "#348d50"
+        ],
+        "link": [
           "#0969da"
+        ],
+        "page": [
+          "#ffffff"
         ],
         "surface": [
           "#ffffff"

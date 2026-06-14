@@ -549,7 +549,7 @@ async def test_analyze_succeeds_with_real_browser_args(fixtures_dir: Path) -> No
         browser_args=("--js-flags=--max-old-space-size=256",),
     )
     assert result.url == url
-    assert all(palette.roles.mapping for palette in result.themes.values())
+    assert all(palette.composition.roles for palette in result.themes.values())
 
 
 @pytest.mark.browser
@@ -559,7 +559,7 @@ async def test_analyze_end_to_end_with_shared_browser(fixtures_dir: Path) -> Non
     url = (fixtures_dir / "tokens.html").as_uri()
     result = await analyze(url, viewport=VIEWPORT, themes=LIGHT_AND_DARK, politeness=file_policy())
     assert set(result.themes) == {Theme.light, Theme.dark}
-    assert all(palette.roles.mapping for palette in result.themes.values())
+    assert all(palette.composition.roles for palette in result.themes.values())
 
 
 # ---------------------------------------------------------------------------

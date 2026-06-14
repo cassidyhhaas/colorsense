@@ -1,12 +1,13 @@
-"""Palette role assignment (60/30/10 taxonomy) — a derived, measured-only view.
+"""Composition (60/30/10 taxonomy) — the demoted, derived, measured-only view.
 
 Assigns each `ColorCluster` to the five palette roles
 ([`PaletteRole`][colorsense.PaletteRole]) with a per-role probability distribution, then
 computes a ``fit_score`` measuring how well the measured palette matches the canonical
-60/30/10 split. This view is a **derived 60/30/10 interpretation of measured usage**:
-the primary palette view is the usage-keyed one (``palette/usage.py``), and the roles
-view is **no longer reconciled against declared tokens** — it is reported exactly as
-measured.
+60/30/10 split, returned together as a [`Composition`][colorsense.Composition]. This view
+is a **secondary 60/30/10 interpretation of measured usage**: the primary views are the
+color-keyed index and the role-keyed projection (``palette/usage.py``), and the
+composition is **no longer reconciled against declared tokens** — it is reported exactly
+as measured.
 
 Design notes
 ------------
@@ -55,9 +56,9 @@ from colorsense.models import (
     Color,
     ColorCluster,
     ComponentType,
+    Composition,
     PaletteCandidate,
     PaletteRole,
-    RoleResults,
 )
 from colorsense.palette._pruning import prune_distribution
 
@@ -268,17 +269,18 @@ def _fit_score(mapping: dict[PaletteRole, tuple[PaletteCandidate, ...]]) -> floa
 # ---------------------------------------------------------------------------
 
 
-def assign_roles(clusters: list[ColorCluster]) -> tuple[RoleResults, float]:
+def assign_roles(clusters: list[ColorCluster]) -> Composition:
     """Assign clusters to palette roles and compute the 60/30/10 ``fit_score``.
 
-    Returns ``(RoleResults, fit_score)``. ``RoleResults.mapping`` is populated for all five
-    palette roles (each a probability-descending candidate list). Secondary is defined
-    *relative to the primary anchor*: the provisional primary cluster never appears among
-    the secondary candidates (see the module Design notes), so a single-cluster page maps
-    secondary to ``()``. The empty-cluster case returns ``(RoleResults(mapping={}), 0.0)``.
+    Returns a [`Composition`][colorsense.Composition] whose ``roles`` mapping is populated
+    for all five palette roles (each a probability-descending candidate list) and whose
+    ``fit_score`` measures the 60/30/10 match. Secondary is defined *relative to the primary
+    anchor*: the provisional primary cluster never appears among the secondary candidates
+    (see the module Design notes), so a single-cluster page maps secondary to ``()``. The
+    empty-cluster case returns ``Composition(fit_score=0.0)`` (all roles ``()``).
     """
     if not clusters:
-        return RoleResults(mapping={}), 0.0
+        return Composition(fit_score=0.0)
 
     feats = [_Features(c) for c in clusters]
     _normalize_comp_assoc(feats)
@@ -362,4 +364,4 @@ def assign_roles(clusters: list[ColorCluster]) -> tuple[RoleResults, float]:
     # --- Step 5: fit_score. ---
     fit = _fit_score(mapping)
 
-    return RoleResults(mapping=mapping), fit
+    return Composition(fit_score=fit, roles=mapping)

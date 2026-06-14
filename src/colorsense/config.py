@@ -36,7 +36,7 @@ from typing import Literal
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from colorsense.models import TokenSemanticRole, UsageCategory
+from colorsense.models import TokenSemanticRole, UsageRole
 
 __all__ = [
     "ChannelPrior",
@@ -208,11 +208,11 @@ class ChannelPrior(BaseModel):
 
 
 class DistributionPrior(BaseModel):
-    """A ``role_to_usage_prior`` row: a normalized distribution over usage categories."""
+    """A ``role_to_usage_prior`` row: a normalized distribution over usage roles."""
 
     model_config = ConfigDict(frozen=True)
 
-    distribution: dict[UsageCategory, float]
+    distribution: dict[UsageRole, float]
 
 
 # A prior row is either a normalized distribution or a tagged channel.

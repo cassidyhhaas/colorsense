@@ -12,11 +12,15 @@
         "secondary"
       ],
       "populated_usage": [
+        "banner",
         "border",
-        "interactive",
+        "cta",
+        "link",
+        "page",
         "surface",
         "text"
       ],
+      "top_color_top_role": "banner",
       "top_role_colors": {
         "accent": [
           "#7c3aed",
@@ -37,11 +41,21 @@
         ]
       },
       "top_usage_colors": {
+        "banner": [
+          "#111828"
+        ],
         "border": [
           "#1f2937"
         ],
-        "interactive": [
-          "#f59e0b"
+        "cta": [
+          "#7c3aed"
+        ],
+        "link": [
+          "#1f2937",
+          "#ffffff"
+        ],
+        "page": [
+          "#111828"
         ],
         "surface": [
           "#111828"
@@ -60,11 +74,15 @@
         "secondary"
       ],
       "populated_usage": [
+        "banner",
         "border",
-        "interactive",
+        "cta",
+        "link",
+        "page",
         "surface",
         "text"
       ],
+      "top_color_top_role": "banner",
       "top_role_colors": {
         "accent": [
           "#5943ce"
@@ -83,11 +101,21 @@
         ]
       },
       "top_usage_colors": {
+        "banner": [
+          "#ffffff"
+        ],
         "border": [
           "#e2e8f0"
         ],
-        "interactive": [
-          "#f59e0b"
+        "cta": [
+          "#5943ce"
+        ],
+        "link": [
+          "#1f2937",
+          "#ffffff"
+        ],
+        "page": [
+          "#ffffff"
         ],
         "surface": [
           "#ffffff"

@@ -30,12 +30,12 @@ from colorsense.color.primitives import delta_e, parse_css_color
 from colorsense.models import (
     AnalysisResult,
     Color,
+    Composition,
     PaletteRole,
-    RoleResults,
     Theme,
     ThemePalette,
     TokenSemanticRole,
-    UsageCategory,
+    UsageRole,
 )
 
 GOLDEN_DIR = Path(__file__).parent / "golden"
@@ -71,9 +71,9 @@ async def _analyze(fixture: Path) -> AnalysisResult:
 # ---------------------------------------------------------------------------
 
 
-def _dominant_role_colors(roles: RoleResults) -> list[Color]:
-    """The argmax (dominant) candidate color per role."""
-    return [candidates[0].color for candidates in roles.mapping.values() if candidates]
+def _dominant_role_colors(composition: Composition) -> list[Color]:
+    """The argmax (dominant) candidate color per palette role."""
+    return [candidates[0].color for candidates in composition.roles.values() if candidates]
 
 
 def _color_near(colors: list[Color], target_hex: str) -> bool:
@@ -124,7 +124,7 @@ def _theme_structure(palette: ThemePalette) -> dict[str, Any]:
     generated on or across which side of a near-tie wins. Roles and categories are
     emitted in a stable, sorted order so the digest is deterministic.
     """
-    mapping = palette.roles.mapping
+    mapping = palette.composition.roles
     populated = sorted(str(role) for role, cands in mapping.items() if cands)
     top_colors = {
         str(role): _co_dominant_hexes(cands)
@@ -132,17 +132,26 @@ def _theme_structure(palette: ThemePalette) -> dict[str, Any]:
         if cands
     }
     usage_mapping = palette.usage.mapping
-    populated_usage = sorted(str(cat) for cat, entries in usage_mapping.items() if entries)
+    populated_usage = sorted(str(role) for role, entries in usage_mapping.items() if entries)
     top_usage_colors = {
-        str(cat): _co_dominant_hexes(entries)
-        for cat, entries in sorted(usage_mapping.items(), key=lambda kv: str(kv[0]))
+        str(role): _co_dominant_hexes(entries)
+        for role, entries in sorted(usage_mapping.items(), key=lambda kv: str(kv[0]))
         if entries
     }
+    # The color-keyed index: the most-prominent color's top usage role, as a stable
+    # structural signal (its hex is checked perceptually below via top_usage_colors;
+    # exact hexes are intentionally NOT pinned here — they drift across OSes).
+    top_color_top_role = (
+        str(palette.colors[0].usages[0].role)
+        if palette.colors and palette.colors[0].usages
+        else None
+    )
     return {
         "populated_roles": populated,
         "top_role_colors": top_colors,
         "populated_usage": populated_usage,
         "top_usage_colors": top_usage_colors,
+        "top_color_top_role": top_color_top_role,
     }
 
 
@@ -170,7 +179,7 @@ def _digest(result: AnalysisResult) -> dict[str, Any]:
             str(theme): _theme_structure(palette)
             for theme, palette in sorted(result.themes.items(), key=lambda kv: str(kv[0]))
         },
-        "fit_score": round(primary.fit_score, 4),
+        "fit_score": round(primary.composition.fit_score, 4),
     }
 
 
@@ -283,17 +292,22 @@ async def test_design_system_site(fixtures_dir: Path) -> None:
     assert not result.third_party_colors
 
     # A token-driven site agrees well between declared intent and measured usage.
-    assert light.fit_score > 0.6
+    assert light.composition.fit_score > 0.6
 
     # Dominance (perceptual, platform-robust): the accent role is led by a declared
-    # brand color, and the same brand colors lead the interactive usage category.
-    accent = light.roles.mapping.get(PaletteRole.accent, [])
+    # brand color, and the same brand colors lead the cta usage role.
+    accent = light.composition.roles.get(PaletteRole.accent, [])
     assert accent, "expected accent candidates"
     brand_hexes = ("#2563eb", "#7c3aed", "#f59e0b")
     assert any(_color_near([accent[0].color], h) for h in brand_hexes)
-    interactive = light.usage.mapping[UsageCategory.interactive]
-    assert interactive, "expected interactive usage entries"
-    assert any(_color_near([interactive[0].color], h) for h in brand_hexes)
+    cta = light.usage.mapping[UsageRole.cta]
+    assert cta, "expected cta usage entries"
+    assert any(_color_near([cta[0].color], h) for h in brand_hexes)
+
+    # The color-keyed index is populated and excludes status/third-party colors.
+    assert light.colors, "expected a populated color index"
+    index_hexes = {cu.color.hex for cu in light.colors}
+    assert not (status_hexes & index_hexes)
 
     # The result is a clean Pydantic round-trip.
     assert AnalysisResult.model_validate_json(result.model_dump_json()) == result
@@ -342,7 +356,7 @@ async def test_cards_site(fixtures_dir: Path) -> None:
     # Six repeated `.product-card` siblings are detected and their shared surface
     # (~#f1f5f9) becomes a dominant palette color.
     (palette,) = result.themes.values()
-    assert _color_near(_dominant_role_colors(palette.roles), "#f1f5f9")
+    assert _color_near(_dominant_role_colors(palette.composition), "#f1f5f9")
 
     _check_golden("cards_site", _digest(result))
 
@@ -363,27 +377,35 @@ async def test_usage_redesign_captures_neutral_layered_design(fixtures_dir: Path
     (palette,) = result.themes.values()
     usage = palette.usage.mapping
 
-    # SURFACE: the white page background dominates, with the layered light-gray
-    # surfaces (header/nav/cards, #f6f8fa) also present.
-    surface = usage[UsageCategory.surface]
-    assert surface, "expected surface entries"
-    assert _color_near([surface[0].color], "#ffffff")
-    assert _color_near([e.color for e in surface], "#f6f8fa")
+    # PAGE: the white page background dominates the base-canvas role.
+    page = usage[UsageRole.page]
+    assert page, "expected page entries"
+    assert _color_near([page[0].color], "#ffffff")
+    # The layered light-gray surfaces (header/nav/cards, #f6f8fa) land in the
+    # background-family roles (banner for header/nav, surface for cards).
+    background_colors = [
+        e.color
+        for role in (UsageRole.page, UsageRole.surface, UsageRole.banner)
+        for e in usage[role]
+    ]
+    assert _color_near(background_colors, "#f6f8fa")
 
     # TEXT: the gray text scale survives — at least two distinct grays (dark body
-    # #1f2328 and muted #59636e), the structure the roles view loses entirely.
-    text_colors = [e.color for e in usage[UsageCategory.text]]
+    # #1f2328 and muted #59636e), the structure the composition view loses entirely.
+    text_colors = [e.color for e in usage[UsageRole.text]]
     assert len(text_colors) >= 2
     assert _color_near(text_colors, "#1f2328")
     assert _color_near(text_colors, "#59636e")
 
-    # INTERACTIVE: both the blue links and the green CTA buttons.
-    interactive_colors = [e.color for e in usage[UsageCategory.interactive]]
-    assert _color_near(interactive_colors, "#0969da")
-    assert _color_near(interactive_colors, "#1f883d")
+    # LINK vs CTA — the redesign's payoff: the blue links and the green CTA buttons now
+    # live in distinct roles instead of one fused "interactive" slot.
+    link_colors = [e.color for e in usage[UsageRole.link]]
+    assert _color_near(link_colors, "#0969da")
+    cta_colors = [e.color for e in usage[UsageRole.cta]]
+    assert _color_near(cta_colors, "#1f883d")
 
     # BORDER: the gray border/divider color.
-    border_colors = [e.color for e in usage[UsageCategory.border]]
+    border_colors = [e.color for e in usage[UsageRole.border]]
     assert _color_near(border_colors, "#d1d9e0")
 
     _check_golden("repo_site", _digest(result))
@@ -413,23 +435,30 @@ async def test_live_probe_regressions_encoded_offline(fixtures_dir: Path) -> Non
     (palette,) = result.themes.values()
     usage = palette.usage.mapping
 
-    # THE TOKEN-FLOOD REGRESSION: no usage entry in ANY category may have empty
+    # THE TOKEN-FLOOD REGRESSION: no usage entry in ANY role may have empty
     # components — every posterior entry must be backed by measured element votes
     # (token-only colors either pool into measured entries or stay out entirely).
-    for category, entries in usage.items():
+    for role, entries in usage.items():
         for entry in entries:
-            assert entry.components, (category, entry.color.hex)
+            assert entry.components, (role, entry.color.hex)
 
-    # SURFACE: white page dominates; the dark code-block surface is present.
-    surface = usage[UsageCategory.surface]
-    assert _color_near([surface[0].color], "#ffffff")
-    assert _color_near([e.color for e in surface], "#0d1117")
+    # No color-keyed-index entry may have an empty usages tuple either.
+    for cu in palette.colors:
+        assert cu.usages, cu.color.hex
+
+    # BACKGROUNDS: the white page dominates the page role; the dark code-block surface is
+    # present somewhere in the background-family roles (page/surface/banner).
+    background_colors = [
+        e.color for r in (UsageRole.page, UsageRole.surface, UsageRole.banner) for e in usage[r]
+    ]
+    assert _color_near([usage[UsageRole.page][0].color], "#ffffff")
+    assert _color_near(background_colors, "#0d1117")
 
     # TEXT (text_presence + tight text-channel join radius): the near-black body
     # text forms its OWN entry — it must not have merged into the adjacent dark
     # code-block bin (0.078 deltaEOK away, inside the old 0.10 bg radius) — and the
     # plain-span muted gray is measured as a second distinct gray.
-    text_colors = [e.color for e in usage[UsageCategory.text]]
+    text_colors = [e.color for e in usage[UsageRole.text]]
     body_text = parse_css_color("#1f2328")
     assert body_text is not None
     # (The tight tolerance IS the no-merge assertion: had the text merged, the
@@ -442,7 +471,7 @@ async def test_live_probe_regressions_encoded_offline(fixtures_dir: Path) -> Non
 
     # BORDER (border_presence, NO inputs anywhere): measured, component-backed, and
     # led by the real card/divider border — not by declared exotic border tokens.
-    border = usage[UsageCategory.border]
+    border = usage[UsageRole.border]
     assert border, "expected border entries"
     assert border[0].components, "top border entry must carry component evidence"
     assert _color_near([border[0].color], "#d1d9e0")
@@ -456,11 +485,13 @@ async def test_live_probe_regressions_encoded_offline(fixtures_dir: Path) -> Non
         assert target is not None
         assert all(delta_e(e.color, target) > COMPUTED_COLOR_TOL for e in border), unrendered
 
-    # INTERACTIVE (log1p damping): the single green Primer-classed CTA survives
-    # against five blue links.
-    interactive_colors = [e.color for e in usage[UsageCategory.interactive]]
-    assert _color_near(interactive_colors, "#0969da")
-    assert _color_near(interactive_colors, "#1f883d")
+    # LINK vs CTA: the five blue links populate the link role; the single green
+    # Primer-classed CTA survives in its OWN dedicated cta role (it no longer has to
+    # outvote ~200 link votes for a shared interactive slot).
+    link_colors = [e.color for e in usage[UsageRole.link]]
+    assert _color_near(link_colors, "#0969da")
+    cta_colors = [e.color for e in usage[UsageRole.cta]]
+    assert _color_near(cta_colors, "#1f883d")
 
     _check_golden("repo_probe_site", _digest(result))
 

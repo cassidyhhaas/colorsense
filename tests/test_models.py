@@ -10,14 +10,16 @@ from colorsense.models import (
     ClassifiedToken,
     Color,
     ColorCluster,
+    ColorUsage,
     ComponentType,
+    Composition,
     DesignToken,
     DivergenceItem,
     HarvestedElement,
     PaletteCandidate,
     PaletteRole,
+    PropertyFamily,
     Rect,
-    RoleResults,
     RunMetadata,
     ScreenshotBin,
     Theme,
@@ -25,10 +27,12 @@ from colorsense.models import (
     TokenOrigin,
     TokenRecord,
     TokenSemanticRole,
-    UsageCategory,
+    Usage,
     UsageEntry,
     UsagePalette,
+    UsageRole,
     Viewport,
+    family_of,
 )
 
 
@@ -44,7 +48,7 @@ def _dummy_result(*, tokens: tuple[DesignToken, ...] | None = None) -> AnalysisR
 
     usage = UsagePalette(
         mapping={
-            UsageCategory.surface: (
+            UsageRole.page: (
                 UsageEntry(
                     color=white,
                     probability=0.8,
@@ -52,30 +56,63 @@ def _dummy_result(*, tokens: tuple[DesignToken, ...] | None = None) -> AnalysisR
                     components={ComponentType.page_bg: 1.0},
                 ),
             ),
-            UsageCategory.interactive: (
+            UsageRole.cta: (
                 UsageEntry(
                     color=brand,
                     probability=0.7,
                     area=0.05,
-                    components={ComponentType.link: 0.6, ComponentType.cta_bg: 0.4},
+                    components={ComponentType.cta_bg: 1.0},
                 ),
             ),
         }
     )
-    roles = RoleResults(
-        mapping={
+    colors = (
+        ColorUsage(
+            color=white,
+            prominence=0.9,
+            area=0.6,
+            usages=(
+                Usage(
+                    role=UsageRole.page,
+                    property_family=PropertyFamily.background,
+                    weight=1.0,
+                    components={ComponentType.page_bg: 1.0},
+                ),
+            ),
+        ),
+        ColorUsage(
+            color=brand,
+            prominence=0.3,
+            area=0.05,
+            usages=(
+                Usage(
+                    role=UsageRole.cta,
+                    property_family=PropertyFamily.background,
+                    weight=0.7,
+                    components={ComponentType.cta_bg: 1.0},
+                ),
+                Usage(
+                    role=UsageRole.link,
+                    property_family=PropertyFamily.text,
+                    weight=0.3,
+                    components={ComponentType.link: 1.0},
+                ),
+            ),
+        ),
+    )
+    composition = Composition(
+        fit_score=0.82,
+        roles={
             PaletteRole.primary: (PaletteCandidate(color=white, probability=0.8, area=0.6),),
             PaletteRole.accent: (PaletteCandidate(color=brand, probability=0.7, area=0.05),),
-        }
+        },
     )
     theme_palette = ThemePalette(
         theme=Theme.light,
+        colors=colors,
         usage=usage,
-        roles=roles,
-        fit_score=0.82,
-        divergence=(
-            DivergenceItem(category=UsageCategory.surface, color=dark, note="declared but unused"),
-        ),
+        composition=composition,
+        divergence=(DivergenceItem(role=UsageRole.page, color=dark, note="declared but unused"),),
         tokens=tokens,
     )
 
@@ -99,6 +136,23 @@ def _design_token() -> DesignToken:
         color=_color("#3366cc", 0.55),
         semantic_role=TokenSemanticRole.brand_primary,
     )
+
+
+def test_family_of_maps_every_role() -> None:
+    # family_of is total over UsageRole and matches the documented rollup.
+    assert family_of(UsageRole.text) is PropertyFamily.text
+    assert family_of(UsageRole.link) is PropertyFamily.text
+    assert family_of(UsageRole.border) is PropertyFamily.border
+    for role in (
+        UsageRole.page,
+        UsageRole.surface,
+        UsageRole.banner,
+        UsageRole.cta,
+        UsageRole.action,
+    ):
+        assert family_of(role) is PropertyFamily.background
+    # Total: defined for every role.
+    assert {family_of(r) for r in UsageRole} <= set(PropertyFamily)
 
 
 def test_value_objects_are_frozen() -> None:
@@ -130,10 +184,17 @@ def test_output_models_are_frozen() -> None:
 
     palette = result.themes[Theme.light]
     with pytest.raises(ValidationError):
-        palette.fit_score = 1.0  # type: ignore[misc]
-    assert palette.fit_score == 0.82
+        palette.composition.fit_score = 1.0  # type: ignore[misc]
+    assert palette.composition.fit_score == 0.82
 
-    entry = palette.usage.mapping[UsageCategory.surface][0]
+    color_usage = palette.colors[0]
+    with pytest.raises(ValidationError):
+        color_usage.prominence = 0.1  # type: ignore[misc]
+    usage_slot = color_usage.usages[0]
+    with pytest.raises(ValidationError):
+        usage_slot.weight = 0.1  # type: ignore[misc]
+
+    entry = palette.usage.mapping[UsageRole.page][0]
     with pytest.raises(ValidationError):
         entry.probability = 0.1  # type: ignore[misc]
 
@@ -141,13 +202,13 @@ def test_output_models_are_frozen() -> None:
     with pytest.raises(ValidationError):
         usage_palette.mapping = {}  # type: ignore[misc]
 
-    candidate = palette.roles.mapping[PaletteRole.accent][0]
+    candidate = palette.composition.roles[PaletteRole.accent][0]
     with pytest.raises(ValidationError):
         candidate.probability = 0.1  # type: ignore[misc]
 
-    role_results = palette.roles
+    composition = palette.composition
     with pytest.raises(ValidationError):
-        role_results.mapping = {}  # type: ignore[misc]
+        composition.roles = {}  # type: ignore[misc]
 
     assert palette.tokens is not None
     token = palette.tokens[0]
@@ -168,34 +229,54 @@ def test_output_sequence_fields_are_tuples_not_appendable() -> None:
     with pytest.raises(AttributeError):
         palette.tokens.append(palette.tokens[0])  # type: ignore[attr-defined]
 
-    entries = palette.usage.mapping[UsageCategory.surface]
+    assert isinstance(palette.colors, tuple)
+    with pytest.raises(AttributeError):
+        palette.colors.append(palette.colors[0])  # type: ignore[attr-defined]
+    assert isinstance(palette.colors[0].usages, tuple)
+
+    entries = palette.usage.mapping[UsageRole.page]
     assert isinstance(entries, tuple)
     with pytest.raises(AttributeError):
         entries.append(entries[0])  # type: ignore[attr-defined]
 
-    candidates = palette.roles.mapping[PaletteRole.accent]
+    candidates = palette.composition.roles[PaletteRole.accent]
     assert isinstance(candidates, tuple)
     with pytest.raises(AttributeError):
         candidates.append(candidates[0])  # type: ignore[attr-defined]
 
 
-def test_usage_palette_backfills_all_categories() -> None:
-    # The after-validator guarantees every UsageCategory key, mapping to () when absent —
+def test_usage_palette_backfills_all_roles() -> None:
+    # The after-validator guarantees every UsageRole key, mapping to () when absent —
     # even for the bare constructor and a partially-populated mapping.
     empty = UsagePalette()
-    assert set(empty.mapping) == set(UsageCategory)
+    assert set(empty.mapping) == set(UsageRole)
     assert all(entries == () for entries in empty.mapping.values())
 
     partial = UsagePalette(
         mapping={
-            UsageCategory.text: (UsageEntry(color=_color(), probability=1.0, area=0.0),),
+            UsageRole.text: (UsageEntry(color=_color(), probability=1.0, area=0.0),),
         }
     )
-    assert set(partial.mapping) == set(UsageCategory)
-    assert partial.mapping[UsageCategory.text] != ()
-    assert partial.mapping[UsageCategory.surface] == ()
-    assert partial.mapping[UsageCategory.interactive] == ()
-    assert partial.mapping[UsageCategory.border] == ()
+    assert set(partial.mapping) == set(UsageRole)
+    assert partial.mapping[UsageRole.text] != ()
+    for role in UsageRole:
+        if role is not UsageRole.text:
+            assert partial.mapping[role] == ()
+
+
+def test_composition_backfills_all_palette_roles() -> None:
+    # Composition backfills every PaletteRole to (), even for the minimal constructor.
+    empty = Composition(fit_score=0.0)
+    assert set(empty.roles) == set(PaletteRole)
+    assert all(cands == () for cands in empty.roles.values())
+
+    partial = Composition(
+        fit_score=0.5,
+        roles={PaletteRole.primary: (PaletteCandidate(color=_color(), probability=1.0, area=0.5),)},
+    )
+    assert set(partial.roles) == set(PaletteRole)
+    assert partial.roles[PaletteRole.primary] != ()
+    assert partial.roles[PaletteRole.accent] == ()
 
 
 def test_theme_palette_tokens_none_vs_empty() -> None:
@@ -264,7 +345,7 @@ def test_internal_classified_token_carries_origin_and_usage_prior() -> None:
         ),
         semantic_role=TokenSemanticRole.brand_primary,
         weight=5.0,
-        usage_prior={UsageCategory.interactive: 0.5, UsageCategory.surface: 0.5},
+        usage_prior={UsageRole.cta: 0.5, UsageRole.surface: 0.5},
         origin=TokenOrigin.name_rule,
     )
     assert token.origin is TokenOrigin.name_rule
@@ -282,14 +363,19 @@ def test_analysis_result_json_round_trip() -> None:
     # Enum-keyed dicts survive the round trip.
     assert Theme.light in restored.themes
     palette = restored.themes[Theme.light]
-    assert UsageCategory.surface in palette.usage.mapping
-    surface_entry = palette.usage.mapping[UsageCategory.surface][0]
-    assert surface_entry.color.hex == "#ffffff"
-    assert surface_entry.components[ComponentType.page_bg] == 1.0
-    assert palette.roles.mapping[PaletteRole.accent][0].color.hex == "#3366cc"
+    assert UsageRole.page in palette.usage.mapping
+    page_entry = palette.usage.mapping[UsageRole.page][0]
+    assert page_entry.color.hex == "#ffffff"
+    assert page_entry.components[ComponentType.page_bg] == 1.0
+    # Color-keyed index round-trips, including nested Usage slots and their family.
+    assert palette.colors[0].color.hex == "#ffffff"
+    brand_color = palette.colors[1]
+    assert brand_color.usages[0].role is UsageRole.cta
+    assert brand_color.usages[1].property_family is PropertyFamily.text
+    assert palette.composition.roles[PaletteRole.accent][0].color.hex == "#3366cc"
     assert palette.tokens is not None
     assert palette.tokens[0].semantic_role is TokenSemanticRole.brand_primary
-    assert palette.divergence[0].category is UsageCategory.surface
+    assert palette.divergence[0].role is UsageRole.page
     assert restored.metadata.user_agent == "colorsense"
     assert restored.metadata.themes_requested == (Theme.light, Theme.dark)
     # Sequence fields round-trip as tuples (typed ``tuple[X, ...]``), not lists.
@@ -297,16 +383,30 @@ def test_analysis_result_json_round_trip() -> None:
     assert isinstance(palette.divergence, tuple)
     assert isinstance(palette.tokens, tuple)
     assert isinstance(restored.metadata.themes_requested, tuple)
-    assert isinstance(palette.usage.mapping[UsageCategory.surface], tuple)
-    assert isinstance(palette.roles.mapping[PaletteRole.accent], tuple)
+    assert isinstance(palette.colors, tuple)
+    assert isinstance(palette.colors[1].usages, tuple)
+    assert isinstance(palette.usage.mapping[UsageRole.page], tuple)
+    assert isinstance(palette.composition.roles[PaletteRole.accent], tuple)
 
 
 def test_public_api_exports() -> None:
-    # The usage redesign's public surface: new names exported, internals removed.
+    # The usage-role redesign's public surface: new names exported, old/internals removed.
     import colorsense
 
-    for name in ("UsageCategory", "UsageEntry", "UsagePalette", "DesignToken", "ComponentType"):
+    for name in (
+        "UsageRole",
+        "PropertyFamily",
+        "family_of",
+        "Usage",
+        "ColorUsage",
+        "Composition",
+        "UsageEntry",
+        "UsagePalette",
+        "DesignToken",
+        "ComponentType",
+    ):
         assert name in colorsense.__all__, name
         assert hasattr(colorsense, name)
-    for name in ("ClassifiedToken", "TokenRecord"):
+    for name in ("UsageCategory", "RoleResults", "ClassifiedToken", "TokenRecord"):
         assert name not in colorsense.__all__, name
+        assert not hasattr(colorsense, name)

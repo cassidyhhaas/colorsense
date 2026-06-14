@@ -1,8 +1,8 @@
 """Token classifier.
 
 Classify declared design tokens (CSS custom properties) into semantic roles and
-produce, for each token, a prior distribution over the usage categories
-([`UsageCategory`][colorsense.UsageCategory]) — how the token's color is expected to be
+produce, for each token, a prior distribution over the usage roles
+([`UsageRole`][colorsense.UsageRole]) — how the token's color is expected to be
 used when rendered.
 
 The classification precedence for a single `TokenRecord` is:
@@ -34,7 +34,7 @@ from colorsense.models import (
     TokenOrigin,
     TokenRecord,
     TokenSemanticRole,
-    UsageCategory,
+    UsageRole,
 )
 
 __all__ = ["classify_tokens"]
@@ -78,8 +78,8 @@ def _classify_self(record: TokenRecord, config: Config) -> _Classification:
     return TokenSemanticRole.ignore, 0.0, TokenOrigin.fallback
 
 
-def _usage_prior(role: TokenSemanticRole, config: Config) -> dict[UsageCategory, float]:
-    """Build the usage-category prior for a classified token.
+def _usage_prior(role: TokenSemanticRole, config: Config) -> dict[UsageRole, float]:
+    """Build the usage-role prior for a classified token.
 
     Distribution priors are copied verbatim (already normalized at load). Channel
     priors carry no usage weight.
@@ -126,7 +126,7 @@ def _resolve_alias_role(
 
 
 def classify_tokens(tokens: list[TokenRecord], config: Config) -> list[ClassifiedToken]:
-    """Classify ``tokens`` into semantic roles and usage-category priors.
+    """Classify ``tokens`` into semantic roles and usage-role priors.
 
     Returns one `ClassifiedToken` per input record (order preserved). ``status``
     tokens get an empty prior when ``status_excluded_from_palette`` is set — they still

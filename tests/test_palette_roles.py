@@ -57,8 +57,8 @@ def test_high_area_neutral_is_primary() -> None:
         _cluster("#2563eb", 0.10, {ComponentType.cta_bg: 1.0}),
         _cluster("#fde68a", 0.30, {ComponentType.card_bg: 1.0}),
     ]
-    results, _ = assign_roles(clusters)
-    assert _top(results.mapping, PaletteRole.primary).hex == "#f3f4f6"
+    results = assign_roles(clusters)
+    assert _top(results.roles, PaletteRole.primary).hex == "#f3f4f6"
 
 
 def test_high_chroma_low_area_button_is_accent() -> None:
@@ -68,8 +68,8 @@ def test_high_chroma_low_area_button_is_accent() -> None:
         _cluster("#e11d48", 0.05, {ComponentType.cta_bg: 0.7, ComponentType.link: 0.3}),
         _cluster("#1f2937", 0.25, {ComponentType.footer_bg: 1.0}),
     ]
-    results, _ = assign_roles(clusters)
-    accent = results.mapping[PaletteRole.accent]
+    results = assign_roles(clusters)
+    accent = results.roles[PaletteRole.accent]
     assert accent[0].color.hex == "#e11d48"
     # Despite tiny area, it beats the large neutral page background for accent.
     accent_hexes = [c.color.hex for c in accent]
@@ -85,8 +85,8 @@ def test_high_area_card_can_be_secondary() -> None:
         _cluster("#fde68a", 0.35, {ComponentType.card_bg: 1.0}),
         _cluster("#e11d48", 0.10, {ComponentType.cta_bg: 1.0}),
     ]
-    results, _ = assign_roles(clusters)
-    secondary = results.mapping[PaletteRole.secondary]
+    results = assign_roles(clusters)
+    secondary = results.roles[PaletteRole.secondary]
     top2 = [c.color.hex for c in secondary[:2]]
     assert "#fde68a" in top2
 
@@ -98,8 +98,8 @@ def test_per_role_probabilities_sum_to_one() -> None:
         _cluster("#e11d48", 0.10, {ComponentType.cta_bg: 1.0}),
         _cluster("#1f2937", 0.05, {ComponentType.footer_bg: 1.0}),
     ]
-    results, _ = assign_roles(clusters)
-    for role, cands in results.mapping.items():
+    results = assign_roles(clusters)
+    for role, cands in results.roles.items():
         if cands:
             total = sum(c.probability for c in cands)
             assert abs(total - 1.0) < PROB_TOL, f"{role} probs sum to {total}"
@@ -111,8 +111,8 @@ def test_candidates_sorted_descending() -> None:
         _cluster("#fde68a", 0.30, {ComponentType.card_bg: 1.0}),
         _cluster("#e11d48", 0.20, {ComponentType.cta_bg: 1.0}),
     ]
-    results, _ = assign_roles(clusters)
-    for cands in results.mapping.values():
+    results = assign_roles(clusters)
+    for cands in results.roles.values():
         probs = [c.probability for c in cands]
         assert probs == sorted(probs, reverse=True)
 
@@ -123,24 +123,24 @@ def test_fit_score_in_range_and_ordering() -> None:
         _cluster("#fde68a", 0.30, {ComponentType.card_bg: 1.0}),
         _cluster("#e11d48", 0.10, {ComponentType.cta_bg: 1.0}),
     ]
-    _clean_results, clean_fit = assign_roles(clean)
+    clean_fit = assign_roles(clean).fit_score
     assert 0.0 <= clean_fit <= 1.0
     assert clean_fit > 0.8
 
     degenerate = [
         _cluster("#f3f4f6", 1.0, {ComponentType.page_bg: 1.0}),
     ]
-    _, degen_fit = assign_roles(degenerate)
+    degen_fit = assign_roles(degenerate).fit_score
     assert 0.0 <= degen_fit <= 1.0
     assert clean_fit > degen_fit
 
 
 def test_empty_clusters() -> None:
-    results, fit = assign_roles([])
-    # RoleResults backfills every role, so empty input yields all roles mapped to ().
-    assert set(results.mapping) == set(PaletteRole)
-    assert all(cands == () for cands in results.mapping.values())
-    assert fit == 0.0
+    results = assign_roles([])
+    # Composition backfills every role, so empty input yields all roles mapped to ().
+    assert set(results.roles) == set(PaletteRole)
+    assert all(cands == () for cands in results.roles.values())
+    assert results.fit_score == 0.0
 
 
 def test_assign_roles_is_input_order_independent() -> None:
@@ -158,18 +158,19 @@ def test_assign_roles_is_input_order_independent() -> None:
         _cluster("#e11d48", 0.10, {ComponentType.cta_bg: 1.0}),
         _cluster("#1f2937", 0.05, {ComponentType.footer_bg: 1.0}),
     ]
-    base_results, base_fit = assign_roles(clusters)
+    base_results = assign_roles(clusters)
+    base_fit = base_results.fit_score
     base = {
         role: [(c.color.hex, c.probability, c.area) for c in cands]
-        for role, cands in base_results.mapping.items()
+        for role, cands in base_results.roles.items()
     }
 
     for perm in itertools.permutations(clusters):
-        results, fit = assign_roles(list(perm))
-        assert fit == pytest.approx(base_fit, abs=1e-12)
-        assert set(results.mapping) == set(base)
+        results = assign_roles(list(perm))
+        assert results.fit_score == pytest.approx(base_fit, abs=1e-12)
+        assert set(results.roles) == set(base)
         for role, expected in base.items():
-            actual = [(c.color.hex, c.probability, c.area) for c in results.mapping[role]]
+            actual = [(c.color.hex, c.probability, c.area) for c in results.roles[role]]
             assert [a[0] for a in actual] == [e[0] for e in expected], (role, perm)
             for (_, a_prob, a_area), (_, e_prob, e_area) in zip(actual, expected, strict=True):
                 assert a_prob == pytest.approx(e_prob, abs=1e-12)
@@ -198,8 +199,8 @@ def test_tiny_pure_structural_cluster_does_not_win_secondary() -> None:
         # Body text, so the set is not degenerate.
         _cluster("#050505", 0.15, {ComponentType.page_text: 30.0}),
     ]
-    results, _ = assign_roles(clusters)
-    secondary = results.mapping[PaletteRole.secondary]
+    results = assign_roles(clusters)
+    secondary = results.roles[PaletteRole.secondary]
     assert secondary[0].color.hex == "#e2e8f0"
     pos = {c.color.hex: i for i, c in enumerate(secondary)}
     # The chip ranks below the well-evidenced surface (or prunes out entirely).
@@ -234,11 +235,11 @@ def test_dominant_surface_excluded_from_secondary() -> None:
         # A CTA so the set carries an accent-affine color too.
         _cluster("#e11d48", 0.10, {ComponentType.cta_bg: 1.0}),
     ]
-    results, _ = assign_roles(clusters)
-    secondary = results.mapping[PaletteRole.secondary]
+    results = assign_roles(clusters)
+    secondary = results.roles[PaletteRole.secondary]
     secondary_hexes = [c.color.hex for c in secondary]
     # The dominant surface is the primary anchor and never appears in secondary...
-    assert _top(results.mapping, PaletteRole.primary).hex == "#ffffff"
+    assert _top(results.roles, PaletteRole.primary).hex == "#ffffff"
     assert "#ffffff" not in secondary_hexes
     # ...so the genuine structural band wins it despite far less raw mass.
     assert secondary[0].color.hex == "#2563eb"
@@ -252,11 +253,11 @@ def test_single_cluster_yields_empty_secondary() -> None:
     when the list is non-empty) and the other roles still resolve.
     """
     clusters = [_cluster("#ffffff", 1.0, {ComponentType.page_bg: 1.0})]
-    results, fit = assign_roles(clusters)
-    assert results.mapping[PaletteRole.secondary] == ()
-    assert results.mapping[PaletteRole.primary][0].color.hex == "#ffffff"
-    assert set(results.mapping) == set(PaletteRole)
-    assert 0.0 <= fit <= 1.0
+    results = assign_roles(clusters)
+    assert results.roles[PaletteRole.secondary] == ()
+    assert results.roles[PaletteRole.primary][0].color.hex == "#ffffff"
+    assert set(results.roles) == set(PaletteRole)
+    assert 0.0 <= results.fit_score <= 1.0
 
 
 def test_high_mass_diluted_chromatic_beats_low_mass_pure_for_accent() -> None:
@@ -282,8 +283,8 @@ def test_high_mass_diluted_chromatic_beats_low_mass_pure_for_accent() -> None:
         # Minor green: link-pure mix but a fraction of the raw accent mass.
         _cluster("#10b77f", 0.0, {ComponentType.link: 2.0}),
     ]
-    results, _ = assign_roles(clusters)
-    accent = results.mapping[PaletteRole.accent]
+    results = assign_roles(clusters)
+    accent = results.roles[PaletteRole.accent]
     # Green pruning out of the accent list entirely also counts as losing.
     pos = {c.color.hex: i for i, c in enumerate(accent)}
     assert pos["#7c3bed"] < pos.get("#10b77f", len(accent))
@@ -296,7 +297,7 @@ def test_all_five_roles_present() -> None:
         _cluster("#fde68a", 0.30, {ComponentType.card_bg: 1.0}),
         _cluster("#e11d48", 0.10, {ComponentType.cta_bg: 1.0}),
     ]
-    results, _ = assign_roles(clusters)
-    assert set(results.mapping) == set(PaletteRole)
-    for cands in results.mapping.values():
+    results = assign_roles(clusters)
+    assert set(results.roles) == set(PaletteRole)
+    for cands in results.roles.values():
         assert len(cands) >= 1

@@ -12,9 +12,9 @@ from colorsense.models import (
     TokenOrigin,
     TokenRecord,
     TokenSemanticRole,
-    UsageCategory,
     UsageEntry,
     UsagePalette,
+    UsageRole,
 )
 from colorsense.palette.reconcile import reconcile
 
@@ -37,7 +37,7 @@ def _entry(
 def _token(
     name: str,
     css: str,
-    prior: dict[UsageCategory, float],
+    prior: dict[UsageRole, float],
     weight: float = 1.0,
     semantic_role: TokenSemanticRole = TokenSemanticRole.brand_accent,
     origin: TokenOrigin = TokenOrigin.name_rule,
@@ -56,7 +56,7 @@ def _token(
     )
 
 
-def _prob_for(results: UsagePalette, category: UsageCategory, css: str) -> float:
+def _prob_for(results: UsagePalette, category: UsageRole, css: str) -> float:
     target = _color(css)
     for entry in results.mapping.get(category, ()):
         if entry.color.hex == target.hex:
@@ -69,7 +69,7 @@ def test_intent_boost_breaks_tie_toward_declared() -> None:
     b = "#e11d48"
     usage = UsagePalette(
         mapping={
-            UsageCategory.interactive: (
+            UsageRole.cta: (
                 _entry(a, 0.5),
                 _entry(b, 0.5),
             )
@@ -78,13 +78,13 @@ def test_intent_boost_breaks_tie_toward_declared() -> None:
     # Both colors are declared for interactive, but A carries far more intent mass; this
     # should tip the 0.5/0.5 usage tie toward A while keeping B present.
     tokens = [
-        _token("--accent", a, {UsageCategory.interactive: 0.85, UsageCategory.surface: 0.15}),
-        _token("--accent-2", b, {UsageCategory.interactive: 0.15, UsageCategory.surface: 0.85}),
+        _token("--accent", a, {UsageRole.cta: 0.85, UsageRole.surface: 0.15}),
+        _token("--accent-2", b, {UsageRole.cta: 0.15, UsageRole.surface: 0.85}),
     ]
     posterior, _ = reconcile(usage, tokens, alpha=0.4)
 
-    p_a = _prob_for(posterior, UsageCategory.interactive, a)
-    p_b = _prob_for(posterior, UsageCategory.interactive, b)
+    p_a = _prob_for(posterior, UsageRole.cta, a)
+    p_b = _prob_for(posterior, UsageRole.cta, b)
     assert p_a > p_b
     assert p_a > 0.5
 
@@ -92,19 +92,19 @@ def test_intent_boost_breaks_tie_toward_declared() -> None:
 def test_declared_but_unused_appears_in_divergence() -> None:
     usage = UsagePalette(
         mapping={
-            UsageCategory.interactive: (_entry("#2563eb", 1.0),),
+            UsageRole.cta: (_entry("#2563eb", 1.0),),
         }
     )
     unused = "#10b981"
     tokens = [
-        _token("--primary", unused, {UsageCategory.surface: 1.0}, origin=TokenOrigin.name_rule),
+        _token("--primary", unused, {UsageRole.surface: 1.0}, origin=TokenOrigin.name_rule),
     ]
     _, divergence = reconcile(usage, tokens, alpha=0.4)
 
     target = _color(unused)
     hits = [d for d in divergence if d.color.hex == target.hex and "unused" in d.note]
     assert hits, divergence
-    assert hits[0].category == UsageCategory.surface
+    assert hits[0].role == UsageRole.surface
 
 
 def _relational_token(name: str, css: str, weight: float = 1.0) -> ClassifiedToken:
@@ -126,24 +126,22 @@ def test_declared_but_unused_gated_to_high_intent_origins() -> None:
     # every scale used to fire. A name_rule-origin token with the same color MUST, and
     # so must a relational token (which classifies with an EMPTY usage prior, the shape
     # classify_tokens really emits — it reports through the dedicated relational pass).
-    usage = UsagePalette(mapping={UsageCategory.interactive: (_entry("#2563eb", 1.0),)})
+    usage = UsagePalette(mapping={UsageRole.cta: (_entry("#2563eb", 1.0),)})
     unused = "#10b981"
 
     for low_intent in (TokenOrigin.scale, TokenOrigin.alias, TokenOrigin.fallback):
-        tokens = [
-            _token("--green-300", unused, {UsageCategory.interactive: 1.0}, origin=low_intent)
-        ]
+        tokens = [_token("--green-300", unused, {UsageRole.cta: 1.0}, origin=low_intent)]
         _, divergence = reconcile(usage, tokens, alpha=0.4)
         assert not any("unused" in d.note for d in divergence), low_intent
 
-    tokens = [_token("--brand", unused, {UsageCategory.interactive: 1.0})]
+    tokens = [_token("--brand", unused, {UsageRole.cta: 1.0})]
     _, divergence = reconcile(usage, tokens, alpha=0.4)
     assert any("unused" in d.note for d in divergence)
 
     tokens = [_relational_token("--on-primary", unused)]
     _, divergence = reconcile(usage, tokens, alpha=0.4)
     hits = [d for d in divergence if "unused" in d.note]
-    assert hits and hits[0].category == UsageCategory.text
+    assert hits and hits[0].role == UsageRole.text
     assert hits[0].note == "declared '--on-primary' unused in render"
 
 
@@ -154,9 +152,7 @@ def test_rendered_relational_token_color_is_not_undeclared() -> None:
     # membership test. Undeclaredness is about the stylesheet, not intent mass.
     white = "#ffffff"
     usage = UsagePalette(
-        mapping={
-            UsageCategory.text: (_entry(white, 1.0, components={ComponentType.page_text: 1.0}),)
-        }
+        mapping={UsageRole.text: (_entry(white, 1.0, components={ComponentType.page_text: 1.0}),)}
     )
     tokens = [_relational_token("--on-primary", white)]
     _, divergence = reconcile(usage, tokens, alpha=0.4)
@@ -170,7 +166,7 @@ def test_rendered_status_token_color_is_not_undeclared() -> None:
     # Status tokens get an empty prior when status_excluded_from_palette is set; their
     # declared color must still count for the used-but-undeclared membership test.
     red = "#dc2626"
-    usage = UsagePalette(mapping={UsageCategory.interactive: (_entry(red, 1.0),)})
+    usage = UsagePalette(mapping={UsageRole.cta: (_entry(red, 1.0),)})
     tokens = [
         _token("--danger", red, prior={}, semantic_role=TokenSemanticRole.status),
     ]
@@ -182,7 +178,7 @@ def test_rendered_status_token_color_is_not_undeclared() -> None:
 def test_near_identical_relational_tokens_report_once() -> None:
     # Two unused foreground tokens within DELTA_E_MATCH fold into one relational group:
     # one divergence item, rep_name from the heavier token.
-    usage = UsagePalette(mapping={UsageCategory.surface: (_entry("#111111", 1.0),)})
+    usage = UsagePalette(mapping={UsageRole.surface: (_entry("#111111", 1.0),)})
     tokens = [
         _relational_token("--on-primary", "#fefefe", weight=1.0),
         _relational_token("--card-foreground", "#ffffff", weight=3.0),
@@ -192,13 +188,13 @@ def test_near_identical_relational_tokens_report_once() -> None:
     unused = [d for d in divergence if "unused" in d.note]
     assert len(unused) == 1
     assert unused[0].note == "declared '--card-foreground' unused in render"
-    assert unused[0].category == UsageCategory.text
+    assert unused[0].role == UsageRole.text
 
 
 def test_alpha_zero_is_pure_usage() -> None:
     usage = UsagePalette(
         mapping={
-            UsageCategory.interactive: (
+            UsageRole.cta: (
                 _entry("#2563eb", 0.7),
                 _entry("#e11d48", 0.3),
             )
@@ -206,16 +202,16 @@ def test_alpha_zero_is_pure_usage() -> None:
     )
     # Strong intent for a token-only color that should be ignored at alpha=0.
     tokens = [
-        _token("--accent", "#10b981", {UsageCategory.interactive: 1.0}, weight=5.0),
+        _token("--accent", "#10b981", {UsageRole.cta: 1.0}, weight=5.0),
     ]
     posterior, _ = reconcile(usage, tokens, alpha=0.0)
 
-    entries = posterior.mapping[UsageCategory.interactive]
+    entries = posterior.mapping[UsageRole.cta]
     hexes = {e.color.hex for e in entries}
     assert hexes == {_color("#2563eb").hex, _color("#e11d48").hex}
 
-    p_blue = _prob_for(posterior, UsageCategory.interactive, "#2563eb")
-    p_rose = _prob_for(posterior, UsageCategory.interactive, "#e11d48")
+    p_blue = _prob_for(posterior, UsageRole.cta, "#2563eb")
+    p_rose = _prob_for(posterior, UsageRole.cta, "#e11d48")
     # Ratio preserved: 0.7 / 0.3.
     assert math.isclose(p_blue / p_rose, 0.7 / 0.3, rel_tol=1e-4)
 
@@ -223,7 +219,7 @@ def test_alpha_zero_is_pure_usage() -> None:
 def test_alpha_one_is_pure_intent() -> None:
     usage = UsagePalette(
         mapping={
-            UsageCategory.interactive: (
+            UsageRole.cta: (
                 _entry("#2563eb", 0.9),
                 _entry("#e11d48", 0.1),
             )
@@ -231,11 +227,11 @@ def test_alpha_one_is_pure_intent() -> None:
     )
     # Token favors the rose color strongly for interactive.
     tokens = [
-        _token("--accent", "#e11d48", {UsageCategory.interactive: 1.0}, weight=3.0),
+        _token("--accent", "#e11d48", {UsageRole.cta: 1.0}, weight=3.0),
     ]
     posterior, _ = reconcile(usage, tokens, alpha=1.0)
 
-    entries = posterior.mapping[UsageCategory.interactive]
+    entries = posterior.mapping[UsageRole.cta]
     argmax = max(entries, key=lambda e: e.probability)
     assert argmax.color.hex == _color("#e11d48").hex
 
@@ -243,25 +239,25 @@ def test_alpha_one_is_pure_intent() -> None:
 def test_every_category_distribution_normalized() -> None:
     usage = UsagePalette(
         mapping={
-            UsageCategory.surface: (
+            UsageRole.surface: (
                 _entry("#2563eb", 0.6),
                 _entry("#1d4ed8", 0.4),
             ),
-            UsageCategory.interactive: (
+            UsageRole.cta: (
                 _entry("#e11d48", 0.5),
                 _entry("#10b981", 0.5),
             ),
         }
     )
     tokens = [
-        _token("--brand", "#2563eb", {UsageCategory.surface: 1.0}),
-        _token("--pop", "#e11d48", {UsageCategory.interactive: 1.0}),
+        _token("--brand", "#2563eb", {UsageRole.surface: 1.0}),
+        _token("--pop", "#e11d48", {UsageRole.cta: 1.0}),
     ]
     posterior, _ = reconcile(usage, tokens, alpha=0.4)
 
-    # Every UsageCategory is always present (categories with no entries map to ()); a
+    # Every UsageRole is always present (categories with no entries map to ()); a
     # non-empty category's entry probabilities form a normalized distribution.
-    assert set(posterior.mapping) == set(UsageCategory)
+    assert set(posterior.mapping) == set(UsageRole)
     for category, entries in posterior.mapping.items():
         if not entries:
             continue
@@ -272,7 +268,7 @@ def test_every_category_distribution_normalized() -> None:
 def test_used_but_undeclared_appears_in_divergence() -> None:
     usage = UsagePalette(
         mapping={
-            UsageCategory.interactive: (
+            UsageRole.cta: (
                 _entry("#2563eb", 0.8),
                 _entry("#e11d48", 0.2),
             )
@@ -285,10 +281,10 @@ def test_used_but_undeclared_appears_in_divergence() -> None:
     target = _color("#2563eb")
     hits = [d for d in divergence if d.color.hex == target.hex and d.note == "used but undeclared"]
     assert hits, divergence
-    assert hits[0].category == UsageCategory.interactive
+    assert hits[0].role == UsageRole.cta
 
 
-def _entry_lists(results: UsagePalette) -> dict[UsageCategory, list[tuple[str, float]]]:
+def _entry_lists(results: UsagePalette) -> dict[UsageRole, list[tuple[str, float]]]:
     """The full per-category (hex, probability) lists, for whole-posterior equality."""
     return {
         category: [(e.color.hex, e.probability) for e in entries]
@@ -303,13 +299,13 @@ def test_alpha_out_of_range_is_clamped() -> None:
     # posteriors exactly.
     usage = UsagePalette(
         mapping={
-            UsageCategory.interactive: (
+            UsageRole.cta: (
                 _entry("#2563eb", 0.7),
                 _entry("#e11d48", 0.3),
             )
         }
     )
-    tokens = [_token("--accent", "#e11d48", {UsageCategory.interactive: 1.0})]
+    tokens = [_token("--accent", "#e11d48", {UsageRole.cta: 1.0})]
 
     at_zero = _entry_lists(reconcile(usage, tokens, alpha=0.0)[0])
     at_one = _entry_lists(reconcile(usage, tokens, alpha=1.0)[0])
@@ -328,16 +324,16 @@ def test_near_colors_join_across_usage_and_tokens() -> None:
     declared_red = "#fa0202"
     usage = UsagePalette(
         mapping={
-            UsageCategory.interactive: (
+            UsageRole.cta: (
                 _entry(used_red, 0.7, area=0.05, components={ComponentType.link: 1.0}),
                 _entry("#0000ff", 0.3),
             )
         }
     )
-    tokens = [_token("--brand-red", declared_red, {UsageCategory.interactive: 1.0})]
+    tokens = [_token("--brand-red", declared_red, {UsageRole.cta: 1.0})]
     posterior, divergence = reconcile(usage, tokens, alpha=0.4)
 
-    entries = posterior.mapping[UsageCategory.interactive]
+    entries = posterior.mapping[UsageRole.cta]
     hexes = {e.color.hex for e in entries}
     # No separate token-only entry: the declared color merged into the usage color.
     assert _color(declared_red).hex not in hexes
@@ -362,16 +358,16 @@ def test_token_only_color_never_enters_posterior() -> None:
     # area/components. The declared intent surfaces through divergence instead.
     usage = UsagePalette(
         mapping={
-            UsageCategory.interactive: (
+            UsageRole.cta: (
                 _entry("#2563eb", 1.0, area=0.05, components={ComponentType.link: 1.0}),
             )
         }
     )
     token_only = "#10b981"
-    tokens = [_token("--green", token_only, {UsageCategory.interactive: 1.0}, weight=5.0)]
+    tokens = [_token("--green", token_only, {UsageRole.cta: 1.0}, weight=5.0)]
     posterior, divergence = reconcile(usage, tokens, alpha=0.4)
 
-    entries = posterior.mapping[UsageCategory.interactive]
+    entries = posterior.mapping[UsageRole.cta]
     assert {e.color.hex for e in entries} == {_color("#2563eb").hex}
     assert all(e.components for e in entries)
     assert any(d.color.hex == _color(token_only).hex and "unused" in d.note for d in divergence)
@@ -381,36 +377,36 @@ def test_near_identical_tokens_aggregate_into_one_intent_group() -> None:
     # #2563eb and #2a66ec are within DELTA_E_MATCH: _aggregate_intent must fold them into
     # ONE intent group (one joined entry, one divergence entry), with rep_name taken
     # from the heavier-weighted token.
-    usage = UsagePalette(mapping={UsageCategory.interactive: (_entry("#10b981", 1.0),)})
+    usage = UsagePalette(mapping={UsageRole.cta: (_entry("#10b981", 1.0),)})
     tokens = [
-        _token("--a-light-blue", "#2563eb", {UsageCategory.surface: 1.0}, weight=1.0),
-        _token("--b-heavy-blue", "#2a66ec", {UsageCategory.surface: 1.0}, weight=3.0),
+        _token("--a-light-blue", "#2563eb", {UsageRole.surface: 1.0}, weight=1.0),
+        _token("--b-heavy-blue", "#2a66ec", {UsageRole.surface: 1.0}, weight=3.0),
     ]
     posterior, divergence = reconcile(usage, tokens, alpha=0.4)
 
     # Surface has no measured usage: the empty-category gate keeps it empty (no
     # token-only injection); the aggregated group surfaces via divergence instead.
-    assert posterior.mapping[UsageCategory.surface] == ()
+    assert posterior.mapping[UsageRole.surface] == ()
 
     # One group -> exactly one declared-but-unused entry; rep_name is the heavier token.
     unused = [d for d in divergence if "unused" in d.note]
     assert len(unused) == 1
     assert unused[0].note == "declared '--b-heavy-blue' unused in render"
-    assert unused[0].category == UsageCategory.surface
+    assert unused[0].role == UsageRole.surface
 
 
 def test_colors_outside_delta_e_threshold_stay_separate() -> None:
     # #2563eb vs #10b981 are far outside DELTA_E_MATCH: two intent groups, two separate
     # divergence entries. The unmeasured surface category itself stays empty (the
     # empty-category gate) rather than carrying token-only entries.
-    usage = UsagePalette(mapping={UsageCategory.interactive: (_entry("#e11d48", 1.0),)})
+    usage = UsagePalette(mapping={UsageRole.cta: (_entry("#e11d48", 1.0),)})
     tokens = [
-        _token("--blue", "#2563eb", {UsageCategory.surface: 1.0}),
-        _token("--green", "#10b981", {UsageCategory.surface: 1.0}),
+        _token("--blue", "#2563eb", {UsageRole.surface: 1.0}),
+        _token("--green", "#10b981", {UsageRole.surface: 1.0}),
     ]
     posterior, divergence = reconcile(usage, tokens, alpha=0.4)
 
-    assert posterior.mapping[UsageCategory.surface] == ()
+    assert posterior.mapping[UsageRole.surface] == ()
     unused_hexes = {d.color.hex for d in divergence if "unused" in d.note}
     assert unused_hexes == {_color("#2563eb").hex, _color("#10b981").hex}
 
@@ -422,7 +418,7 @@ def test_weak_entries_pruned_and_survivors_renormalized() -> None:
     weak = "#aaaaaa"
     usage = UsagePalette(
         mapping={
-            UsageCategory.interactive: (
+            UsageRole.cta: (
                 _entry("#2563eb", 0.495),
                 _entry("#e11d48", 0.495),
                 _entry(weak, 0.01),
@@ -431,7 +427,7 @@ def test_weak_entries_pruned_and_survivors_renormalized() -> None:
     )
     posterior, _ = reconcile(usage, [], alpha=0.0)
 
-    entries = posterior.mapping[UsageCategory.interactive]
+    entries = posterior.mapping[UsageRole.cta]
     hexes = {e.color.hex for e in entries}
     assert _color(weak).hex not in hexes  # pruned
     assert hexes == {_color("#2563eb").hex, _color("#e11d48").hex}
@@ -450,10 +446,10 @@ def test_pruning_that_empties_category_keeps_argmax_at_one() -> None:
         _entry(f"#0000{i:02x}", weak_share) for i in range(n - 1)
     ]
     assert all(e.probability < 0.02 for e in entries_in)
-    usage = UsagePalette(mapping={UsageCategory.interactive: tuple(entries_in)})
+    usage = UsagePalette(mapping={UsageRole.cta: tuple(entries_in)})
     posterior, _ = reconcile(usage, [], alpha=0.0)
 
-    entries = posterior.mapping[UsageCategory.interactive]
+    entries = posterior.mapping[UsageRole.cta]
     assert len(entries) == 1
     assert entries[0].color.hex == _color(strongest).hex
     assert entries[0].probability == 1.0
@@ -471,10 +467,10 @@ def test_argmax_fallback_tie_is_broken_by_smallest_hex() -> None:
     entries_in = [_entry("#cccccc", tied_prob), _entry("#aaaaaa", tied_prob)] + [
         _entry(f"#0000{i:02x}", weak_share) for i in range(n - 2)
     ]
-    usage = UsagePalette(mapping={UsageCategory.interactive: tuple(entries_in)})
+    usage = UsagePalette(mapping={UsageRole.cta: tuple(entries_in)})
     posterior, _ = reconcile(usage, [], alpha=0.0)
 
-    entries = posterior.mapping[UsageCategory.interactive]
+    entries = posterior.mapping[UsageRole.cta]
     assert len(entries) == 1
     assert entries[0].color.hex == _color("#aaaaaa").hex
     assert entries[0].probability == 1.0
@@ -487,17 +483,17 @@ def test_dominant_undeclared_color_stays_dominant() -> None:
     # intent signal is a bounded penalty: white must remain present AND dominant.
     usage = UsagePalette(
         mapping={
-            UsageCategory.surface: (
+            UsageRole.surface: (
                 _entry("#ffffff", 0.95, components={ComponentType.page_bg: 1.0}),
                 _entry("#2563eb", 0.05, components={ComponentType.hero_bg: 1.0}),
             )
         }
     )
-    tokens = [_token("--brand", "#2563eb", {UsageCategory.surface: 0.3})]
+    tokens = [_token("--brand", "#2563eb", {UsageRole.surface: 0.3})]
     posterior, _ = reconcile(usage, tokens, alpha=0.4)
 
-    p_white = _prob_for(posterior, UsageCategory.surface, "#ffffff")
-    p_blue = _prob_for(posterior, UsageCategory.surface, "#2563eb")
+    p_white = _prob_for(posterior, UsageRole.surface, "#ffffff")
+    p_blue = _prob_for(posterior, UsageRole.surface, "#2563eb")
     assert p_white > p_blue
     assert p_white > 0.5
 
@@ -508,14 +504,14 @@ def test_empty_category_yields_empty_posterior_not_token_flood() -> None:
     # no measured borders, 16 token-only colors all got the same eps usage factor,
     # survived pruning near-uniformly, and flooded usage.border with empty-components
     # noise.) The declared intent still surfaces through divergence.
-    usage = UsagePalette(mapping={UsageCategory.surface: (_entry("#ffffff", 1.0),)})
+    usage = UsagePalette(mapping={UsageRole.surface: (_entry("#ffffff", 1.0),)})
     tokens = [
-        _token(f"--border-{i}", hexv, {UsageCategory.border: 1.0})
+        _token(f"--border-{i}", hexv, {UsageRole.border: 1.0})
         for i, hexv in enumerate(["#ff8182", "#a830e8", "#7ae9ff", "#c7e580"])
     ]
     posterior, divergence = reconcile(usage, tokens, alpha=0.4)
 
-    assert posterior.mapping[UsageCategory.border] == ()
+    assert posterior.mapping[UsageRole.border] == ()
     # Honest emptiness, but not silence: every declared border color raises divergence.
     unused = {d.color.hex for d in divergence if "unused" in d.note}
     assert unused == {_color(h).hex for h in ("#ff8182", "#a830e8", "#7ae9ff", "#c7e580")}
@@ -527,16 +523,16 @@ def test_unmatched_token_excluded_when_category_is_measured() -> None:
     # merely crushed by pooling), and every surviving entry keeps non-empty components.
     usage = UsagePalette(
         mapping={
-            UsageCategory.border: (
+            UsageRole.border: (
                 _entry("#d1d9e0", 0.9, components={ComponentType.border: 1.0}),
                 _entry("#59636e", 0.1, components={ComponentType.border: 1.0}),
             )
         }
     )
-    tokens = [_token("--border-exotic", "#ff8182", {UsageCategory.border: 1.0})]
+    tokens = [_token("--border-exotic", "#ff8182", {UsageRole.border: 1.0})]
     posterior, _ = reconcile(usage, tokens, alpha=0.4)
 
-    entries = posterior.mapping[UsageCategory.border]
+    entries = posterior.mapping[UsageRole.border]
     hexes = {e.color.hex for e in entries}
     assert _color("#ff8182").hex not in hexes  # structurally excluded
     assert hexes == {_color("#d1d9e0").hex, _color("#59636e").hex}
@@ -550,7 +546,7 @@ def test_used_but_undeclared_threshold_boundary() -> None:
     above = "#e11d48"
     usage = UsagePalette(
         mapping={
-            UsageCategory.interactive: (
+            UsageRole.cta: (
                 _entry(above, 0.16),
                 _entry(below, 0.14),
             )
@@ -570,8 +566,8 @@ def test_subthreshold_rendered_declared_color_is_not_reported_unused() -> None:
     post-prune, so they alone cannot answer "did this render?").
     """
     declared = "#e11d48"
-    usage = UsagePalette(mapping={UsageCategory.surface: (_entry("#ffffff", 1.0),)})
-    tokens = [_token("--brand", declared, {UsageCategory.surface: 1.0})]
+    usage = UsagePalette(mapping={UsageRole.surface: (_entry("#ffffff", 1.0),)})
+    tokens = [_token("--brand", declared, {UsageRole.surface: 1.0})]
 
     # Fallback path (no inventory): the pruned-away color looks unused.
     _, fallback_div = reconcile(usage, tokens)

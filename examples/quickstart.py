@@ -34,26 +34,35 @@ POLICY = PolitenessPolicy(
 
 
 def print_palette(result: AnalysisResult) -> None:
-    """Print the usage view (the primary view) per theme, then the derived roles view."""
+    """Print the color-keyed index, the role-keyed usage view, then the 60/30/10 composition."""
     print(result.url)
     for theme, palette in result.themes.items():
         print(f"  [{theme}]")
-        # The usage view is the primary output: what colors paint each usage category.
-        # usage.mapping always contains every UsageCategory; an empty tuple means nothing
-        # was detected for it. Entries are ranked by probability — [0] is the best pick.
-        for category, entries in palette.usage.mapping.items():
+        # The canonical color-keyed index: every measured color, ranked by prominence,
+        # with the usage roles it appears in. Answers "how is each color used?".
+        print("    colors (how each color is used):")
+        for cu in palette.colors[:6]:
+            roles = ", ".join(f"{u.role}={u.weight:.2f}" for u in cu.usages)
+            print(f"      {cu.color.hex}  prominence={cu.prominence:.2f}  [{roles}]")
+        # The role-keyed projection: which colors paint each usage role. usage.mapping
+        # always contains every UsageRole; an empty tuple means nothing was detected for
+        # it. Entries are ranked by probability — [0] is the best pick.
+        print("    usage (which colors paint each role):")
+        for role, entries in palette.usage.mapping.items():
             if not entries:
-                print(f"    {category:<13}(none detected)")
+                print(f"      {role:<8}(none detected)")
                 continue
             top = ", ".join(f"{e.color.hex} ({e.probability:.2f})" for e in entries[:3])
-            print(f"    {category:<13}{top}")
-        # The roles view is a derived 60/30/10 interpretation; fit_score in [0, 1] says
-        # how 60/30/10-like the design is (descriptive, not a quality score).
-        print(f"    60/30/10 fit {palette.fit_score:.2f}; best per role:")
-        for role, candidates in palette.roles.mapping.items():
+            print(f"      {role:<8}{top}")
+        # composition is a demoted, secondary 60/30/10 interpretation; fit_score in [0, 1]
+        # says how 60/30/10-like the design is (descriptive, not a quality score).
+        print(f"    60/30/10 fit {palette.composition.fit_score:.2f}; best per role:")
+        for palette_role, candidates in palette.composition.roles.items():
             if candidates:
                 best = candidates[0]
-                print(f"      {role:<14}{best.color.hex}  probability={best.probability:.2f}")
+                print(
+                    f"      {palette_role:<14}{best.color.hex}  probability={best.probability:.2f}"
+                )
 
 
 async def main(urls: tuple[str, ...]) -> None:

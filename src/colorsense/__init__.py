@@ -17,11 +17,14 @@ Result & contracts
 ------------------
 * [`AnalysisResult`][colorsense.AnalysisResult] — the typed result, with
   [`RunMetadata`][colorsense.RunMetadata] provenance.
-* [`ThemePalette`][colorsense.ThemePalette] — everything derived per theme. Its **primary view** is
-  ``usage`` ([`UsagePalette`][colorsense.UsagePalette] / [`UsageEntry`][colorsense.UsageEntry] —
-  what colors paint surfaces, text, interactive elements, and borders); ``roles``
-  ([`RoleResults`][colorsense.RoleResults] / [`PaletteCandidate`][colorsense.PaletteCandidate]) is
-  the **derived** measured-only 60/30/10 interpretation. ``divergence``
+* [`ThemePalette`][colorsense.ThemePalette] — everything derived per theme. Its **canonical
+  index** is ``colors`` (a [`ColorUsage`][colorsense.ColorUsage] tuple of measured colors, each
+  carrying its [`Usage`][colorsense.Usage] slots — "how each color is used"); its **role-keyed
+  projection** is ``usage`` ([`UsagePalette`][colorsense.UsagePalette] /
+  [`UsageEntry`][colorsense.UsageEntry] — "which colors paint each usage role"); its **secondary**
+  view is ``composition`` ([`Composition`][colorsense.Composition] /
+  [`PaletteCandidate`][colorsense.PaletteCandidate]), the demoted measured-only 60/30/10
+  interpretation with its ``fit_score``. ``divergence``
   ([`DivergenceItem`][colorsense.DivergenceItem]) reports declared-vs-measured discrepancies, and
   ``tokens`` ([`DesignToken`][colorsense.DesignToken]) carries the declared design tokens — opt-in
   via ``analyze(..., include_tokens=True)`` (``None`` when not requested, ``()`` when requested but
@@ -29,10 +32,12 @@ Result & contracts
   non-color or ignore-classified, both yield ``()``).
 * [`Color`][colorsense.Color] / [`Viewport`][colorsense.Viewport] — value types (``Viewport`` is
   also an ``analyze`` argument).
-* [`Theme`][colorsense.Theme], [`UsageCategory`][colorsense.UsageCategory],
+* [`Theme`][colorsense.Theme], [`UsageRole`][colorsense.UsageRole],
+  [`PropertyFamily`][colorsense.PropertyFamily] (with the
+  [`family_of`][colorsense.family_of] role→family helper),
   [`PaletteRole`][colorsense.PaletteRole], [`ComponentType`][colorsense.ComponentType],
   [`TokenSemanticRole`][colorsense.TokenSemanticRole] — the enums that key the result (e.g.
-  ``usage.mapping[UsageCategory.surface]``, ``roles.mapping[PaletteRole.primary]``).
+  ``usage.mapping[UsageRole.cta]``, ``composition.roles[PaletteRole.primary]``).
 
 Inputs & policy
 ---------------
@@ -68,20 +73,24 @@ from colorsense.harvest import RenderError, RequestFilter
 from colorsense.models import (
     AnalysisResult,
     Color,
+    ColorUsage,
     ComponentType,
+    Composition,
     DesignToken,
     DivergenceItem,
     PaletteCandidate,
     PaletteRole,
-    RoleResults,
+    PropertyFamily,
     RunMetadata,
     Theme,
     ThemePalette,
     TokenSemanticRole,
-    UsageCategory,
+    Usage,
     UsageEntry,
     UsagePalette,
+    UsageRole,
     Viewport,
+    family_of,
 )
 from colorsense.net.guard import block_private_networks
 from colorsense.net.politeness import (
@@ -97,28 +106,32 @@ __all__ = [
     "AnalysisResult",
     "AnalysisTimeoutError",
     "Color",
+    "ColorUsage",
     "ComponentType",
+    "Composition",
     "Config",
     "DesignToken",
     "DivergenceItem",
     "PaletteCandidate",
     "PaletteRole",
     "PolitenessPolicy",
+    "PropertyFamily",
     "RenderError",
     "RequestFilter",
     "RobotsDisallowedError",
-    "RoleResults",
     "RunMetadata",
     "Theme",
     "ThemePalette",
     "TokenSemanticRole",
     "UnsupportedSchemeError",
-    "UsageCategory",
+    "Usage",
     "UsageEntry",
     "UsagePalette",
+    "UsageRole",
     "Viewport",
     "analyze",
     "block_private_networks",
+    "family_of",
     "load_config",
     "load_default_config",
 ]

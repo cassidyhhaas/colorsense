@@ -77,39 +77,49 @@ def _parse_viewport(value: str, scale: float) -> Viewport:
 
 
 def _print_palette(result: AnalysisResult) -> None:
-    """Human summary per theme: the usage view first, then roles + fit score, divergence,
-    and (when requested) the declared tokens."""
+    """Human summary per theme: the color-keyed index, the role-keyed usage view, then the
+    demoted 60/30/10 composition, divergence, and (when requested) the declared tokens."""
     typer.echo(result.url)
     for theme, palette in result.themes.items():
         typer.echo(f"  [{theme}]")
 
-        typer.echo("    usage:")
-        for category, entries in palette.usage.mapping.items():
+        typer.echo("    colors (how each color is used):")
+        for cu in palette.colors:
+            roles = ", ".join(f"{u.role}={u.weight:.2f}" for u in cu.usages)
+            typer.echo(
+                f"      {cu.color.hex}  prominence={cu.prominence:.2f}  area={cu.area:.2f}"
+                f"  [{roles}]"
+            )
+
+        typer.echo("    usage (which colors paint each role):")
+        for role, entries in palette.usage.mapping.items():
             if not entries:
-                typer.echo(f"      {category:<13}(none detected)")
+                typer.echo(f"      {role:<8}(none detected)")
                 continue
-            typer.echo(f"      {category}:")
+            typer.echo(f"      {role}:")
             for entry in entries:
                 typer.echo(
                     f"        {entry.color.hex}"
                     f"  probability={entry.probability:.2f}  area={entry.area:.2f}"
                 )
 
-        typer.echo(f"    roles (60/30/10 view, fit score {palette.fit_score:.2f}):")
-        for role, candidates in palette.roles.mapping.items():
+        typer.echo(
+            f"    composition (60/30/10 view, fit score {palette.composition.fit_score:.2f}):"
+        )
+        for palette_role, candidates in palette.composition.roles.items():
             if not candidates:
-                typer.echo(f"      {role:<14}(none detected)")
+                typer.echo(f"      {palette_role:<14}(none detected)")
                 continue
             best = candidates[0]
             typer.echo(
-                f"      {role:<14}{best.color.hex}"
+                f"      {palette_role:<14}{best.color.hex}"
                 f"  probability={best.probability:.2f}  area={best.area:.2f}"
             )
 
         if palette.divergence:
             typer.echo("    divergence:")
             for item in palette.divergence:
-                typer.echo(f"      {item.category:<13}{item.color.hex}  {item.note}")
+                typer.echo(f"      {item.role:<8}{item.color.hex}  {item.note}")
 
         if palette.tokens is not None:
             typer.echo("    tokens:")

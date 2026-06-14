@@ -20,11 +20,15 @@ not listed here is internal and free to change between releases.
 
 ::: colorsense.ThemePalette
 
+::: colorsense.ColorUsage
+
+::: colorsense.Usage
+
 ::: colorsense.UsagePalette
 
 ::: colorsense.UsageEntry
 
-::: colorsense.RoleResults
+::: colorsense.Composition
 
 ::: colorsense.PaletteCandidate
 
@@ -40,7 +44,11 @@ not listed here is internal and free to change between releases.
 
 ::: colorsense.Theme
 
-::: colorsense.UsageCategory
+::: colorsense.UsageRole
+
+::: colorsense.PropertyFamily
+
+::: colorsense.family_of
 
 ::: colorsense.PaletteRole
 

@@ -7,9 +7,10 @@ and a rough idea of how web pages are built.
 The one-line version: `analyze(url)` renders the page in headless Chromium, **harvests**
 four kinds of raw evidence from it, **classifies** the declared design tokens and the
 visible DOM elements, fuses everything into a perceptually clustered **color inventory**,
-builds the **usage-keyed palette** (what colors paint surfaces, text, interactive
-elements, and borders), **reconciles** that against what the site's CSS declared, and
-derives a **60/30/10 roles** view. Everything after the harvest is deterministic, pure
+builds the **color-keyed index** ("how each color is used") and the **role-keyed usage
+projection** ("which colors paint each role" — page, surface, banner, cta, action, text,
+link, border), **reconciles** the latter against what the site's CSS declared, and derives
+a demoted **60/30/10 composition**. Everything after the harvest is deterministic, pure
 CPU work.
 
 Perceptual color distance appears throughout. It is always the same function: Euclidean
@@ -122,9 +123,13 @@ reconciliation treats only `relational` and `name_rule` classifications as direc
 evidence of author intent.
 
 The classified role is then mapped (via the YAML's `role_to_usage_prior` table) to a
-prior distribution over the four usage categories — e.g. `brand_accent` is expected to
-render 90% interactive / 10% surface, while `neutral` spreads across surface, text, and
-border.
+prior distribution over the eight usage roles — e.g. `brand_accent` leans
+cta/link/action (its old "interactive" mass, now split across those three roles), while
+`neutral` spreads across the background roles (page/surface/banner), text, and border. The
+priors were derived from the previous 4-category table by splitting each old category's
+mass across the roles it became (old `surface` → page/surface/banner, old `interactive` →
+cta/link/action, `text` → text, `border` → border), weighted toward the most-likely role
+per semantic.
 
 ### Component classification (`classify/components.py`)
 
@@ -263,61 +268,88 @@ away, the measured-vs-declared match radius (`DELTA_E_MATCH_MEASURED`) must be *
 least** that — so it is defined as equal to `DELTA_E_MATCH_BG`, and can never silently
 fall below it.
 
-## 4. The usage-keyed palette
+## 4. The usage views
 
-`palette/usage.py` turns the clusters into the primary result: for each usage category —
-`surface`, `text`, `interactive`, `border` — a probability-ranked list of colors. Each
-component type routes to one category (backgrounds → surface, typography → text, links
-and CTAs → interactive, borders → border; `third_party` routes nowhere — vendor-widget
-colors are excluded and surface separately on the result). A color used in multiple ways,
-like the same gray as both text and border, correctly appears in multiple categories.
+`palette/usage.py` turns the clusters into two complementary views, keyed off one fixed
+code-level convention: the **role→component collapse** (`ROLE_COMPONENTS`). Each component
+type belongs to exactly one of eight developer-facing **usage roles** — `page_bg` → `page`;
+`card_bg`/`modal_bg`/`hero_bg`/`input_bg` → `surface`; `header_bg`/`nav_bg`/`footer_bg` →
+`banner`; `cta_bg` → `cta`; `button_secondary`/`badge` → `action`; the `*_text` components →
+`text`; `link` → `link`; `border` → `border`. Two components route nowhere on purpose:
+`cta_text` (it never surfaces on real sites) and `third_party` (vendor-widget colors are
+excluded and surface separately on the result). The inverse map is built once and asserted
+to partition every routed component to exactly one role. This taxonomy is the redesign's
+core: it splits the two axes the old 4-value usage taxonomy conflated — *which CSS property
+paints the color* (a `property_family` rollup: background / text / border) versus *what kind
+of element it is* — so a link's color and a CTA button's background no longer share one slot.
 
-The interesting part is **prominence** — how clusters are ranked within a category —
-which is deliberately scored differently per category:
+### The role-keyed projection (`build_usage`)
 
-- **Surfaces are ranked by screenshot area.** Area is the authoritative signal for
-  surfaces, and vote *counts* would actively mislead: a page with 30 repeated cards
-  produces 30 card-background votes, while the page background — covering, say, 86% of
-  every pixel — is one `<body>` element with one vote. Ranking by votes would crown the
-  cards; ranking by area correctly crowns the background. (Only clusters with nonzero
-  surface vote mass participate at all — area alone doesn't prove a color *is* a
-  surface.)
+For each usage role, a probability-ranked list of colors. A color used in multiple ways,
+like the same gray as both text and border, correctly appears in multiple roles.
+**Prominence** — how clusters rank within a role — is scored by the role's property family:
 
-- **Text, interactive, and border are ranked by `log1p` of vote mass.** These paint
-  negligible screenshot area, so area can't rank them; how many elements use the color
-  can — but only *sub-linearly*. Raw linear mass lets element count drown high-confidence
-  single-element evidence. The motivating case: on github.com, roughly 200 link votes
-  (clusters with mass 93 / 55 / 48) pushed the page's one green CTA — vote mass 1.0 — down
-  to a 0.005 share of the `interactive` category, below the pruning floor, and the brand
-  accent vanished from the palette. Taking `log1p(mass)` compresses the big masses
-  (`log1p(93) ≈ 4.5` vs `log1p(1.0) ≈ 0.69`) without changing the *ordering* (the
-  logarithm is monotonic): the CTA's share becomes ≈ 0.04 and survives, while genuinely
-  tiny masses still prune (`log1p(0.05) ≈ 0.05`).
+- **Background-family roles (page/surface/banner/cta/action) are ranked by screenshot
+  area.** Area is the authoritative signal for backgrounds, and vote *counts* would
+  actively mislead: a page with 30 repeated cards produces 30 card-background votes, while
+  the page background — covering, say, 86% of every pixel — is one `<body>` element with
+  one vote. Ranking by votes would crown the cards; ranking by area correctly crowns the
+  background. (Only clusters with nonzero vote mass in the role participate at all — area
+  alone doesn't prove a color *is* used that way.)
 
-Within each category the prominence scores are normalized to probabilities, entries below
+- **Text/link/border are ranked by `log1p` of vote mass.** These paint negligible
+  screenshot area, so area can't rank them; how many elements use the color can — but only
+  *sub-linearly*. Raw linear mass lets element count drown high-confidence single-element
+  evidence. Taking `log1p(mass)` compresses big masses (`log1p(93) ≈ 4.5` vs
+  `log1p(1.0) ≈ 0.69`) without changing the *ordering* (the logarithm is monotonic), while
+  genuinely tiny masses still prune (`log1p(0.05) ≈ 0.05`).
+
+The CTA-vs-links problem the old taxonomy had is now structural, not just damped: on
+github.com, ~200 link votes (clusters with mass 93 / 55 / 48) and the page's one green CTA
+(vote mass 1.0) used to compete for a single shared `interactive` slot, dropping the CTA to
+a 0.005 share — below the pruning floor — so the brand accent vanished. With links in the
+`link` role and the CTA in its own `cta` role, the CTA's small painted area normalizes to a
+high share *within its own role* and trivially survives. (We verified colored CTAs survive
+the prune under the dedicated `cta` role with the current area formula across 12 real sites.)
+
+Within each role the prominence scores are normalized to probabilities, entries below
 `MIN_SHARE` (0.02) are pruned, and survivors are renormalized. If pruning would empty a
-non-empty category, the single argmax entry is kept at probability 1.0 instead — a
-category that measured *something* never reports nothing.
+non-empty role, the single argmax entry is kept at probability 1.0 instead — a role that
+measured *something* never reports nothing.
+
+### The color-keyed index (`build_color_index`)
+
+The same clusters, re-projected as the canonical, color-first answer to "how is each color
+used?". Each routed cluster becomes a `ColorUsage`: its `usages` are one slot per role it
+participates in (the role's routed mass over the color's total routed mass — slots sum to
+~1 — plus normalized per-component evidence and the `property_family` rollup), and its
+overall `prominence` blends the cluster's normalized screenshot area with its normalized
+`log1p` of total routed vote mass. The blend (`PROMINENCE_AREA_WEIGHT`, default 0.7 toward
+area) is a **first-cut heuristic** — area-truth primary so dominant backgrounds rank high,
+vote-mass secondary so zero-area brand accents (CTA/link colors) are not buried — and is
+flagged in-code as worth later empirical tuning the way the role taxonomy was. The tuple is
+sorted by `prominence` descending; third-party-dominated clusters are excluded (as in the
+role view).
 
 ## 5. Reconciling with declared intent
 
-`palette/reconcile.py` fuses two independent signals about each usage category: the
-**measured** usage probabilities from §4 ("what actually rendered") and the **declared**
-token intent from §2 ("what the author said"). First, declared token colors are grouped
-with each other at a tight ΔE 0.08 (both sides are exact computed values), accumulating
-each group's weighted usage priors; measured entries then match declared groups at the
-looser 0.10 radius from §3.
+`palette/reconcile.py` operates on the role-keyed projection. It fuses two independent
+signals about each usage role: the **measured** usage probabilities from §4 ("what actually
+rendered") and the **declared** token intent from §2 ("what the author said"). First,
+declared token colors are grouped with each other at a tight ΔE 0.08 (both sides are exact
+computed values), accumulating each group's weighted usage priors; measured entries then
+match declared groups at the looser 0.10 radius from §3.
 
 ### Log-linear pooling, unpacked
 
-For each candidate color in a category, the two probabilities are combined as a
+For each candidate color in a role, the two probabilities are combined as a
 **weighted geometric mean**:
 
 ```
 posterior ∝ p_usage^(1 − α) × (p_intent + 1/K)^α
 ```
 
-over the K measured entries in the category, then all candidates are normalized to
+over the K measured entries in the role, then all candidates are normalized to
 sum to 1. Reading the formula:
 
 - **The candidates are the measured entries only.** Declared intent re-weights colors
@@ -341,21 +373,20 @@ sum to 1. Reading the formula:
   declared color erase a 95%-dominant undeclared one from the posterior entirely.
 
 Posterior entries below 0.02 are pruned and survivors renormalized (argmax kept if
-pruning empties the category). Every entry keeps its measured area and component
-breakdown.
+pruning empties the role). Every entry keeps its measured area and component breakdown.
 
-### The empty-category gate
+### The empty-role gate
 
-A category with **no measured usage at all yields an empty posterior.** Declared-only
+A role with **no measured usage at all yields an empty posterior.** Declared-only
 colors never enter any posterior, and the original motivation was a live failure in
 exactly this case: when token-only colors were still injected, zero measurement gave
 every one the *same* floor usage factor, so the posterior collapsed to `intent^α` — a
 near-uniform spread where everything survives pruning. On github.com that meant
 `usage.border` reported **16 never-rendered theme tokens**, every entry with empty
 components — pure noise presented as measurement. Honest emptiness beats intent-only
-noise. Declared intent for an unmeasured category can still surface through the
+noise. Declared intent for an unmeasured role can still surface through the
 divergence report — but only when the declared color has no perceptual match (within
-0.10) among measured colors in *any* category; a near-white border token on a
+0.10) among measured colors in *any* role; a near-white border token on a
 white-surfaced page reads as "used" and stays silent.
 
 ### Divergence reporting
@@ -363,14 +394,14 @@ white-surfaced page reads as "used" and stays silent.
 Two kinds of discrepancy are reported:
 
 - **Declared but unused** — a declared color with no perceptual match (within 0.10)
-  among measured usage in *any* category. This is gated to **high-intent** origins only:
+  among measured usage in *any* role. This is gated to **high-intent** origins only:
   tokens classified by an explicit name rule or relational pattern. The gate exists
   because of another live failure: on token-heavy sites, every unused shade of every
   numbered color scale is technically "declared", and the report was 100% noise — **54
   out of 54 items on github.com** were unused scale shades. Scale members, alias
   followers, and fallbacks therefore never fire this item. Name-rule tokens report under
-  their intent's strongest category; relational tokens (`--on-primary`-style foreground
-  colors, which carry no category prior) report under `text`.
+  their intent's strongest role; relational tokens (`--on-primary`-style foreground
+  colors, which carry no role prior) report under `text`.
 - **Used but undeclared** — a measured entry with probability ≥ 0.15 whose color matches
   no *declared* color at all. Membership is tested against every resolved token color —
   including relational, status, scale, and fallback classifications that carry no intent
@@ -378,18 +409,19 @@ Two kinds of discrepancy are reported:
   exactly its declared `--on-primary` text color is not undeclared. A prominent rendered
   color the design system doesn't name.
 
-## 6. The 60/30/10 roles view
+## 6. The 60/30/10 composition
 
-`palette/roles.py` derives a second, opinionated view: the classic 60/30/10 interior-
-design split mapped to five roles — **primary** (the dominant, usually neutral surface,
-~60%), **secondary** (structural color: cards/headers/nav, ~30%), **accent** (the
-action/brand "pop", ~10%), plus **neutral_light** and **neutral_dark**. Unlike the usage
-view it is *measured-only* — never reconciled against tokens.
+`palette/roles.py` derives a second, **demoted, secondary** view (exposed as
+`ThemePalette.composition`): the classic 60/30/10 interior-design split mapped to five
+palette roles — **primary** (the dominant, usually neutral surface, ~60%), **secondary**
+(structural color: cards/headers/nav, ~30%), **accent** (the action/brand "pop", ~10%),
+plus **neutral_light** and **neutral_dark**. Unlike the usage views it is *measured-only* —
+never reconciled against tokens.
 
 Component evidence enters the scores as **raw vote mass, not mix purity**: each
 cluster's `component_mass` is summed into role-affinity buckets (page-bg → primary,
 CTA/link/badge → accent, card/header/nav/footer/hero → secondary), `log1p`-damped (the
-same sub-linear compression the usage view applies, section 5), then divided by the
+same sub-linear compression the usage view applies, section 4), then divided by the
 largest damped value any cluster has for that bucket — so the best-evidenced cluster per
 bucket scores 1.0 and the rest scale down with their actual evidence. The normalized
 `component_mix` is deliberately not used here: purity carries no cross-cluster

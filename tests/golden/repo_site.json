@@ -12,11 +12,15 @@
         "secondary"
       ],
       "populated_usage": [
+        "banner",
         "border",
-        "interactive",
+        "cta",
+        "link",
+        "page",
         "surface",
         "text"
       ],
+      "top_color_top_role": "surface",
       "top_role_colors": {
         "accent": [
           "#0969da"
@@ -42,11 +46,20 @@
         ]
       },
       "top_usage_colors": {
+        "banner": [
+          "#ffffff"
+        ],
         "border": [
           "#d3d7da"
         ],
-        "interactive": [
+        "cta": [
+          "#1f883d"
+        ],
+        "link": [
           "#0969da"
+        ],
+        "page": [
+          "#ffffff"
         ],
         "surface": [
           "#ffffff"

@@ -21,18 +21,21 @@ from colorsense import (
     AnalysisResult,
     AnalysisTimeoutError,
     Color,
+    ColorUsage,
     ComponentType,
+    Composition,
     PaletteCandidate,
     PaletteRole,
+    PropertyFamily,
     RenderError,
     RobotsDisallowedError,
-    RoleResults,
     Theme,
     ThemePalette,
     UnsupportedSchemeError,
-    UsageCategory,
+    Usage,
     UsageEntry,
     UsagePalette,
+    UsageRole,
     Viewport,
 )
 from examples.webservice import main, policy, routes, settings
@@ -45,7 +48,7 @@ def fake_result(url: str) -> AnalysisResult:
     candidate = PaletteCandidate(color=blue, probability=0.9, area=0.6)
     usage = UsagePalette(
         mapping={
-            UsageCategory.surface: (
+            UsageRole.page: (
                 UsageEntry(
                     color=blue,
                     probability=0.9,
@@ -56,15 +59,30 @@ def fake_result(url: str) -> AnalysisResult:
             ),
         }
     )
+    colors = (
+        ColorUsage(
+            color=blue,
+            prominence=0.9,
+            area=0.6,
+            usages=(
+                Usage(
+                    role=UsageRole.page,
+                    property_family=PropertyFamily.background,
+                    weight=1.0,
+                    components={ComponentType.page_bg: 1.0},
+                ),
+            ),
+        ),
+    )
     return AnalysisResult(
         url=url,
         viewport=VIEWPORT,
         themes={
             Theme.light: ThemePalette(
                 theme=Theme.light,
+                colors=colors,
                 usage=usage,
-                roles=RoleResults(mapping={PaletteRole.primary: (candidate,)}),
-                fit_score=0.8,
+                composition=Composition(fit_score=0.8, roles={PaletteRole.primary: (candidate,)}),
             )
         },
     )
@@ -160,14 +178,23 @@ def test_success_returns_trimmed_palette(
     assert body["url"] == url
     theme = body["themes"]["light"]
     assert theme["fit_score"] == 0.8
-    surface = theme["usage"]["surface"]
-    assert surface == [{"hex": "#336699", "probability": 0.9, "area": 0.6}]
-    primary = theme["roles"]["primary"]
+    page = theme["usage"]["page"]
+    assert page == [{"hex": "#336699", "probability": 0.9, "area": 0.6}]
+    primary = theme["composition"]["primary"]
     assert primary == [{"hex": "#336699", "probability": 0.9, "area": 0.6}]
-    # Empty categories/roles are present (the library guarantees the full key sets);
-    # internals (component evidence, OKLCH coordinates) are trimmed.
-    assert theme["usage"]["interactive"] == []
-    assert theme["roles"]["accent"] == []
+    # The color-keyed index is present, trimmed to hex/prominence/area + usage slots.
+    assert theme["colors"] == [
+        {
+            "hex": "#336699",
+            "prominence": 0.9,
+            "area": 0.6,
+            "usages": [{"role": "page", "property_family": "background", "weight": 1.0}],
+        }
+    ]
+    # Empty roles are present (the library guarantees the full key sets); internals
+    # (fine component evidence, OKLCH coordinates) are trimmed.
+    assert theme["usage"]["cta"] == []
+    assert theme["composition"]["accent"] == []
     assert "components" not in str(body)
     assert "page_bg" not in str(body)
 
