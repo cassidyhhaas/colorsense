@@ -19,12 +19,13 @@
 sites:
   shadcn:
     category: quality
+    # theme: Zinc scale (grays); neutrals + black/white throughout.
     theme_colors: ["#0a0a0a", "#ffffff"]
     roles:
       page: {expect: ["#ffffff"], source: "shadcn/ui --background"}
-      text: {expect: ["#0a0a0a"], source: "--foreground"}
-      border: {expect: ["#e5e5e5"], source: "--border"}
-      cta: {expect: ["#0a0a0a", "#171717"], source: "near-black primary button"}
+      text: {expect: ["#000000", "#0a0a0a", "#737373"], source: "--foreground / --muted-foreground (zinc-500)"}
+      border: {expect: ["#e5e5e5"], source: "--border (zinc-200)"}
+      cta: {expect: ["#000000", "#0a0a0a", "#171717"], source: "--primary (pure black) near-black button"}
 
   vercel:
     category: quality
