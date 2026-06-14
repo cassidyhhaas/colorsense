@@ -7,6 +7,18 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-06-13
+
+A palette-quality release. These changes affect the **extracted colors** (golden snapshots
+were regenerated) but make no breaking change to the public API. Three rendering-accuracy
+improvements: gradient call-to-action buttons — which paint a transparent computed
+`background-color` — now contribute their gradient's brand color stops, and semi-transparent
+solid backgrounds are weighted by their opacity; component evidence is attributed one color
+channel at a time (text, background, border) instead of in a single shared pool, so a filled
+button's strong background vote no longer starves its border or text color; and raster
+photographic content is masked out of the area-weighted screenshot palette so a site's
+photography no longer drowns its design colors (CSS gradients and inline `<svg>` are kept).
+
 ### Changed
 
 - **Gradient call-to-action colors are now captured.** A button painted with a CSS gradient
@@ -572,7 +584,8 @@ Initial public release.
 - Bundled, overridable palette configuration (`config_path=` / `load_config`).
 - Fully typed (`py.typed`), Python 3.12+.
 
-[Unreleased]: https://github.com/cassidyhhaas/colorsense/compare/v0.4.1...HEAD
+[Unreleased]: https://github.com/cassidyhhaas/colorsense/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/cassidyhhaas/colorsense/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/cassidyhhaas/colorsense/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/cassidyhhaas/colorsense/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/cassidyhhaas/colorsense/compare/v0.2.0...v0.3.0
