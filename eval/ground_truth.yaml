@@ -1,0 +1,122 @@
+# Human-reviewed expected colors for the real-site quality eval (eval/score.py).
+#
+# METHODOLOGY (Session 15, Cass-endorsed): a site's OWN declared design tokens are the
+# strongest truth for page/text/border; published brand guidelines confirm brand/cta/link.
+# Tokens-primary, guidelines-confirm. Each value below has a `source` note.
+#
+# This file is the eval's *anchor*: it is sourced independently of the algorithm output and
+# reviewed by a human, which is what makes the eval non-self-referential (unlike goldens,
+# which are regenerated from the algorithm itself). DRAFT — pending Cass's review/lock.
+#
+# Per role, `expect` is a SET: a predicted color matches if it is within the ΔE tolerance
+# of ANY listed color (so a text role can accept primary OR muted text, etc.).
+# `theme_colors` are scored against the color-keyed index (present in the top-K prominence).
+#
+# `category: quality` sites count toward the aggregate scorecard. `harvest_completeness`
+# sites (consent/login-walled, too few elements to analyze) are reported but NOT aggregated
+# — they exist to track the separate "thin harvest" problem, not palette quality.
+
+sites:
+  shadcn:
+    category: quality
+    theme_colors: ["#0a0a0a", "#ffffff"]
+    roles:
+      page: {expect: ["#ffffff"], source: "shadcn/ui --background"}
+      text: {expect: ["#0a0a0a"], source: "--foreground"}
+      border: {expect: ["#e5e5e5"], source: "--border"}
+      cta: {expect: ["#0a0a0a", "#171717"], source: "near-black primary button"}
+
+  vercel:
+    category: quality
+    theme_colors: ["#171717", "#fafafa", "#ffffff"]
+    roles:
+      page: {expect: ["#fafafa", "#ffffff"], source: "Geist background"}
+      text: {expect: ["#171717"], source: "Geist foreground"}
+      border: {expect: ["#ebebeb", "#eaeaea"], source: "Geist gray border"}
+
+  stripe:
+    category: quality
+    # CORRECTION (Session 16): brand is blurple/navy, NOT the dominant body-text color.
+    theme_colors: ["#635bff", "#0a2540"]
+    roles:
+      page: {expect: ["#ffffff", "#f6f9fc"], source: "stripe.com surfaces"}
+      text: {expect: ["#425466", "#3a3a3a", "#0a2540"], source: "body / heading text"}
+      cta: {expect: ["#635bff", "#533afd"], source: "stripe brand blurple #635BFF"}
+
+  github:
+    category: quality
+    # CORRECTION (Session 16): accent/cta is the GREEN hero CTA, not the dark-mode link blue.
+    # Site hard-codes data-color-mode=dark, so page is the dark canvas (harvested faithfully).
+    theme_colors: ["#2da44e", "#0d1117"]
+    roles:
+      page: {expect: ["#0d1117", "#010409"], source: "Primer canvas.default (forced dark)"}
+      text: {expect: ["#f0f6fc", "#e6edf3", "#848d97"], source: "Primer fg.default / muted"}
+      border: {expect: ["#30363d", "#21262d", "#d1d9e0"], source: "Primer border.default"}
+      cta: {expect: ["#2da44e", "#08872b", "#238636"], source: "brand.github.com green hero CTA"}
+
+  tailwindcss:
+    category: quality
+    theme_colors: ["#030712", "#38bdf8", "#0ea5e9"]
+    roles:
+      page: {expect: ["#ffffff", "#030712"], source: "Tailwind white / slate-950 hero"}
+      text: {expect: ["#030712", "#90a1b9"], source: "slate-950 / slate-400 muted"}
+      border: {expect: ["#e2e8f0", "#1e293b"], source: "slate scale border"}
+
+  supabase:
+    category: quality
+    theme_colors: ["#3ecf8e", "#171717"]
+    roles:
+      page: {expect: ["#ffffff", "#fcfcfc"], source: "supabase light site"}
+      text: {expect: ["#171717", "#ededed"], source: "foreground"}
+      border: {expect: ["#e2e2e2", "#292929"], source: "border token"}
+      cta: {expect: ["#3ecf8e", "#3fcf8e"], source: "supabase brand green"}
+
+  resend:
+    category: quality
+    # Dark-first rebrand: black canvas, neutral grays, no chromatic brand accent.
+    theme_colors: ["#000000", "#ffffff"]
+    roles:
+      page: {expect: ["#000000", "#0a0a0a"], source: "resend dark-first canvas"}
+      text: {expect: ["#ffffff", "#a1a1a1", "#ededed"], source: "Eggshell / Iron grays"}
+
+  linear:
+    category: quality
+    theme_colors: ["#5e6ad2", "#08090b"]
+    roles:
+      page: {expect: ["#08090b", "#000000"], source: "linear.app/brand dark canvas"}
+      text: {expect: ["#f7f8f8", "#d0d6e0", "#8a8f98"], source: "linear text scale"}
+      cta: {expect: ["#5e6ad2", "#8299ff"], source: "linear brand indigo #5E6AD2"}
+
+  notion:
+    category: quality
+    theme_colors: ["#000000", "#ffffff"]
+    roles:
+      page: {expect: ["#ffffff", "#f6f5f3"], source: "notion surfaces"}
+      text: {expect: ["#000000", "#191919"], source: "notion near-black text"}
+
+  disconetwork:
+    category: quality
+    # No published palette; on-site Tailwind theme tokens are the truth.
+    theme_colors: ["#7c3bed", "#3c83f6", "#10b77f"]
+    roles:
+      page: {expect: ["#ffffff"], source: "disco white site"}
+      text: {expect: ["#030711", "#65758b"], source: "slate-950 / muted"}
+      border: {expect: ["#e5e7eb"], source: "gray-200 border"}
+      cta: {expect: ["#7c3bed", "#3c83f6"], source: "disco primary/secondary CTA brand"}
+
+  # --- harvest-completeness cases (reported, NOT aggregated) ---
+
+  klarna:
+    category: harvest_completeness
+    theme_colors: ["#ffa8cd", "#0b051d"]
+    roles:
+      page: {expect: ["#ffffff", "#f9f8f5"], source: "consent-walled; brand.klarna.com"}
+      text: {expect: ["#0b051d"], source: "klarna black"}
+
+  platform_disco:
+    category: harvest_completeness
+    # Login wall: only ~29 elements harvest. The real app is behind auth.
+    theme_colors: ["#6761f7", "#5793ff"]
+    roles:
+      cta: {expect: ["#6761f7"], source: "login button bg"}
+      link: {expect: ["#5793ff"], source: "login-view-link anchor text"}
