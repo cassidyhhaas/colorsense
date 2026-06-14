@@ -1,4 +1,4 @@
-"""Inventory & clustering: join area-truth with semantics, then cluster.
+"""Inventory & clustering: join area-truth with semantics, then cluster per family.
 
 This module fuses two sources of truth from a `Harvest`
 and its classified elements into area-weighted `ColorCluster`
@@ -10,8 +10,8 @@ objects:
 * **Semantic truth** — the classified elements. Each
   `ClassifiedElement` carries a ``component_dist`` over
   [`ComponentType`][colorsense.ComponentType]. The distribution is split per color
-  channel and attributed to the nearest screenshot-bin color of the *matching*
-  measured color: ``*_text`` components and ``link`` route to ``element.text``
+  channel and attributed to the nearest measured color of the *matching* channel:
+  ``*_text`` components and ``link`` route to ``element.text``
   (a link paints its typography), `border`
   to ``element.border``, and everything else to ``element.bg``. This channel
   routing is a fixed code-level convention (the shared `models.channel_for`). A channel
@@ -23,6 +23,23 @@ objects:
   evenly across them and scaled by each stop's alpha, so a purple→blue button makes both
   purple and blue candidates without out-voting a solid one.
 
+Family-segregated clustering
+----------------------------
+Attribution and clustering happen **within three separate pools**, one per
+[`PropertyFamily`][colorsense.PropertyFamily]: ``background`` (the bg channel),
+``text`` (the text channel), and ``border`` (the border channel). The ``background``
+pool is seeded with one entry per `ScreenshotBin` (area truth); the ``text`` and
+``border`` pools start empty, since text/border colors paint no screenshot area. A
+channel's mass only ever nearest-joins or clusters against entries in its own family's
+pool — so a low-area near-black text color can no longer be absorbed by a high-area
+background bin of a perceptually-near hex and report the bin's hex. Each pool's
+representative is chosen by what is authoritative for that family: ``background`` by
+largest area weight (hex tiebreak), ``text``/``border`` by largest in-family vote mass
+(hex tiebreak). The flat union of all three pools' `ColorCluster`s is returned; because
+each cluster's ``component_mass`` only contains its own family's components (by
+construction), the downstream usage/reconcile/third-party stages operate on the flat
+list unchanged.
+
 Perceptual distance is measured exclusively with
 `colorsense.color.primitives.delta_e` (OKLab ``deltaEOK``), whose units are small;
 the thresholds below are tuned for that scale.
@@ -30,7 +47,10 @@ the thresholds below are tuned for that scale.
 Determinism
 -----------
 There is no randomness. Wherever iteration order could affect the result we sort by a
-stable key (color ``hex``). The same input always yields identical output.
+stable key (color ``hex``). The flat union is assembled in fixed family order
+(background, text, border), each family pre-sorted by ``(-area_weight, hex)``, then a
+**stable** final sort by ``(-area_weight, hex)`` preserves that family order for any
+same-(area, hex) tie. The same input always yields identical output.
 """
 
 from __future__ import annotations
@@ -45,6 +65,7 @@ from colorsense.models import (
     ComponentType,
     Harvest,
     HarvestedElement,
+    PropertyFamily,
     channel_for,
 )
 
@@ -91,6 +112,14 @@ _MATCH_BY_CHANNEL: dict[str, float] = {
     "border": DELTA_E_MATCH_TEXT_BORDER,
 }
 
+# The PropertyFamily a color channel attributes into. Each channel's mass is clustered
+# only against entries in its own family's pool (see the module docstring).
+_FAMILY_BY_CHANNEL: dict[str, PropertyFamily] = {
+    "bg": PropertyFamily.background,
+    "text": PropertyFamily.text,
+    "border": PropertyFamily.border,
+}
+
 
 # Channel routing is the shared `models.channel_for` (the single source of truth, used
 # identically by the component classifier's per-channel normalization). Aliased here for
@@ -130,41 +159,115 @@ def _union(parent: list[int], a: int, b: int) -> None:
         parent[ra] = rb
 
 
+def _in_family_mass(entry: _Entry) -> float:
+    """Total vote mass on a text/border-pool entry (all of one family by construction)."""
+    return sum(entry.component_mix.values())
+
+
+def _cluster_pool(entries: list[_Entry], family: PropertyFamily) -> list[ColorCluster]:
+    """Union-find cluster one family's entry pool into `ColorCluster`s.
+
+    Representative selection is family-specific: ``background`` picks the largest area
+    weight (hex tiebreak — area is authoritative for surfaces); ``text``/``border`` pick
+    the largest in-family vote mass (hex tiebreak — they paint no screenshot area). The
+    returned clusters are pre-sorted by ``(-area_weight, hex)``.
+    """
+    entry_count = len(entries)
+    if entry_count == 0:
+        return []
+
+    parent = list(range(entry_count))
+    for i in range(entry_count):
+        for j in range(i + 1, entry_count):
+            if delta_e(entries[i].color, entries[j].color) <= DELTA_E_CLUSTER:
+                _union(parent, i, j)
+
+    groups: dict[int, list[int]] = defaultdict(list)
+    for i in range(entry_count):
+        groups[_find(parent, i)].append(i)
+
+    clusters: list[ColorCluster] = []
+    for members in groups.values():
+        group = [entries[i] for i in members]
+
+        if family is PropertyFamily.background:
+            # Area truth: largest area weight, ties (and all-zero) broken by smallest hex.
+            representative = min(group, key=lambda entry: (-entry.area_weight, entry.color.hex))
+        else:
+            # Text/border paint no area: rank by in-family vote mass, hex tiebreak.
+            representative = min(
+                group, key=lambda entry: (-_in_family_mass(entry), entry.color.hex)
+            )
+
+        total_area = sum(entry.area_weight for entry in group)
+
+        summed_mass: dict[ComponentType, float] = defaultdict(float)
+        for entry in group:
+            for component, mass in entry.component_mix.items():
+                summed_mass[component] += mass
+
+        mix: dict[ComponentType, float] = {}
+        total = sum(summed_mass.values())
+        if total > 0.0:
+            mix = {component: mass / total for component, mass in summed_mass.items()}
+
+        clusters.append(
+            ColorCluster(
+                color=representative.color,
+                area_weight=total_area,
+                member_count=len(group),
+                component_mix=mix,
+                component_mass=dict(summed_mass),
+            )
+        )
+
+    clusters.sort(key=lambda cluster: (-cluster.area_weight, cluster.color.hex))
+    return clusters
+
+
 def build_inventory(harvest: Harvest, classified: list[ClassifiedElement]) -> list[ColorCluster]:
-    """Join area-truth with element semantics and cluster perceptually-near colors.
+    """Join area-truth with element semantics and cluster perceptually-near colors per family.
 
-    See the module docstring for the data sources. The algorithm is:
+    See the module docstring for the data sources and family segregation. The algorithm is:
 
-    1. Seed one entry per `ScreenshotBin` (authoritative
-       area weight, empty mix).
+    1. Seed the ``background`` pool with one entry per `ScreenshotBin`
+       (authoritative area weight, empty mix); the ``text`` and ``border`` pools start
+       empty (text/border colors paint no screenshot area).
     2. For each classified element, split its ``component_dist`` into per-channel
        sub-distributions via `_channel_for` and process the channels in a
        fixed (bg, text, border) order. For each channel whose measured color is
        non-``None`` and whose sub-distribution is non-empty, find the nearest
-       entry by `delta_e`. If that nearest
-       entry is within the channel's join radius (`DELTA_E_MATCH_BG` for
+       entry **within that channel's family pool only** by `delta_e`. If that
+       nearest entry is within the channel's join radius (`DELTA_E_MATCH_BG` for
        bg, the tighter `DELTA_E_MATCH_TEXT_BORDER` for text/border), add
        the channel's mass (each element weighted equally, raw) into the entry's
-       mix. Otherwise create a
-       new entry from the channel's color with ``area_weight = 0.0`` so its
-       semantics are not lost. New entries are appended in element order then
-       channel order, which is deterministic.
-    3. Cluster entries via union-find under `DELTA_E_CLUSTER`. For each group
-       emit one `ColorCluster`: representative color =
-       member with the largest area weight (ties / all-zero broken by ``hex``);
-       ``area_weight`` = sum of member weights; ``member_count`` = group size;
-       ``component_mass`` = the raw summed member mixes (un-normalized vote mass —
-       the usage view needs cross-cluster magnitude); ``component_mix`` = the same
+       mix. Otherwise append a new entry to that pool from the channel's color
+       with ``area_weight = 0.0`` so its semantics are not lost. New entries are
+       appended in element order then channel order, which is deterministic.
+    3. Cluster each pool independently via union-find under `DELTA_E_CLUSTER`. For
+       each group emit one `ColorCluster`: representative color =
+       member with the largest area weight for ``background`` (largest in-family
+       vote mass for ``text``/``border``), ties / all-zero broken by ``hex``;
+       ``area_weight`` = sum of member weights (0 for text/border); ``member_count`` =
+       group size; ``component_mass`` = the raw summed member mixes (un-normalized vote
+       mass — the usage view needs cross-cluster magnitude); ``component_mix`` = the same
        sums normalized to ~1.0 (empty stays empty).
 
-    Returns clusters sorted by ``area_weight`` descending, ties broken by ``hex``.
+    Returns the flat union of all three pools' clusters, assembled in fixed family order
+    (background, text, border) and then **stably** sorted by ``area_weight`` descending,
+    ties broken by ``hex`` (the stable sort preserves family order for same-(area, hex)
+    ties, keeping the output deterministic).
     """
-    entries: list[_Entry] = [
-        _Entry(bin_.color, bin_.area_fraction) for bin_ in harvest.screenshot_bins
-    ]
+    pools: dict[PropertyFamily, list[_Entry]] = {
+        PropertyFamily.background: [
+            _Entry(bin_.color, bin_.area_fraction) for bin_ in harvest.screenshot_bins
+        ],
+        PropertyFamily.text: [],
+        PropertyFamily.border: [],
+    }
 
-    # STEP 1b: attribute element semantics to the nearest entry (or a new one),
-    # routing each component's mass to the channel that actually paints it.
+    # STEP 1b: attribute element semantics to the nearest entry in the channel's family
+    # pool (or a new one), routing each component's mass to the channel that paints it.
     for classification in classified:
         if not classification.component_dist:
             continue
@@ -196,6 +299,10 @@ def build_inventory(harvest: Harvest, classified: list[ClassifiedElement]) -> li
             if not fills:
                 continue
 
+            # The channel's mass is attributed (and later clustered) only within its
+            # own family's pool — never across families.
+            pool = pools[_FAMILY_BY_CHANNEL[channel]]
+
             # Split the element's channel mass evenly across its fill colors so a
             # multi-stop gradient is not double-counted (a purple->blue button donates
             # the same total cta_bg mass as a solid one, half to each stop). On the bg
@@ -208,7 +315,7 @@ def build_inventory(harvest: Harvest, classified: list[ClassifiedElement]) -> li
 
                 nearest_index: int | None = None
                 nearest_distance = _MATCH_BY_CHANNEL[channel]
-                for idx, entry in enumerate(entries):
+                for idx, entry in enumerate(pool):
                     distance = delta_e(color, entry.color)
                     if distance <= nearest_distance:
                         nearest_distance = distance
@@ -218,54 +325,17 @@ def build_inventory(harvest: Harvest, classified: list[ClassifiedElement]) -> li
                     new_entry = _Entry(color, 0.0)
                     for component, mass in channel_distribution.items():
                         new_entry.component_mix[component] += mass * weight
-                    entries.append(new_entry)
+                    pool.append(new_entry)
                 else:
-                    target = entries[nearest_index]
+                    target = pool[nearest_index]
                     for component, mass in channel_distribution.items():
                         target.component_mix[component] += mass * weight
 
-    if not entries:
-        return []
-
-    # STEP 2: union-find clustering under DELTA_E_CLUSTER.
-    entry_count = len(entries)
-    parent = list(range(entry_count))
-    for i in range(entry_count):
-        for j in range(i + 1, entry_count):
-            if delta_e(entries[i].color, entries[j].color) <= DELTA_E_CLUSTER:
-                _union(parent, i, j)
-
-    groups: dict[int, list[int]] = defaultdict(list)
-    for i in range(entry_count):
-        groups[_find(parent, i)].append(i)
-
+    # STEP 2: cluster each family pool independently, then assemble the flat union in
+    # fixed family order and stably re-sort by (-area_weight, hex).
     clusters: list[ColorCluster] = []
-    for members in groups.values():
-        group = [entries[i] for i in members]
-
-        # Representative: largest area weight, ties (and all-zero) broken by smallest hex.
-        representative = min(group, key=lambda entry: (-entry.area_weight, entry.color.hex))
-        total_area = sum(entry.area_weight for entry in group)
-
-        summed_mass: dict[ComponentType, float] = defaultdict(float)
-        for entry in group:
-            for component, mass in entry.component_mix.items():
-                summed_mass[component] += mass
-
-        mix: dict[ComponentType, float] = {}
-        total = sum(summed_mass.values())
-        if total > 0.0:
-            mix = {component: mass / total for component, mass in summed_mass.items()}
-
-        clusters.append(
-            ColorCluster(
-                color=representative.color,
-                area_weight=total_area,
-                member_count=len(group),
-                component_mix=mix,
-                component_mass=dict(summed_mass),
-            )
-        )
+    for family in (PropertyFamily.background, PropertyFamily.text, PropertyFamily.border):
+        clusters.extend(_cluster_pool(pools[family], family))
 
     clusters.sort(key=lambda cluster: (-cluster.area_weight, cluster.color.hex))
     return clusters

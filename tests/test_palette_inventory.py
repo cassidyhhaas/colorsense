@@ -13,6 +13,7 @@ from colorsense.models import (
     ComponentType,
     Harvest,
     HarvestedElement,
+    PropertyFamily,
     Rect,
     ScreenshotBin,
     Theme,
@@ -22,6 +23,8 @@ from colorsense.palette.inventory import (
     DELTA_E_CLUSTER,
     DELTA_E_MATCH_BG,
     DELTA_E_MATCH_TEXT_BORDER,
+    _cluster_pool,
+    _Entry,
     build_inventory,
 )
 
@@ -522,3 +525,113 @@ def test_bg_channel_keeps_loose_radius_at_same_distance() -> None:
     assert len(clusters) == 1
     assert clusters[0].color.hex == surface.hex
     assert max(clusters[0].component_mix) == ComponentType.card_bg
+
+
+# ---------------------------------------------------------------------------
+# Family-segregated clustering: text/border colors never adopt a bg bin's hex.
+# ---------------------------------------------------------------------------
+
+
+def test_text_color_near_large_bg_bin_keeps_own_hex() -> None:
+    # A low-area text color perceptually NEAR a big background bin must keep its OWN hex
+    # under family segregation — the bin is in the background pool, the text in the text
+    # pool, so they cannot join. (Distance is within the bg join radius, which under the
+    # OLD single-pool algorithm would have let the text adopt the higher-area bin's hex.)
+    surface, text = _color(_DARK_SURFACE), _color(_NEAR_BLACK_TEXT)
+    assert DELTA_E_MATCH_TEXT_BORDER < delta_e(surface, text) <= DELTA_E_MATCH_BG
+
+    harvest = _harvest([ScreenshotBin(color=surface, area_fraction=0.9)])
+    classified = [_classified(None, {ComponentType.page_text: 1.0}, text=text)]
+    clusters = build_inventory(harvest, classified)
+
+    text_cluster = next(c for c in clusters if ComponentType.page_text in c.component_mix)
+    assert text_cluster.color.hex == text.hex  # did NOT adopt the bin's hex
+    assert text_cluster.area_weight == pytest.approx(0.0, abs=1e-9)
+
+
+def test_border_color_near_bg_bin_keeps_own_hex() -> None:
+    # Same guarantee for the border channel: a border color near a bg bin keeps its hex.
+    surface, border = _color(_DARK_SURFACE), _color(_NEAR_BLACK_TEXT)
+    assert DELTA_E_MATCH_TEXT_BORDER < delta_e(surface, border) <= DELTA_E_MATCH_BG
+
+    harvest = _harvest([ScreenshotBin(color=surface, area_fraction=0.9)])
+    classified = [_classified(None, {ComponentType.border: 1.0}, border=border)]
+    clusters = build_inventory(harvest, classified)
+
+    border_cluster = next(c for c in clusters if ComponentType.border in c.component_mix)
+    assert border_cluster.color.hex == border.hex
+    assert border_cluster.area_weight == pytest.approx(0.0, abs=1e-9)
+
+
+def test_background_output_unchanged_for_simple_page_bg_input() -> None:
+    # A page-bg-only input must yield the SAME background cluster as the old single-pool
+    # behavior: one cluster, page bin's hex, full area, page_bg mass.
+    page = _color("#ffffff")
+    harvest = _harvest([ScreenshotBin(color=page, area_fraction=1.0)])
+    classified = [_classified(page, {ComponentType.page_bg: 1.0})]
+
+    clusters = build_inventory(harvest, classified)
+
+    assert [c.color.hex for c in clusters] == ["#ffffff"]
+    assert clusters[0].area_weight == pytest.approx(1.0, abs=1e-9)
+    assert clusters[0].component_mix == {ComponentType.page_bg: pytest.approx(1.0)}
+
+
+def test_text_border_representative_is_max_in_family_mass() -> None:
+    # Within a text/border cluster the representative is the member with the largest
+    # in-family vote mass (hex tiebreak), NOT area (text/border have no area). Build the
+    # pool directly: through build_inventory two near text colors nearest-join into one
+    # entry, so the multi-entry case is exercised at the _cluster_pool level.
+    low = _color("#3366cc")
+    high = _color("#3367cc")  # near enough to cluster with `low`
+    assert delta_e(low, high) <= DELTA_E_CLUSTER
+
+    low_entry = _Entry(low, 0.0)
+    low_entry.component_mix[ComponentType.page_text] = 1.0
+    high_entry = _Entry(high, 0.0)
+    high_entry.component_mix[ComponentType.page_text] = 5.0
+
+    clusters = _cluster_pool([low_entry, high_entry], PropertyFamily.text)
+
+    assert len(clusters) == 1
+    # `high` carries more in-family mass, so it is the representative hex (not max area:
+    # both areas are 0). The bg path would instead break the tie by smallest hex (`low`).
+    assert clusters[0].color.hex == high.hex
+    assert _cluster_pool([low_entry, high_entry], PropertyFamily.background)[0].color.hex == low.hex
+
+
+def test_background_representative_is_max_area() -> None:
+    # Within a background cluster the representative is still the max-area member.
+    small = _color("#3366cc")
+    big = _color("#3367cc")
+    assert delta_e(small, big) <= DELTA_E_CLUSTER
+
+    harvest = _harvest(
+        [
+            ScreenshotBin(color=small, area_fraction=0.2),
+            ScreenshotBin(color=big, area_fraction=0.6),
+        ]
+    )
+    clusters = build_inventory(harvest, [])
+
+    assert len(clusters) == 1
+    assert clusters[0].color.hex == big.hex  # max-area member wins
+
+
+def test_segregated_determinism_same_input_identical_output() -> None:
+    # Family segregation must stay deterministic: same input -> identical cluster list.
+    harvest = _harvest(
+        [
+            ScreenshotBin(color=_color("#0d1117"), area_fraction=0.7),
+            ScreenshotBin(color=_color("#ffffff"), area_fraction=0.3),
+        ]
+    )
+    classified = [
+        _classified(None, {ComponentType.page_text: 1.0}, text=_color("#1f2328")),
+        _classified(None, {ComponentType.border: 1.0}, border=_color("#30363d")),
+        _classified(_color("#0d1117"), {ComponentType.page_bg: 1.0}),
+    ]
+
+    first = build_inventory(harvest, classified)
+    second = build_inventory(harvest, classified)
+    assert first == second

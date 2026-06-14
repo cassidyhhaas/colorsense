@@ -8,7 +8,12 @@ Two complementary views are built here from the same `ColorCluster` list:
   [`UsageEntry`][colorsense.UsageEntry] colors. Answers "which colors paint each role?".
 * **The canonical color-keyed index** (a [`ColorUsage`][colorsense.ColorUsage] tuple, via
   `build_color_index`): per measured color, every role it appears in plus an overall
-  ``prominence`` ranking. Answers "how is each color used?".
+  ``prominence`` ranking. Answers "how is each color used?". Because the inventory now
+  clusters per [`PropertyFamily`][colorsense.PropertyFamily], one hex can appear as
+  several clusters (e.g. the same gray as a text cluster *and* a border cluster, or
+  ``#ffffff`` as both a background bin and a text color); `build_color_index` groups
+  clusters by **exact** ``Color.hex`` so each distinct color surfaces as a single atom
+  listing all its usages.
 
 Both preserve the design's actual structure: a neutral-layered design's gray
 text/border hierarchy appears directly, rather than being flattened into a coarse
@@ -54,6 +59,7 @@ from __future__ import annotations
 import math
 
 from colorsense.models import (
+    Color,
     ColorCluster,
     ColorUsage,
     ComponentType,
@@ -137,15 +143,17 @@ def _build_component_role() -> dict[ComponentType, UsageRole]:
 COMPONENT_ROLE: dict[ComponentType, UsageRole] = _build_component_role()
 
 
-def _role_masses(cluster: ColorCluster) -> dict[UsageRole, dict[ComponentType, float]]:
-    """Split a cluster's raw ``component_mass`` by usage role.
+def _role_masses_from(
+    component_mass: dict[ComponentType, float],
+) -> dict[UsageRole, dict[ComponentType, float]]:
+    """Split a raw ``component_mass`` mapping by usage role.
 
     A color used in multiple ways (e.g. the same gray as text *and* border) correctly
     lands in multiple roles, each with its respective component masses. Components with
     no role (``cta_text``, ``third_party``) are dropped.
     """
     split: dict[UsageRole, dict[ComponentType, float]] = {}
-    for comp, mass in cluster.component_mass.items():
+    for comp, mass in component_mass.items():
         if mass <= 0.0:
             continue
         role = COMPONENT_ROLE.get(comp)
@@ -153,6 +161,11 @@ def _role_masses(cluster: ColorCluster) -> dict[UsageRole, dict[ComponentType, f
             continue
         split.setdefault(role, {})[comp] = mass
     return split
+
+
+def _role_masses(cluster: ColorCluster) -> dict[UsageRole, dict[ComponentType, float]]:
+    """Split a cluster's raw ``component_mass`` by usage role (see `_role_masses_from`)."""
+    return _role_masses_from(cluster.component_mass)
 
 
 # ---------------------------------------------------------------------------
@@ -270,43 +283,65 @@ def _color_usages(role_masses: dict[UsageRole, dict[ComponentType, float]]) -> t
 
 
 def build_color_index(clusters: list[ColorCluster]) -> tuple[ColorUsage, ...]:
-    """Build the canonical color-keyed index from the color inventory.
+    """Build the canonical color-keyed index from the (family-segregated) color inventory.
 
-    For each cluster with at least one routed usage (``cta_text``/``third_party``-only
-    clusters are dropped — third-party colors surface via
+    The inventory clusters per [`PropertyFamily`][colorsense.PropertyFamily], so a single
+    color can arrive as several clusters (the same gray as a text cluster and a border
+    cluster, or ``#ffffff`` as both a background bin and a text color). To present **one
+    atom per color**, clusters are first grouped by **exact** ``Color.hex`` and merged:
+    component masses are summed, area is the max member ``area_weight``, and the shared hex
+    is the representative. Exact equality is intentional — it fully preserves
+    family-distinct hexes (e.g. ``#e5e5ea`` border vs ``#ffffff`` bg), which already
+    differ; perceptually-near-but-distinct colors stay as separate atoms.
+
+    For each merged group with at least one routed usage (``cta_text``/``third_party``-only
+    groups are dropped — third-party colors surface via
     ``AnalysisResult.third_party_colors``), emit a [`ColorUsage`][colorsense.ColorUsage]
     whose ``usages`` describe every role the color appears in and whose ``prominence``
-    blends the cluster's normalized screenshot area with its normalized (``log1p``-damped)
-    total routed vote mass (see `_prominence`). The tuple is sorted by ``prominence``
-    descending, ``hex`` tiebreak. An empty cluster list yields ``()``.
+    blends the group's normalized area with its normalized (``log1p``-damped) total routed
+    vote mass (see `_prominence`). The tuple is sorted by ``prominence`` descending,
+    ``hex`` tiebreak. An empty cluster list yields ``()``.
     """
-    # Precompute each cluster's routed role masses and total routed mass; drop clusters
+    # Group clusters by exact hex (first-seen order over the inventory's stable sort),
+    # merging same-hex clusters across families into one atom.
+    grouped: dict[str, list[ColorCluster]] = {}
+    for cluster in sorted(clusters, key=lambda c: (-c.area_weight, c.color.hex)):
+        grouped.setdefault(cluster.color.hex, []).append(cluster)
+
+    # Per merged atom: summed component mass, max area, routed role masses; drop atoms
     # with no routed usage (e.g. third-party-only).
-    routed: list[tuple[ColorCluster, dict[UsageRole, dict[ComponentType, float]], float]] = []
-    for cluster in clusters:
-        role_masses = _role_masses(cluster)
+    routed: list[tuple[Color, float, dict[UsageRole, dict[ComponentType, float]], float]] = []
+    for members in grouped.values():
+        merged_mass: dict[ComponentType, float] = {}
+        for cluster in members:
+            for comp, mass in cluster.component_mass.items():
+                merged_mass[comp] = merged_mass.get(comp, 0.0) + mass
+        role_masses = _role_masses_from(merged_mass)
         total_mass = sum(sum(m.values()) for m in role_masses.values())
         if not role_masses or total_mass <= 0.0:
             continue
-        routed.append((cluster, role_masses, total_mass))
+        # Members share the hex; any color is representative (use the first, in sort order).
+        color = members[0].color
+        area = max(cluster.area_weight for cluster in members)
+        routed.append((color, area, role_masses, total_mass))
 
     if not routed:
         return ()
 
-    # Normalize area and log1p(vote mass) to [0, 1] across the routed cluster set.
-    max_area = max((c.area_weight for c, _, _ in routed), default=0.0)
-    damped_masses = [math.log1p(total) for _, _, total in routed]
+    # Normalize area and log1p(vote mass) to [0, 1] across the atom set.
+    max_area = max((area for _, area, _, _ in routed), default=0.0)
+    damped_masses = [math.log1p(total) for _, _, _, total in routed]
     max_damped = max(damped_masses, default=0.0)
 
     color_usages: list[ColorUsage] = []
-    for (cluster, role_masses, _total), damped in zip(routed, damped_masses, strict=True):
-        area_norm = cluster.area_weight / max_area if max_area > 0.0 else 0.0
+    for (color, area, role_masses, _total), damped in zip(routed, damped_masses, strict=True):
+        area_norm = area / max_area if max_area > 0.0 else 0.0
         mass_norm = damped / max_damped if max_damped > 0.0 else 0.0
         color_usages.append(
             ColorUsage(
-                color=cluster.color,
+                color=color,
                 prominence=_prominence(area_norm, mass_norm),
-                area=cluster.area_weight,
+                area=area,
                 usages=_color_usages(role_masses),
             )
         )

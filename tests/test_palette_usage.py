@@ -312,3 +312,47 @@ def test_color_index_deterministic_under_permutation() -> None:
     base = build_color_index(clusters)
     for permuted in (list(reversed(clusters)), clusters[2:] + clusters[:2]):
         assert build_color_index(permuted) == base
+
+
+# ---------------------------------------------------------------------------
+# Exact-hex re-merge: family-segregated clusters of the same hex collapse to one atom.
+# ---------------------------------------------------------------------------
+
+
+def test_color_index_same_hex_text_and_border_collapse_to_one_atom() -> None:
+    # Family segregation can emit the SAME hex as a text cluster AND a border cluster.
+    # The color-keyed index must show ONE atom listing both usages.
+    text_cluster = _cluster("#1a1a1a", 0.0, {ComponentType.page_text: 4.0})
+    border_cluster = _cluster("#1a1a1a", 0.0, {ComponentType.border: 2.0})
+
+    index = build_color_index([text_cluster, border_cluster])
+
+    atoms = [cu for cu in index if cu.color.hex == "#1a1a1a"]
+    assert len(atoms) == 1
+    roles = {u.role for u in atoms[0].usages}
+    assert roles == {UsageRole.text, UsageRole.border}
+
+
+def test_color_index_same_hex_merges_area_and_mass() -> None:
+    # Merged atom: area = max member area, masses summed across families.
+    bg_cluster = _cluster("#ffffff", 0.8, {ComponentType.page_bg: 1.0})
+    text_cluster = _cluster("#ffffff", 0.0, {ComponentType.page_text: 3.0})
+
+    index = build_color_index([bg_cluster, text_cluster])
+
+    (atom,) = [cu for cu in index if cu.color.hex == "#ffffff"]
+    assert atom.area == 0.8  # max of (0.8, 0.0)
+    roles = {u.role for u in atom.usages}
+    assert roles == {UsageRole.page, UsageRole.text}
+
+
+def test_color_index_near_but_distinct_hexes_stay_two_atoms() -> None:
+    # Two perceptually near but DISTINCT hexes (e.g. a border vs a bg color) are NOT
+    # merged — exact-hex grouping preserves family-distinct colors.
+    border = _cluster("#e5e5ea", 0.0, {ComponentType.border: 2.0})
+    bg = _cluster("#ffffff", 0.9, {ComponentType.page_bg: 1.0})
+
+    index = build_color_index([border, bg])
+
+    hexes = {cu.color.hex for cu in index}
+    assert hexes == {"#e5e5ea", "#ffffff"}
