@@ -67,7 +67,7 @@ def _is_interactive_pill(
 
 
 def _gradient_fill_stops(bg: Color | None, raw_colors: Sequence[str]) -> tuple[Color, ...]:
-    """Opaque stops of a gradient that *fills* the element, or ``()``.
+    """Color stops of a gradient that *fills* the element, or ``()``.
 
     Applied only to elements that pass `_is_interactive_pill` (a CTA). Returns stops only
     when the gradient is the element's actual background fill: the computed
@@ -75,8 +75,9 @@ def _gradient_fill_stops(bg: Color | None, raw_colors: Sequence[str]) -> tuple[C
     precedence and the gradient is ignored), and the gradient must have **no
     fully-transparent stop** — decorative fades, glow halos, and dot-grid textures always
     fade to ``rgba(0, 0, 0, 0)``, so a transparent stop marks the gradient as ornamental
-    rather than a fill. Stops are deduped by hex (a repeated brand color counts once) and
-    capped at `_MAX_GRADIENT_STOPS`.
+    rather than a fill. A merely *partly*-transparent stop is kept; the inventory later
+    scales its mass by its alpha. Stops are deduped by opaque hex (a repeated brand color
+    counts once) and capped at `_MAX_GRADIENT_STOPS`.
     """
     if bg is not None and bg.alpha > 0.0:
         return ()
@@ -85,6 +86,7 @@ def _gradient_fill_stops(bg: Color | None, raw_colors: Sequence[str]) -> tuple[C
         return ()
     deduped: list[Color] = []
     seen: set[str] = set()
+    # Dedup by opaque hex, keeping the first (gradient source-order) occurrence.
     for stop in stops:
         if stop.hex in seen:
             continue

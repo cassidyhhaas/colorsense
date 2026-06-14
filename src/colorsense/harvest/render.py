@@ -662,12 +662,17 @@ class RenderSession:
         for item in raw:
             if not isinstance(item, dict):
                 continue
-            rects.append(
-                Rect(
+            try:
+                rect = Rect(
                     x=float(item["x"]),
                     y=float(item["y"]),
                     width=float(item["w"]),
                     height=float(item["h"]),
                 )
-            )
+            except (KeyError, TypeError, ValueError):
+                # A hostile page can hand back dicts missing keys or with non-numeric
+                # values; skip them so detection degrades to a best-effort list (per the
+                # docstring) rather than raising out of the harvest.
+                continue
+            rects.append(rect)
         return rects
