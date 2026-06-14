@@ -301,30 +301,39 @@ of element it is* — so a link's color and a CTA button's background no longer 
 
 For each usage role, a probability-ranked list of colors. A color used in multiple ways,
 like the same gray as both text and border, correctly appears in multiple roles.
-**Prominence** — how clusters rank within a role — is scored by the role's property family:
+**Prominence** — how clusters rank within a role — depends on whether the role names a
+*structural surface* or an *element color*:
 
-- **Background-family roles (page/surface/banner/cta/action) are ranked by screenshot
-  area.** Area is the authoritative signal for backgrounds, and vote *counts* would
-  actively mislead: a page with 30 repeated cards produces 30 card-background votes, while
-  the page background — covering, say, 86% of every pixel — is one `<body>` element with
-  one vote. Ranking by votes would crown the cards; ranking by area correctly crowns the
-  background. (Only clusters with nonzero vote mass in the role participate at all — area
-  alone doesn't prove a color *is* used that way.)
+- **Structural-surface roles (page/surface/banner) are ranked by screenshot area.** Area is
+  the authoritative signal for surfaces, and vote *counts* would actively mislead: a page
+  with 30 repeated cards produces 30 card-background votes, while the page background —
+  covering, say, 86% of every pixel — is one `<body>` element with one vote. Ranking by votes
+  would crown the cards; ranking by area correctly crowns the background. A dominant-area
+  cluster anchors each of these roles, so the winner is also stable across operating systems.
+  (Only clusters with nonzero vote mass in the role participate at all — area alone doesn't
+  prove a color *is* used that way.)
 
-- **Text/link/border are ranked by `log1p` of vote mass.** These paint negligible
-  screenshot area, so area can't rank them; how many elements use the color can — but only
-  *sub-linearly*. Raw linear mass lets element count drown high-confidence single-element
-  evidence. Taking `log1p(mass)` compresses big masses (`log1p(93) ≈ 4.5` vs
-  `log1p(1.0) ≈ 0.69`) without changing the *ordering* (the logarithm is monotonic), while
-  genuinely tiny masses still prune (`log1p(0.05) ≈ 0.05`).
+- **Element-color roles (cta/action/text/link/border) are ranked by `log1p` of vote mass.**
+  These paint negligible screenshot area, so area would be wrong twice over. It would be
+  *incorrect*: the page background out-areas every button, so an area-ranked `cta` collapses
+  to the page-background hex and the real brand CTA is pruned below `MIN_SHARE` — on
+  github.com the `cta` role reported the dark page background and the green "Sign up" button
+  vanished. And it would be *non-deterministic*: which of two near-zero-area buttons forms its
+  own median-cut screenshot bin (and so gets area) flips between macOS and Linux on identical
+  input — the cross-OS coin flip the golden tests kept catching. Vote mass is DOM-derived
+  (computed colors, not rendered pixels), so it ranks the real element color — and the primary
+  button over the secondary — correctly and *stably*. `log1p` damps it *sub-linearly* so that
+  element count can't drown high-confidence evidence: it compresses big masses
+  (`log1p(93) ≈ 4.5` vs `log1p(1.0) ≈ 0.69`) without changing the *ordering* (the logarithm is
+  monotonic), while genuinely tiny masses still prune (`log1p(0.05) ≈ 0.05`).
 
-The CTA-vs-links problem the old taxonomy had is now structural, not just damped: on
-github.com, ~200 link votes (clusters with mass 93 / 55 / 48) and the page's one green CTA
-(vote mass 1.0) used to compete for a single shared `interactive` slot, dropping the CTA to
-a 0.005 share — below the pruning floor — so the brand accent vanished. With links in the
-`link` role and the CTA in its own `cta` role, the CTA's small painted area normalizes to a
-high share *within its own role* and trivially survives. (We verified colored CTAs survive
-the prune under the dedicated `cta` role with the current area formula across 12 real sites.)
+This is why each interactive color also gets its own role rather than one shared slot: on
+github.com ~200 link votes (clusters with mass 93 / 55 / 48) and the lone green CTA once
+competed for a single `interactive` slot, dropping the CTA below the pruning floor. With
+links in `link` and the CTA mass-ranked in `cta`, the brand green surfaces (and on a page
+with two hero buttons, the higher-mass primary button wins the role on every OS). The
+cta/action `property_family` stays `background` for the family rollups and the color-keyed
+index below; only their *ranking signal* is vote mass.
 
 Within each role the prominence scores are normalized to probabilities, entries below
 `MIN_SHARE` (0.02) are pruned, and survivors are renormalized. If pruning would empty a

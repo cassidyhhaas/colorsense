@@ -14,6 +14,7 @@ from colorsense.models import (
     family_of,
 )
 from colorsense.palette.usage import (
+    _AREA_RANKED_ROLES,
     COMPONENT_ROLE,
     MIN_SHARE,
     ROLE_COMPONENTS,
@@ -91,8 +92,9 @@ def test_role_with_no_mass_backfills_to_empty() -> None:
             assert palette.mapping[role] == ()
 
 
-def test_background_roles_ranked_by_area_not_vote_mass() -> None:
+def test_surface_roles_ranked_by_area_not_vote_mass() -> None:
     # 30 repeated cards (high vote mass, small area) must NOT outrank an 86%-area page bg.
+    # (Surface roles — page/surface/banner — are area-ranked; cta/action are not.)
     page = _cluster("#ffffff", 0.86, {ComponentType.page_bg: 1.0})
     cards = _cluster("#f6f8fa", 0.08, {ComponentType.card_bg: 30.0})
     palette = build_usage([page, cards])
@@ -130,8 +132,8 @@ def test_text_ranked_by_log_damped_vote_mass() -> None:
 
 def test_cta_survives_in_its_own_role() -> None:
     # The redesign's payoff: the colored CTA gets its OWN role, so it no longer competes
-    # with ~200 link votes for one "interactive" slot. Its small area normalizes to 1.0
-    # within the cta role and trivially survives MIN_SHARE.
+    # with ~200 link votes for one "interactive" slot. As the only cta-mass cluster it
+    # normalizes to 1.0 within the cta role (which is ranked by vote mass, not area).
     links_a = _cluster("#59636e", 0.0, {ComponentType.link: 93.0})
     links_b = _cluster("#0969da", 0.0, {ComponentType.link: 48.0})
     cta = _cluster("#1f883d", 0.02, {ComponentType.cta_bg: 1.0})
@@ -142,6 +144,59 @@ def test_cta_survives_in_its_own_role() -> None:
     link_hexes = [e.color.hex for e in palette.mapping[UsageRole.link]]
     assert _color("#0969da").hex in link_hexes
     assert link_hexes[0] == _color("#59636e").hex  # mass-monotonic ordering within link
+
+
+def test_cta_action_are_mass_ranked_not_area_ranked() -> None:
+    # The taxonomy split: surfaces (page/surface/banner) rank by area; element colors
+    # (cta/action/text/link/border) rank by vote mass. Guards against silent drift.
+    assert {UsageRole.page, UsageRole.surface, UsageRole.banner} == _AREA_RANKED_ROLES
+    assert UsageRole.cta not in _AREA_RANKED_ROLES
+    assert UsageRole.action not in _AREA_RANKED_ROLES
+
+
+def test_cta_brand_color_not_buried_by_high_area_page_background() -> None:
+    # Regression for the area-ranked-cta bug: a huge-area page background that also carries
+    # cta_bg mass (white "ghost"/secondary buttons share the page hex) must NOT bury the
+    # small, zero-area brand CTA. Under the old area ranking the page bg (area 0.9) won the
+    # cta role outright and the brand green was pruned below MIN_SHARE; under mass ranking the
+    # higher-mass brand green wins and the page bg ranks below it. (The github case.)
+    page = _cluster("#ffffff", 0.9, {ComponentType.page_bg: 1.0, ComponentType.cta_bg: 2.0})
+    brand = _cluster("#08872b", 0.0, {ComponentType.cta_bg: 5.0})
+    palette = build_usage([page, brand])
+
+    cta = palette.mapping[UsageRole.cta]
+    cta_hexes = [e.color.hex for e in cta]
+    # Brand green survives AND outranks the high-area page bg (mass 5 > 2, area ignored).
+    assert _color("#08872b").hex in cta_hexes
+    assert cta_hexes[0] == _color("#08872b").hex
+    # The page role itself is still area-ranked: white wins it.
+    assert [e.color.hex for e in palette.mapping[UsageRole.page]] == [_color("#ffffff").hex]
+
+
+def test_cta_winner_is_mass_deterministic_when_areas_tie() -> None:
+    # The ds_site cross-OS flip, distilled: two zero-area CTAs (primary + secondary button)
+    # whose screenshot bins flip across OSes. Area cannot decide (both 0 -> arbitrary hex
+    # tiebreak), but DOM-derived vote mass is stable and picks the primary button on every
+    # OS. Higher-mass amber (btn-primary) must beat lower-mass purple (btn-secondary)
+    # regardless of hex order (purple's hex sorts first, so an area/hex tiebreak would pick
+    # it — this asserts mass decides instead).
+    amber = _cluster("#f59e0b", 0.0, {ComponentType.cta_bg: 0.865})
+    purple = _cluster("#7c3aed", 0.0, {ComponentType.cta_bg: 0.737})
+    palette = build_usage([amber, purple])
+
+    cta = palette.mapping[UsageRole.cta]
+    assert cta[0].color.hex == _color("#f59e0b").hex
+    assert _color("#7c3aed").hex < _color("#f59e0b").hex  # purple would win a hex tiebreak
+
+
+def test_action_brand_color_not_buried_by_high_area_background() -> None:
+    # Same as the cta case, for the action role (secondary buttons / badges).
+    page = _cluster("#ffffff", 0.9, {ComponentType.page_bg: 1.0, ComponentType.badge: 1.0})
+    brand = _cluster("#7c3aed", 0.0, {ComponentType.button_secondary: 4.0})
+    palette = build_usage([page, brand])
+
+    action_hexes = [e.color.hex for e in palette.mapping[UsageRole.action]]
+    assert action_hexes[0] == _color("#7c3aed").hex
 
 
 def test_dual_use_color_appears_in_both_roles_with_correct_masses() -> None:
