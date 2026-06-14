@@ -204,14 +204,18 @@ gap: typography in plain `<p>`/`<span>` content was previously never measured
 ## 3. Building the color inventory
 
 `palette/inventory.py` fuses the screenshot's *area truth* with the elements' *semantic
-truth* into `ColorCluster`s:
+truth* into `ColorCluster`s. The work happens in **three separate pools, one per property
+family** — background, text, and border — and a color never crosses between them:
 
-1. **Seed** one working entry per screenshot bin, carrying its authoritative
-   `area_fraction` and an empty component mix.
+1. **Seed** the *background* pool with one working entry per screenshot bin, carrying its
+   authoritative `area_fraction` and an empty component mix. The *text* and *border* pools
+   start empty: text and border colors paint no screenshot area, so there is nothing to
+   seed them with.
 2. **Attribute element semantics.** Each classified element's component distribution is
    split by *color channel*: `*_text` components and `link` route to the element's text
    color (a link paints its typography, not its usually-transparent background), `border`
-   to its border color, everything else to its background color. A channel whose measured
+   to its border color, everything else to its background color. Each channel's votes land
+   in **that channel's family pool only**. A channel whose measured
    color is fully transparent (`alpha == 0` — e.g. the default
    `background-color: transparent`) paints nothing and donates no votes; without that
    gate, every transparent-background element would pile votes onto a phantom black
@@ -224,15 +228,25 @@ truth* into `ColorCluster`s:
    which is what matters for a translucent *solid* background: a faint tint such as
    `bg-primary/10` votes its intended saturated color in proportion to how little it paints,
    rather than at full strength.
-   Each fill's vote mass is added to the nearest existing entry
-   within the channel's **join radius** — or, if nothing is close enough, a new entry
-   with `area_weight = 0` is created so the semantics aren't lost.
-3. **Cluster.** Entries within ΔE 0.05 of each other are merged transitively
-   (union-find: if A is near B and B is near C, all three become one cluster). Each group
-   becomes one `ColorCluster`: the representative color is the member with the largest
-   area weight, `area_weight` is the group sum, and the component votes are kept both raw
-   (`component_mass` — cross-cluster magnitudes matter later) and normalized
-   (`component_mix`).
+   Each fill's vote mass is added to the nearest existing entry **in that channel's family
+   pool** within the channel's **join radius** — or, if nothing is close enough, a new entry
+   with `area_weight = 0` is created in that pool so the semantics aren't lost.
+3. **Cluster each pool independently.** Within a pool, entries within ΔE 0.05 of each other
+   are merged transitively (union-find: if A is near B and B is near C, all three become one
+   cluster). Each group becomes one `ColorCluster`. The representative color is chosen by
+   what is authoritative for that family: **background** picks the largest *area weight*;
+   **text** and **border** pick the largest *in-family vote mass* (they paint no screenshot
+   area), ties broken by hex. `area_weight` is the group sum (zero for text/border), and the
+   component votes are kept both raw (`component_mass` — cross-cluster magnitudes matter
+   later) and normalized (`component_mix`). The three pools' clusters are returned as one
+   flat list (each cluster's `component_mass` holds only its own family's components, so the
+   downstream usage/reconcile stages need no family bookkeeping).
+
+Segregating the pools is what stops a low-area text or border color from being swallowed by a
+high-area background bin of a near-identical hue and then *reported as the bin's hex* — the
+family-bleed that put a page-background color in the `border` slot, or a card surface in the
+`link` slot. Because text and border colors now cluster only against their own kind, the
+representative reported for each role is a real color of that family.
 
 ### Why two join radii?
 
@@ -246,10 +260,11 @@ and the two limits guard against opposite failure modes:
 - **Text and borders match tightly (0.05).** These come from computed style — exact
   values, not quantized pixels — and dark colors sit perceptually close together in
   OKLab, so a loose radius would fold a page's near-black text into adjacent dark
-  surface bins and erase its text hierarchy from the usage view. The tight radius
-  bounds that absorption; it does not eliminate it. Colors genuinely within 0.05 of
-  each other still merge — `#1f2328` body text and a `#002a36` surface sit at
-  ΔE ≈ 0.041 and become one cluster — a known limitation of clustering in OKLab.
+  *text* colors and blur its text hierarchy. The tight radius bounds that absorption; it
+  does not eliminate it. Two genuinely-near colors *of the same family* still merge — a
+  `#1f2328` and a `#002a36` body text sitting at ΔE ≈ 0.041 become one text cluster — a
+  known limitation of clustering in OKLab. (A near-black *text* color and a near-black
+  *surface* no longer merge, though: they live in different family pools.)
 
 ### The cross-OS quantizer incident
 
@@ -319,10 +334,15 @@ measured *something* never reports nothing.
 ### The color-keyed index (`build_color_index`)
 
 The same clusters, re-projected as the canonical, color-first answer to "how is each color
-used?". Each routed cluster becomes a `ColorUsage`: its `usages` are one slot per role it
-participates in (the role's routed mass over the color's total routed mass — slots sum to
-~1 — plus normalized per-component evidence and the `property_family` rollup), and its
-overall `prominence` blends the cluster's normalized screenshot area with its normalized
+used?". Because the inventory now clusters per family, one color can arrive as several
+clusters (the same gray as a text cluster *and* a border cluster, or `#ffffff` as both a
+background bin and a text color), so clusters are first grouped by **exact hex** and merged
+into one atom per color — exact equality is deliberate, since it keeps family-distinct hexes
+like a near-white `#e5e5ea` border and the `#ffffff` page apart while collapsing only what is
+truly the same value. Each merged atom becomes a `ColorUsage`: its `usages` are one slot per
+role it participates in (the role's routed mass over the color's total routed mass — slots
+sum to ~1 — plus normalized per-component evidence and the `property_family` rollup), and its
+overall `prominence` blends the atom's normalized screenshot area with its normalized
 `log1p` of total routed vote mass. The blend (`PROMINENCE_AREA_WEIGHT`, default 0.7 toward
 area) is a **first-cut heuristic** — area-truth primary so dominant backgrounds rank high,
 vote-mass secondary so zero-area brand accents (CTA/link colors) are not buried — and is
