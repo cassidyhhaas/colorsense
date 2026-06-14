@@ -532,13 +532,17 @@ def test_bg_channel_keeps_loose_radius_at_same_distance() -> None:
 # ---------------------------------------------------------------------------
 
 
+# A text/border color WITHIN the tight join radius of the big bg bin: this is the actual
+# family-bleed window. Under the OLD single-pool algorithm the text would join (or cluster
+# into) the higher-area bin and adopt ITS hex; family segregation keeps them apart.
+_BLEED_TEXT = "#10141a"  # deltaEOK 0.0136 from _DARK_SURFACE — inside DELTA_E_MATCH_TEXT_BORDER
+
+
 def test_text_color_near_large_bg_bin_keeps_own_hex() -> None:
-    # A low-area text color perceptually NEAR a big background bin must keep its OWN hex
-    # under family segregation — the bin is in the background pool, the text in the text
-    # pool, so they cannot join. (Distance is within the bg join radius, which under the
-    # OLD single-pool algorithm would have let the text adopt the higher-area bin's hex.)
-    surface, text = _color(_DARK_SURFACE), _color(_NEAR_BLACK_TEXT)
-    assert DELTA_E_MATCH_TEXT_BORDER < delta_e(surface, text) <= DELTA_E_MATCH_BG
+    surface, text = _color(_DARK_SURFACE), _color(_BLEED_TEXT)
+    # Inside the tight radius => the OLD code bled the text onto the bin's hex; the NEW
+    # family-segregated code must keep the text's own hex.
+    assert delta_e(surface, text) <= DELTA_E_MATCH_TEXT_BORDER
 
     harvest = _harvest([ScreenshotBin(color=surface, area_fraction=0.9)])
     classified = [_classified(None, {ComponentType.page_text: 1.0}, text=text)]
@@ -551,8 +555,8 @@ def test_text_color_near_large_bg_bin_keeps_own_hex() -> None:
 
 def test_border_color_near_bg_bin_keeps_own_hex() -> None:
     # Same guarantee for the border channel: a border color near a bg bin keeps its hex.
-    surface, border = _color(_DARK_SURFACE), _color(_NEAR_BLACK_TEXT)
-    assert DELTA_E_MATCH_TEXT_BORDER < delta_e(surface, border) <= DELTA_E_MATCH_BG
+    surface, border = _color(_DARK_SURFACE), _color(_BLEED_TEXT)
+    assert delta_e(surface, border) <= DELTA_E_MATCH_TEXT_BORDER
 
     harvest = _harvest([ScreenshotBin(color=surface, area_fraction=0.9)])
     classified = [_classified(None, {ComponentType.border: 1.0}, border=border)]
