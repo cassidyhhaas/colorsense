@@ -28,10 +28,6 @@ not listed here is internal and free to change between releases.
 
 ::: colorsense.UsageEntry
 
-::: colorsense.Composition
-
-::: colorsense.PaletteCandidate
-
 ::: colorsense.DivergenceItem
 
 ::: colorsense.DesignToken
@@ -49,8 +45,6 @@ not listed here is internal and free to change between releases.
 ::: colorsense.PropertyFamily
 
 ::: colorsense.family_of
-
-::: colorsense.PaletteRole
 
 ::: colorsense.ComponentType
 

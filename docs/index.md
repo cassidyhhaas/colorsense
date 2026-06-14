@@ -5,8 +5,8 @@ Extract the rendered color palette of any website as a structured, typed Python 
 colorsense renders a page in headless Chromium ([Playwright](https://playwright.dev/python/)),
 harvests its design tokens and computed element colors, and classifies them by **usage role**
 — page, surface, banner, cta, action, text, link, border — exposed as a color-keyed
-canonical index and a role-keyed projection, plus a demoted 60/30/10 composition. The result
-is a frozen Pydantic `AnalysisResult`.
+canonical index and a role-keyed projection. The result is a frozen Pydantic
+`AnalysisResult`.
 
 ## Requirements
 

@@ -24,7 +24,6 @@ from colorsense.models import (
     Color,
     Harvest,
     HarvestedElement,
-    PaletteRole,
     Rect,
     ScreenshotBin,
     Theme,
@@ -510,17 +509,6 @@ async def test_analyze_orchestrates_faked_harvest(config: Config) -> None:
     cta_color = next(cu for cu in palette.colors if cu.color.hex == "#2244aa")
     assert any(u.role is UsageRole.cta for u in cta_color.usages)
 
-    # The demoted composition view: the mapping has every role key, and the area-truth
-    # bins yield real candidates for the dominant surface roles.
-    roles = palette.composition.roles
-    assert set(roles) == set(PaletteRole)
-    nonempty = {role for role, cands in roles.items() if cands}
-    assert nonempty, "expected at least one palette role to carry a candidate"
-    assert roles[PaletteRole.primary], "primary role should be populated from the 60% bin"
-    primary_hexes = {cand.color.hex for cand in roles[PaletteRole.primary]}
-    assert "#ffffff" in primary_hexes
-    assert 0.0 <= palette.composition.fit_score <= 1.0
-
     # Tokens requested (include_tokens=True): carried through, classified, public shape.
     assert palette.tokens is not None
     token_names = {t.name for t in palette.tokens}
@@ -531,11 +519,11 @@ async def test_analyze_orchestrates_faked_harvest(config: Config) -> None:
     assert by_name["--destructive"].semantic_role is TokenSemanticRole.status
 
     # Status colors are segregated OUT of the palette views: the destructive red appears
-    # only as a status-role DesignToken, never as a usage entry or role candidate.
+    # only as a status-role DesignToken, never as a usage entry or color-index entry.
     all_usage_hexes = {entry.color.hex for entries in usage.values() for entry in entries}
     assert "#ef4444" not in all_usage_hexes
-    all_role_hexes = {cand.color.hex for cands in roles.values() for cand in cands}
-    assert "#ef4444" not in all_role_hexes
+    all_index_hexes = {cu.color.hex for cu in palette.colors}
+    assert "#ef4444" not in all_index_hexes
 
     # Clean Pydantic round-trip of the assembled result.
     restored = AnalysisResult.model_validate_json(result.model_dump_json())
@@ -734,7 +722,7 @@ async def test_first_requested_theme_is_primary(config: Config) -> None:
     assert dark_palette.tokens is not None and light_palette.tokens is not None
     assert {t.name for t in dark_palette.tokens} == {"--dark-surface", "--color-primary"}
     assert "--gray-100" in {t.name for t in light_palette.tokens}
-    assert 0.0 <= dark_palette.composition.fit_score <= 1.0
+    assert dark_palette.colors and light_palette.colors
 
 
 async def test_config_path_flows_through_analyze(tmp_path: Path, config: Config) -> None:
@@ -872,7 +860,6 @@ async def test_include_tokens_does_not_change_other_fields(config: Config) -> No
     a, b = without.themes[Theme.light], with_tokens.themes[Theme.light]
     assert a.colors == b.colors
     assert a.usage == b.usage
-    assert a.composition == b.composition
     assert a.divergence == b.divergence
     assert a.tokens is None and b.tokens is not None
 
@@ -916,11 +903,9 @@ async def test_end_to_end_light_and_dark(fixtures_dir: Path) -> None:
 
     for theme, palette in result.themes.items():
         assert palette.theme is theme
-        # Each surviving theme carries the color index, the usage view, and the composition.
+        # Each surviving theme carries the color index and the usage view.
         assert palette.colors
         assert any(palette.usage.mapping.values())
-        assert palette.composition.roles
-        assert 0.0 <= palette.composition.fit_score <= 1.0
 
         # Declared tokens were classified and carried onto each theme palette.
         assert palette.tokens

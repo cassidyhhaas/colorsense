@@ -39,8 +39,8 @@ second theme roughly doubles the render cost. Pass `themes=LIGHT_AND_DARK` (equi
 theme; `result.metadata` records when that happened.
 
 The first theme in the tuple is "primary": when light/dark renders are near-identical, it
-is the one kept. Everything derived per theme (`colors`, `usage`, `composition`,
-`divergence`, `tokens`) lives on that theme's `ThemePalette` in `result.themes`.
+is the one kept. Everything derived per theme (`colors`, `usage`, `divergence`, `tokens`)
+lives on that theme's `ThemePalette` in `result.themes`.
 
 ### Overall deadline
 
@@ -106,8 +106,8 @@ stdout carries data only; warnings and errors go to stderr.
 
 The default (no `--json`) output prints, per theme, the color-keyed index first (each
 color's prominence and the roles it appears in), then the role-keyed usage view (each
-role's entries with hex, probability, and area), then the composition summary with the fit
-score, any divergence, and (under `--tokens`) the declared tokens, in the spirit of
+role's entries with hex, probability, and area), any divergence, and (under `--tokens`) the
+declared tokens, in the spirit of
 [`examples/quickstart.py`](https://github.com/cassidyhhaas/colorsense/blob/main/examples/quickstart.py).
 
 ## The result
@@ -170,16 +170,6 @@ from colorsense import UsageRole
 for entry in result.themes[theme].usage.mapping[UsageRole.cta]:
     print(entry.color.hex, entry.probability, entry.components)
 ```
-
-#### `composition` — the demoted 60/30/10 view
-
-A measured-only 60/30/10 interpretation of the same colors (it is *not* reconciled
-against tokens), exposed as a `Composition`. `palette.composition.roles` always contains
-every `PaletteRole` (`primary`, `secondary`, `accent`, `neutral_light`, `neutral_dark`);
-each `PaletteCandidate` carries `color`, `probability`, and `area`.
-`palette.composition.fit_score` (in `[0, 1]`) describes how closely the design matches the
-canonical 60/30/10 split — a descriptive property of the design, not a quality score for
-the analysis.
 
 #### `divergence`
 

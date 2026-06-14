@@ -77,8 +77,8 @@ def _parse_viewport(value: str, scale: float) -> Viewport:
 
 
 def _print_palette(result: AnalysisResult) -> None:
-    """Human summary per theme: the color-keyed index, the role-keyed usage view, then the
-    demoted 60/30/10 composition, divergence, and (when requested) the declared tokens."""
+    """Human summary per theme: the color-keyed index, the role-keyed usage view,
+    divergence, and (when requested) the declared tokens."""
     typer.echo(result.url)
     for theme, palette in result.themes.items():
         typer.echo(f"  [{theme}]")
@@ -102,19 +102,6 @@ def _print_palette(result: AnalysisResult) -> None:
                     f"        {entry.color.hex}"
                     f"  probability={entry.probability:.2f}  area={entry.area:.2f}"
                 )
-
-        typer.echo(
-            f"    composition (60/30/10 view, fit score {palette.composition.fit_score:.2f}):"
-        )
-        for palette_role, candidates in palette.composition.roles.items():
-            if not candidates:
-                typer.echo(f"      {palette_role:<14}(none detected)")
-                continue
-            best = candidates[0]
-            typer.echo(
-                f"      {palette_role:<14}{best.color.hex}"
-                f"  probability={best.probability:.2f}  area={best.area:.2f}"
-            )
 
         if palette.divergence:
             typer.echo("    divergence:")

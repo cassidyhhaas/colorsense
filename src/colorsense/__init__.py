@@ -21,10 +21,7 @@ Result & contracts
   index** is ``colors`` (a [`ColorUsage`][colorsense.ColorUsage] tuple of measured colors, each
   carrying its [`Usage`][colorsense.Usage] slots — "how each color is used"); its **role-keyed
   projection** is ``usage`` ([`UsagePalette`][colorsense.UsagePalette] /
-  [`UsageEntry`][colorsense.UsageEntry] — "which colors paint each usage role"); its **secondary**
-  view is ``composition`` ([`Composition`][colorsense.Composition] /
-  [`PaletteCandidate`][colorsense.PaletteCandidate]), the demoted measured-only 60/30/10
-  interpretation with its ``fit_score``. ``divergence``
+  [`UsageEntry`][colorsense.UsageEntry] — "which colors paint each usage role"). ``divergence``
   ([`DivergenceItem`][colorsense.DivergenceItem]) reports declared-vs-measured discrepancies, and
   ``tokens`` ([`DesignToken`][colorsense.DesignToken]) carries the declared design tokens — opt-in
   via ``analyze(..., include_tokens=True)`` (``None`` when not requested, ``()`` when requested but
@@ -35,9 +32,9 @@ Result & contracts
 * [`Theme`][colorsense.Theme], [`UsageRole`][colorsense.UsageRole],
   [`PropertyFamily`][colorsense.PropertyFamily] (with the
   [`family_of`][colorsense.family_of] role→family helper),
-  [`PaletteRole`][colorsense.PaletteRole], [`ComponentType`][colorsense.ComponentType],
+  [`ComponentType`][colorsense.ComponentType],
   [`TokenSemanticRole`][colorsense.TokenSemanticRole] — the enums that key the result (e.g.
-  ``usage.mapping[UsageRole.cta]``, ``composition.roles[PaletteRole.primary]``).
+  ``usage.mapping[UsageRole.cta]``).
 
 Inputs & policy
 ---------------
@@ -75,11 +72,8 @@ from colorsense.models import (
     Color,
     ColorUsage,
     ComponentType,
-    Composition,
     DesignToken,
     DivergenceItem,
-    PaletteCandidate,
-    PaletteRole,
     PropertyFamily,
     RunMetadata,
     Theme,
@@ -108,12 +102,9 @@ __all__ = [
     "Color",
     "ColorUsage",
     "ComponentType",
-    "Composition",
     "Config",
     "DesignToken",
     "DivergenceItem",
-    "PaletteCandidate",
-    "PaletteRole",
     "PolitenessPolicy",
     "PropertyFamily",
     "RenderError",

@@ -20,10 +20,7 @@ from colorsense import (
     AnalysisResult,
     Color,
     ColorUsage,
-    Composition,
     DesignToken,
-    PaletteCandidate,
-    PaletteRole,
     PolitenessPolicy,
     PropertyFamily,
     RenderError,
@@ -57,7 +54,6 @@ runner = make_runner()
 
 def fake_result(url: str, *, include_tokens: bool = False) -> AnalysisResult:
     blue = Color(hex="#336699", lightness=0.5, chroma=0.1, hue=250.0)
-    candidate = PaletteCandidate(color=blue, probability=0.9, area=0.6)
     usage = UsagePalette(
         mapping={
             UsageRole.page: (UsageEntry(color=blue, probability=0.9, area=0.6),),
@@ -91,7 +87,6 @@ def fake_result(url: str, *, include_tokens: bool = False) -> AnalysisResult:
                 theme=Theme.light,
                 colors=colors,
                 usage=usage,
-                composition=Composition(fit_score=0.8, roles={PaletteRole.primary: (candidate,)}),
                 tokens=tokens,
             )
         },
@@ -118,29 +113,23 @@ def install_stub(monkeypatch: pytest.MonkeyPatch, stub: AnalyzeStub) -> None:
     monkeypatch.setattr(cli_module, "analyze", stub)
 
 
-def test_human_output_leads_with_colors_then_usage_then_composition(
+def test_human_output_leads_with_colors_then_usage(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     install_stub(monkeypatch, AnalyzeStub())
     result = runner.invoke(cli_module.app, ["https://example.com"])
     assert result.exit_code == 0
-    # The color-keyed index comes first, then the role-keyed usage view, then the
-    # demoted composition summary with the fit score.
+    # The color-keyed index comes first, then the role-keyed usage view.
     assert "colors (how each color is used):" in result.stdout
     assert "usage (which colors paint each role):" in result.stdout
-    assert "composition" in result.stdout
-    assert (
-        result.stdout.index("colors (how each color is used):")
-        < result.stdout.index("usage (which colors paint each role):")
-        < result.stdout.index("composition")
+    assert result.stdout.index("colors (how each color is used):") < result.stdout.index(
+        "usage (which colors paint each role):"
     )
-    assert "fit score 0.80" in result.stdout
     assert "#336699" in result.stdout
     assert "page" in result.stdout  # the populated usage role
-    assert "primary" in result.stdout  # the populated composition role
     assert "probability=0.90" in result.stdout
-    # Undetected roles are still listed (the mappings carry every key).
-    assert "accent" in result.stdout
+    # Undetected roles are still listed (the mapping carries every key).
+    assert "border" in result.stdout
     assert "cta" in result.stdout
     # Tokens were not requested: no tokens section.
     assert "tokens:" not in result.stdout
@@ -185,11 +174,9 @@ def test_json_single_url_is_one_parseable_document(monkeypatch: pytest.MonkeyPat
     body = json.loads(result.stdout)  # the whole stream must be one JSON document
     assert body["url"] == "https://example.com"
     theme = body["themes"]["light"]
-    assert theme["composition"]["fit_score"] == 0.8
+    assert "composition" not in theme
     page = theme["usage"]["mapping"]["page"]
     assert page[0]["color"]["hex"] == "#336699"
-    primary = theme["composition"]["roles"]["primary"]
-    assert primary[0]["color"]["hex"] == "#336699"
     # The color-keyed index is present, carrying per-color usage slots with their family.
     color = theme["colors"][0]
     assert color["color"]["hex"] == "#336699"

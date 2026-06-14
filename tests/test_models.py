@@ -12,12 +12,9 @@ from colorsense.models import (
     ColorCluster,
     ColorUsage,
     ComponentType,
-    Composition,
     DesignToken,
     DivergenceItem,
     HarvestedElement,
-    PaletteCandidate,
-    PaletteRole,
     PropertyFamily,
     Rect,
     RunMetadata,
@@ -100,18 +97,10 @@ def _dummy_result(*, tokens: tuple[DesignToken, ...] | None = None) -> AnalysisR
             ),
         ),
     )
-    composition = Composition(
-        fit_score=0.82,
-        roles={
-            PaletteRole.primary: (PaletteCandidate(color=white, probability=0.8, area=0.6),),
-            PaletteRole.accent: (PaletteCandidate(color=brand, probability=0.7, area=0.05),),
-        },
-    )
     theme_palette = ThemePalette(
         theme=Theme.light,
         colors=colors,
         usage=usage,
-        composition=composition,
         divergence=(DivergenceItem(role=UsageRole.page, color=dark, note="declared but unused"),),
         tokens=tokens,
     )
@@ -183,10 +172,6 @@ def test_output_models_are_frozen() -> None:
     assert result.url == "https://example.com"
 
     palette = result.themes[Theme.light]
-    with pytest.raises(ValidationError):
-        palette.composition.fit_score = 1.0  # type: ignore[misc]
-    assert palette.composition.fit_score == 0.82
-
     color_usage = palette.colors[0]
     with pytest.raises(ValidationError):
         color_usage.prominence = 0.1  # type: ignore[misc]
@@ -201,14 +186,6 @@ def test_output_models_are_frozen() -> None:
     usage_palette = palette.usage
     with pytest.raises(ValidationError):
         usage_palette.mapping = {}  # type: ignore[misc]
-
-    candidate = palette.composition.roles[PaletteRole.accent][0]
-    with pytest.raises(ValidationError):
-        candidate.probability = 0.1  # type: ignore[misc]
-
-    composition = palette.composition
-    with pytest.raises(ValidationError):
-        composition.roles = {}  # type: ignore[misc]
 
     assert palette.tokens is not None
     token = palette.tokens[0]
@@ -239,11 +216,6 @@ def test_output_sequence_fields_are_tuples_not_appendable() -> None:
     with pytest.raises(AttributeError):
         entries.append(entries[0])  # type: ignore[attr-defined]
 
-    candidates = palette.composition.roles[PaletteRole.accent]
-    assert isinstance(candidates, tuple)
-    with pytest.raises(AttributeError):
-        candidates.append(candidates[0])  # type: ignore[attr-defined]
-
 
 def test_usage_palette_backfills_all_roles() -> None:
     # The after-validator guarantees every UsageRole key, mapping to () when absent —
@@ -262,21 +234,6 @@ def test_usage_palette_backfills_all_roles() -> None:
     for role in UsageRole:
         if role is not UsageRole.text:
             assert partial.mapping[role] == ()
-
-
-def test_composition_backfills_all_palette_roles() -> None:
-    # Composition backfills every PaletteRole to (), even for the minimal constructor.
-    empty = Composition(fit_score=0.0)
-    assert set(empty.roles) == set(PaletteRole)
-    assert all(cands == () for cands in empty.roles.values())
-
-    partial = Composition(
-        fit_score=0.5,
-        roles={PaletteRole.primary: (PaletteCandidate(color=_color(), probability=1.0, area=0.5),)},
-    )
-    assert set(partial.roles) == set(PaletteRole)
-    assert partial.roles[PaletteRole.primary] != ()
-    assert partial.roles[PaletteRole.accent] == ()
 
 
 def test_theme_palette_tokens_none_vs_empty() -> None:
@@ -372,7 +329,6 @@ def test_analysis_result_json_round_trip() -> None:
     brand_color = palette.colors[1]
     assert brand_color.usages[0].role is UsageRole.cta
     assert brand_color.usages[1].property_family is PropertyFamily.text
-    assert palette.composition.roles[PaletteRole.accent][0].color.hex == "#3366cc"
     assert palette.tokens is not None
     assert palette.tokens[0].semantic_role is TokenSemanticRole.brand_primary
     assert palette.divergence[0].role is UsageRole.page
@@ -386,7 +342,6 @@ def test_analysis_result_json_round_trip() -> None:
     assert isinstance(palette.colors, tuple)
     assert isinstance(palette.colors[1].usages, tuple)
     assert isinstance(palette.usage.mapping[UsageRole.page], tuple)
-    assert isinstance(palette.composition.roles[PaletteRole.accent], tuple)
 
 
 def test_public_api_exports() -> None:
@@ -399,7 +354,6 @@ def test_public_api_exports() -> None:
         "family_of",
         "Usage",
         "ColorUsage",
-        "Composition",
         "UsageEntry",
         "UsagePalette",
         "DesignToken",
@@ -407,6 +361,15 @@ def test_public_api_exports() -> None:
     ):
         assert name in colorsense.__all__, name
         assert hasattr(colorsense, name)
-    for name in ("UsageCategory", "RoleResults", "ClassifiedToken", "TokenRecord"):
+    # The 60/30/10 view and its taxonomy were removed along with the legacy internals.
+    for name in (
+        "UsageCategory",
+        "RoleResults",
+        "Composition",
+        "PaletteRole",
+        "PaletteCandidate",
+        "ClassifiedToken",
+        "TokenRecord",
+    ):
         assert name not in colorsense.__all__, name
         assert not hasattr(colorsense, name)

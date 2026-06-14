@@ -12,10 +12,9 @@ Extract the rendered color palette of any website as a structured, typed Python 
 colorsense renders a page in a headless browser, harvests its design tokens and computed
 element colors, and classifies them by **usage role** — page, surface, banner, cta, action,
 text, link, border — across two complementary indexes: a color-keyed canonical index ("how
-each color is used") and a role-keyed projection ("which colors paint each role"), plus a
-demoted 60/30/10 composition (primary/secondary/accent/neutrals). The result is a frozen
-Pydantic model, ready for downstream consumers (including AI models) that need to
-understand a site's color identity.
+each color is used") and a role-keyed projection ("which colors paint each role"). The
+result is a frozen Pydantic model, ready for downstream consumers (including AI models) that
+need to understand a site's color identity.
 
 ```python
 import asyncio
@@ -64,11 +63,8 @@ index**: each measured `ColorUsage` carries its `prominence` ranking and the `Us
 it appears in (with a `property_family` rollup: background / text / border).
 `palette.usage.mapping` is the **role-keyed projection**: each `UsageRole` — `page`,
 `surface`, `banner`, `cta`, `action`, `text`, `link`, `border` — maps to a
-probability-ranked tuple of entries; take `[0]` for the best pick. `palette.composition` is
-a demoted, secondary 60/30/10 interpretation (`primary`, `secondary`, `accent`,
-`neutral_light`, `neutral_dark`) with a `fit_score` describing how 60/30/10-like the design
-is. Inside an async application (e.g. a FastAPI endpoint), just `result = await
-analyze(url)`.
+probability-ranked tuple of entries; take `[0]` for the best pick. Inside an async
+application (e.g. a FastAPI endpoint), just `result = await analyze(url)`.
 
 See the [usage guide](https://github.com/cassidyhhaas/colorsense/blob/main/docs/usage.md) for the full result schema, options, and fetch policy.
 
@@ -95,8 +91,6 @@ The default output is a human-readable palette summary; `--json` emits the full
   (`probability`), page-area dominance (`area`), and the component types it came from
   (`components`). Splitting CTA backgrounds from link text (and the page canvas from raised
   surfaces and chrome bars) preserves structure a 4-value taxonomy lost.
-- **Demoted 60/30/10 composition** — five palette roles with ranked candidates, plus a
-  `fit_score` describing how 60/30/10-like the design is.
 - **Typed, serializable results** — `analyze` returns a frozen Pydantic `AnalysisResult`;
   `result.model_dump_json()` round-trips.
 - **OKLCH out of the box** — every `Color` carries an sRGB `hex` plus cached OKLCH

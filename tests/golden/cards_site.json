@@ -1,16 +1,8 @@
 {
-  "fit_score": 0.6783,
   "has_divergence": true,
   "single_theme": true,
   "theme_structure": {
     "light": {
-      "populated_roles": [
-        "accent",
-        "neutral_dark",
-        "neutral_light",
-        "primary",
-        "secondary"
-      ],
       "populated_usage": [
         "banner",
         "border",
@@ -21,23 +13,6 @@
         "text"
       ],
       "top_color_top_role": "surface",
-      "top_role_colors": {
-        "accent": [
-          "#ea580c"
-        ],
-        "neutral_dark": [
-          "#000000"
-        ],
-        "neutral_light": [
-          "#f1f4f9"
-        ],
-        "primary": [
-          "#f1f4f9"
-        ],
-        "secondary": [
-          "#0c9488"
-        ]
-      },
       "top_usage_colors": {
         "banner": [
           "#0c9488"

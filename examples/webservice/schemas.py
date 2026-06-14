@@ -17,7 +17,7 @@ class AnalyzeRequest(BaseModel):
 
 
 class EntryOut(BaseModel):
-    """One usage entry (or composition candidate), trimmed to what API consumers paint with."""
+    """One role-keyed usage entry, trimmed to what API consumers paint with."""
 
     hex: str
     probability: float
@@ -44,23 +44,19 @@ class ColorOut(BaseModel):
 
 
 class ThemeOut(BaseModel):
-    """One analyzed theme, mirroring the library payload's three views.
+    """One analyzed theme, mirroring the library payload's two views.
 
     ``colors`` is the canonical color-keyed index ("how each color is used"); ``usage``
     maps usage role (page/surface/banner/cta/action/text/link/border) -> ranked entries
-    ("which colors paint each role"); ``composition`` maps PaletteRole name -> ranked
-    candidates (best first; empty list when nothing was detected), the demoted 60/30/10
-    view, and ``fit_score`` describes how 60/30/10-like the design is.
+    ("which colors paint each role").
     """
 
     colors: list[ColorOut]
     usage: dict[str, list[EntryOut]]
-    composition: dict[str, list[EntryOut]]
-    fit_score: float
 
 
 class AnalyzeResponse(BaseModel):
-    """Trimmed response: per-theme color index, role-keyed usage view, and composition."""
+    """Trimmed response: per-theme color index and role-keyed usage view."""
 
     url: str
     themes: dict[str, ThemeOut]
@@ -71,9 +67,8 @@ def shape_response(result: AnalysisResult) -> AnalyzeResponse:
 
     The full result carries divergence, fine component evidence, and OKLCH coordinates —
     valuable to library consumers, noise to a palette API. Keep hex/probability/area per
-    entry for the role-keyed usage view and the demoted composition (both UsageEntry and
-    PaletteCandidate expose color/probability/area, so one trimming shape covers them),
-    plus the color-keyed index trimmed to hex/prominence/area and its usage-role slots.
+    entry for the role-keyed usage view, plus the color-keyed index trimmed to
+    hex/prominence/area and its usage-role slots.
     """
     themes = {
         theme.value: ThemeOut(
@@ -100,14 +95,6 @@ def shape_response(result: AnalysisResult) -> AnalyzeResponse:
                 ]
                 for role, entries in palette.usage.mapping.items()
             },
-            composition={
-                role.value: [
-                    EntryOut(hex=c.color.hex, probability=c.probability, area=c.area)
-                    for c in candidates
-                ]
-                for role, candidates in palette.composition.roles.items()
-            },
-            fit_score=palette.composition.fit_score,
         )
         for theme, palette in result.themes.items()
     }

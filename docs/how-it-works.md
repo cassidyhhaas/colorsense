@@ -9,9 +9,8 @@ four kinds of raw evidence from it, **classifies** the declared design tokens an
 visible DOM elements, fuses everything into a perceptually clustered **color inventory**,
 builds the **color-keyed index** ("how each color is used") and the **role-keyed usage
 projection** ("which colors paint each role" — page, surface, banner, cta, action, text,
-link, border), **reconciles** the latter against what the site's CSS declared, and derives
-a demoted **60/30/10 composition**. Everything after the harvest is deterministic, pure
-CPU work.
+link, border), and **reconciles** the latter against what the site's CSS declared.
+Everything after the harvest is deterministic, pure CPU work.
 
 Perceptual color distance appears throughout. It is always the same function: Euclidean
 distance in the OKLab color space ("ΔE", `deltaEOK`), whose units are small — in this
@@ -409,67 +408,14 @@ Two kinds of discrepancy are reported:
   exactly its declared `--on-primary` text color is not undeclared. A prominent rendered
   color the design system doesn't name.
 
-## 6. The 60/30/10 composition
-
-`palette/roles.py` derives a second, **demoted, secondary** view (exposed as
-`ThemePalette.composition`): the classic 60/30/10 interior-design split mapped to five
-palette roles — **primary** (the dominant, usually neutral surface, ~60%), **secondary**
-(structural color: cards/headers/nav, ~30%), **accent** (the action/brand "pop", ~10%),
-plus **neutral_light** and **neutral_dark**. Unlike the usage views it is *measured-only* —
-never reconciled against tokens.
-
-Component evidence enters the scores as **raw vote mass, not mix purity**: each
-cluster's `component_mass` is summed into role-affinity buckets (page-bg → primary,
-CTA/link/badge → accent, card/header/nav/footer/hero → secondary), `log1p`-damped (the
-same sub-linear compression the usage view applies, section 4), then divided by the
-largest damped value any cluster has for that bucket — so the best-evidenced cluster per
-bucket scores 1.0 and the rest scale down with their actual evidence. The normalized
-`component_mix` is deliberately not used here: purity carries no cross-cluster
-magnitude, and a cluster whose only evidence was one tiny badge chip (mix purity 1.0,
-raw mass 0.88) used to out-score the real page surface (raw structural mass >100) for
-secondary.
-
-Each cluster gets a score per role from weighted features: primary rewards area,
-neutrality (a smooth `1 − chroma/0.10` signal), and page-background component evidence;
-accent rewards chroma, contrast against the provisional primary, and action-component
-evidence — with only a small area term, so a tiny but vivid CTA can win; secondary
-rewards area and structural-surface evidence (the "card exception"); the neutrals score
-`neutrality × lightness` (or `× (1 − lightness)`) with a small area floor. Per role, the
-scores go through a softmax (temperature 0.25), pruning, and renormalization into ranked
-candidates.
-
-**Secondary is scored relative to the primary anchor**: the provisional primary cluster
-is excluded from the secondary candidate list. The dominant page background accrues
-structural votes (cards, headers, and nav painted in the page color) from sheer element
-count, so under raw-mass scoring it carries both the largest area *and* the largest
-structural evidence — it would otherwise win primary and secondary together, burying the
-real ~30% color (a blue hero band, a dark header). Excluding it lets the genuine second
-layer surface. The per-bucket normalization above is still computed over *all* clusters
-including the primary one; renormalizing over the survivors would let a lone tiny chip
-become the bucket maximum and re-inflate to 1.0, recreating the badge-chip failure. A
-one-color page therefore has an empty secondary list — there is genuinely no second
-structural layer, which the `fit_score` below then reflects.
-
-`fit_score` then measures how 60/30/10-like the page actually is: take the top
-candidate's area for primary/secondary/accent, normalize the triple to sum to 1, and
-compare against (0.6, 0.3, 0.1):
-
-```
-fit = 1 − 0.5 × Σ |measured_i − target_i|
-```
-
-The 0.5 maps the maximum possible L1 distance between two distributions (2.0) onto
-[0, 1], so 1.0 means a textbook 60/30/10 split and 0.0 means nothing measurable. It is
-descriptive, not a quality grade.
-
-## 7. Concurrency and safety
+## 6. Concurrency and safety
 
 A few structural guarantees hold across the pipeline; this section explains what they are
 and why they hold, not the line-by-line mechanics.
 
 **Everything downstream of the harvest is pure.** Networking lives entirely behind
 `PolitenessPolicy` / `harvest_page`; given a `Harvest`, the classify/inventory/usage/
-reconcile/roles chain does no I/O and shares no mutable state. That is why the per-theme
+reconcile chain does no I/O and shares no mutable state. That is why the per-theme
 CPU work (which includes O(n²) perceptual clustering) can be pushed onto worker threads
 with `asyncio.to_thread` — the event loop stays responsive while themes are analyzed
 concurrently — and why the whole downstream pipeline is testable without a network or a

@@ -3,8 +3,7 @@
 ``analyze`` wires every stage into one typed call: render each requested
 theme (gated by [`PolitenessPolicy`][colorsense.PolitenessPolicy]), classify tokens
 and components, build a color inventory, build the color-keyed index and the role-keyed
-usage projection, reconcile the latter against declared token intent, and derive the
-demoted 60/30/10 composition — per theme.
+usage projection, and reconcile the latter against declared token intent — per theme.
 Sites that ignore
 ``prefers-color-scheme`` (near-identical light/dark renders)
 are collapsed to a single theme. The whole thing is assembled into a typed
@@ -47,7 +46,6 @@ from colorsense.models import (
 from colorsense.net.politeness import PolitenessPolicy
 from colorsense.palette.inventory import build_inventory
 from colorsense.palette.reconcile import reconcile
-from colorsense.palette.roles import assign_roles
 from colorsense.palette.usage import build_color_index, build_usage
 
 DEFAULT_VIEWPORT = Viewport(width=1280, height=800, device_scale_factor=1.0)
@@ -85,9 +83,9 @@ class AnalysisTimeoutError(TimeoutError):
 class _ThemeOutput:
     """Everything derived for one rendered theme.
 
-    The per-theme analysis (color-keyed index, role-keyed usage view, composition,
-    divergence, tokens) lives on the [`ThemePalette`][colorsense.ThemePalette] itself; only
-    the cross-theme aggregates ride alongside.
+    The per-theme analysis (color-keyed index, role-keyed usage view, divergence, tokens)
+    lives on the [`ThemePalette`][colorsense.ThemePalette] itself; only the cross-theme
+    aggregates ride alongside.
     """
 
     palette: ThemePalette
@@ -293,7 +291,7 @@ def _reraise_first_leaf(eg: ExceptionGroup[Exception]) -> NoReturn:
 def _analyze_theme(
     harvest: Harvest, config: Config, viewport: Viewport, include_tokens: bool
 ) -> _ThemeOutput:
-    """Run the per-theme classify → inventory → colors/usage → reconcile → composition chain.
+    """Run the per-theme classify → inventory → colors/usage → reconcile chain.
 
     Pure CPU over immutable inputs (no I/O, no shared mutable state); ``analyze`` runs it
     on a worker thread via ``asyncio.to_thread`` to keep the event loop responsive.
@@ -313,13 +311,10 @@ def _analyze_theme(
     posterior_usage, divergence = reconcile(
         measured_usage, classified_tokens, measured_colors=[c.color for c in clusters]
     )
-    composition = assign_roles(clusters)
-
     palette = ThemePalette(
         theme=harvest.theme,
         colors=color_index,
         usage=posterior_usage,
-        composition=composition,
         divergence=tuple(divergence),
         tokens=_design_tokens(classified_tokens) if include_tokens else None,
     )

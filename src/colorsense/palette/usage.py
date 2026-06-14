@@ -10,8 +10,9 @@ Two complementary views are built here from the same `ColorCluster` list:
   `build_color_index`): per measured color, every role it appears in plus an overall
   ``prominence`` ranking. Answers "how is each color used?".
 
-Both preserve the design's actual structure (e.g. a neutral-layered design's gray
-text/border hierarchy appears directly), unlike the demoted 60/30/10 composition.
+Both preserve the design's actual structure: a neutral-layered design's gray
+text/border hierarchy appears directly, rather than being flattened into a coarse
+aesthetic split.
 
 Design notes
 ------------

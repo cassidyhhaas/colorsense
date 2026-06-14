@@ -10,12 +10,15 @@ replaced by the 8-value developer-facing ``UsageRole``
 (background/text/border) rollup axis and the code-level ``family_of`` mapping. The result
 tree gained a **color-keyed canonical index** (``ColorUsage`` carrying ``Usage`` slots and
 an overall ``prominence``) alongside the re-keyed role-keyed projection (``UsagePalette``
-of ``UsageEntry``); the demoted 60/30/10 view moved into ``Composition`` (the former
-``RoleResults`` mapping plus ``fit_score``), and ``RoleResults`` was removed.
-``ThemePalette`` now carries ``colors``/``usage``/``composition``/``divergence``/``tokens``;
-``DivergenceItem`` re-keyed its ``category: UsageCategory`` field to ``role: UsageRole`` —
-re-validated against ``pipeline``, ``cli``, ``classify.tokens``, ``config``,
-``palette.usage``, ``palette.roles``, ``palette.reconcile``, and the ``examples`` package.
+of ``UsageEntry``). The legacy 60/30/10 view (``RoleResults``/``Composition`` plus its
+``fit_score`` and the ``PaletteRole``/``PaletteCandidate`` taxonomy) was **dropped
+entirely**: it is a consumer-side re-categorization, not the library's job, and keeping it
+let 60/30/10-shaped logic leak into the primary views — so the response now focuses on the
+color-keyed index and the role-keyed projection. ``ThemePalette`` now carries
+``colors``/``usage``/``divergence``/``tokens``; ``DivergenceItem`` re-keyed its
+``category: UsageCategory`` field to ``role: UsageRole`` — re-validated against
+``pipeline``, ``cli``, ``classify.tokens``, ``config``, ``palette.usage``,
+``palette.reconcile``, and the ``examples`` package.
 Previous central change: ``HarvestedElement`` gained
 ``input_type: str | None = None`` — the lowercased ``type`` attribute of an ``<input>``
 element, ``None`` for non-inputs and for inputs with no/empty ``type`` attribute; mirrors
@@ -73,11 +76,8 @@ __all__ = [
     "Color",
     "ColorUsage",
     "ComponentType",
-    "Composition",
     "DesignToken",
     "DivergenceItem",
-    "PaletteCandidate",
-    "PaletteRole",
     "PropertyFamily",
     "RunMetadata",
     "Theme",
@@ -94,16 +94,6 @@ __all__ = [
 # ---------------------------------------------------------------------------
 # Enums
 # ---------------------------------------------------------------------------
-
-
-class PaletteRole(StrEnum):
-    """A slot in the 60/30/10 palette taxonomy."""
-
-    primary = "primary"
-    secondary = "secondary"
-    accent = "accent"
-    neutral_light = "neutral_light"
-    neutral_dark = "neutral_dark"
 
 
 class PropertyFamily(StrEnum):
@@ -153,8 +143,8 @@ class UsageRole(StrEnum):
 def family_of(role: UsageRole) -> PropertyFamily:
     """Return the [`PropertyFamily`][colorsense.PropertyFamily] a usage role rolls up to.
 
-    A fixed code-level convention (mirroring [`channel_for`][colorsense.models.channel_for]
-    for components): ``text``/``link`` are painted by the element's ``color`` (the ``text``
+    A fixed code-level convention (mirroring ``channel_for`` for components): ``text``/``link``
+    are painted by the element's ``color`` (the ``text``
     family), ``border`` by its ``border-color``, and every other role
     (``page``/``surface``/``banner``/``cta``/``action``) by a background property.
     """
@@ -456,16 +446,6 @@ class ColorCluster(BaseModel):
     component_mass: dict[ComponentType, float] = Field(default_factory=dict)
 
 
-class PaletteCandidate(BaseModel):
-    """A candidate color for a palette role with a probability and its area share."""
-
-    model_config = ConfigDict(frozen=True)
-
-    color: Color
-    probability: float
-    area: float
-
-
 class Usage(BaseModel):
     """One usage slot of a color in the color-keyed index ([`ColorUsage`][colorsense.ColorUsage]).
 
@@ -578,33 +558,6 @@ class DivergenceItem(BaseModel):
     note: str
 
 
-class Composition(BaseModel):
-    """The demoted, **secondary** 60/30/10 aesthetic interpretation of a theme's palette.
-
-    A derived, measured-only reading of the same clusters the usage views are built from
-    (it is *not* reconciled against declared tokens). ``fit_score`` is descriptive — "how
-    60/30/10-like is this design" in ``[0, 1]``, not a quality score. ``roles`` maps each
-    [`PaletteRole`][colorsense.PaletteRole] to a probability-descending candidate list; an
-    after-validator backfills every role to ``()``, so even ``Composition(fit_score=...)``
-    and the empty-input path expose all five keys.
-    """
-
-    model_config = ConfigDict(frozen=True)
-
-    fit_score: float
-    roles: dict[PaletteRole, tuple[PaletteCandidate, ...]] = Field(default_factory=dict)
-
-    @model_validator(mode="after")
-    def _backfill_roles(self) -> Composition:
-        """Ensure every [`PaletteRole`][colorsense.PaletteRole] is present (``()`` when absent)."""
-        # ``frozen=True`` blocks reassigning ``roles`` itself, but the dict it points to
-        # is a regular (non-deep-frozen) dict, so in-place backfill is sound.
-        for role in PaletteRole:
-            if role not in self.roles:
-                self.roles[role] = ()
-        return self
-
-
 # ---------------------------------------------------------------------------
 # Output models
 # ---------------------------------------------------------------------------
@@ -620,10 +573,6 @@ class ThemePalette(BaseModel):
     * ``usage`` — the **role-keyed projection** ([`UsagePalette`][colorsense.UsagePalette]):
       the reconciled posterior over usage roles (measured usage pooled with declared token
       intent). Answers "which colors paint each role?".
-    * ``composition`` — the demoted, **secondary** 60/30/10 interpretation
-      ([`Composition`][colorsense.Composition]): a derived, measured-only reading (its
-      ``fit_score`` and per-`PaletteRole` candidate lists), no longer reconciled against
-      tokens.
     * ``divergence`` — declared-vs-measured discrepancies, keyed by usage role.
     * ``tokens`` — declared design tokens, opt-in: ``None`` means tokens were **not
       requested** (``include_tokens=False``, the default); ``()`` means tokens were
@@ -637,7 +586,6 @@ class ThemePalette(BaseModel):
     theme: Theme
     colors: tuple[ColorUsage, ...] = Field(default_factory=tuple)
     usage: UsagePalette
-    composition: Composition
     divergence: tuple[DivergenceItem, ...] = Field(default_factory=tuple)
     tokens: tuple[DesignToken, ...] | None = None
 
@@ -661,9 +609,8 @@ class RunMetadata(BaseModel):
 class AnalysisResult(BaseModel):
     """The top-level typed result returned by ``analyze``.
 
-    Per-theme analysis (the color-keyed index, the role-keyed usage view, the demoted
-    60/30/10 composition, divergence, and opt-in tokens) lives on each
-    [`ThemePalette`][colorsense.ThemePalette] in ``themes``.
+    Per-theme analysis (the color-keyed index, the role-keyed usage view, divergence, and
+    opt-in tokens) lives on each [`ThemePalette`][colorsense.ThemePalette] in ``themes``.
 
     This aggregate is **immutable**: it is ``frozen=True`` and its sequence field
     (``third_party_colors``) is a tuple, so neither reassigning an attribute

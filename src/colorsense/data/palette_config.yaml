@@ -4,7 +4,7 @@
 #
 # Two config domains:
 #   1. token_vocabulary  — maps CSS custom-property NAMES -> semantic token roles,
-#                          then semantic roles -> 60/30/10 palette-role priors.
+#                          then semantic roles -> usage-role priors.
 #   2. component_classifier — rule-based scorer weights for classifying DOM
 #                          elements by visual COMPONENT (source).
 #

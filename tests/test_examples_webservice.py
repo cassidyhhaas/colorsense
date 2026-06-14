@@ -23,9 +23,6 @@ from colorsense import (
     Color,
     ColorUsage,
     ComponentType,
-    Composition,
-    PaletteCandidate,
-    PaletteRole,
     PropertyFamily,
     RenderError,
     RobotsDisallowedError,
@@ -45,7 +42,6 @@ VIEWPORT = Viewport(width=1280, height=800, device_scale_factor=1.0)
 
 def fake_result(url: str) -> AnalysisResult:
     blue = Color(hex="#336699", lightness=0.5, chroma=0.1, hue=250.0)
-    candidate = PaletteCandidate(color=blue, probability=0.9, area=0.6)
     usage = UsagePalette(
         mapping={
             UsageRole.page: (
@@ -82,7 +78,6 @@ def fake_result(url: str) -> AnalysisResult:
                 theme=Theme.light,
                 colors=colors,
                 usage=usage,
-                composition=Composition(fit_score=0.8, roles={PaletteRole.primary: (candidate,)}),
             )
         },
     )
@@ -177,11 +172,10 @@ def test_success_returns_trimmed_palette(
     body = response.json()
     assert body["url"] == url
     theme = body["themes"]["light"]
-    assert theme["fit_score"] == 0.8
+    assert "composition" not in theme
+    assert "fit_score" not in theme
     page = theme["usage"]["page"]
     assert page == [{"hex": "#336699", "probability": 0.9, "area": 0.6}]
-    primary = theme["composition"]["primary"]
-    assert primary == [{"hex": "#336699", "probability": 0.9, "area": 0.6}]
     # The color-keyed index is present, trimmed to hex/prominence/area + usage slots.
     assert theme["colors"] == [
         {
@@ -191,10 +185,9 @@ def test_success_returns_trimmed_palette(
             "usages": [{"role": "page", "property_family": "background", "weight": 1.0}],
         }
     ]
-    # Empty roles are present (the library guarantees the full key sets); internals
+    # Empty roles are present (the library guarantees the full key set); internals
     # (fine component evidence, OKLCH coordinates) are trimmed.
     assert theme["usage"]["cta"] == []
-    assert theme["composition"]["accent"] == []
     assert "components" not in str(body)
     assert "page_bg" not in str(body)
 

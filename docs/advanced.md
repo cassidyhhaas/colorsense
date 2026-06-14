@@ -72,9 +72,6 @@ color-index prominence blend in
 the per-channel perceptual join radii in
 [`palette/inventory.py`](https://github.com/cassidyhhaas/colorsense/blob/main/src/colorsense/palette/inventory.py) (`DELTA_E_MATCH_BG`,
 `DELTA_E_MATCH_TEXT_BORDER`, `DELTA_E_CLUSTER`),
-the declared/measured token-match radii in
+and the declared/measured token-match radii in
 [`palette/reconcile.py`](https://github.com/cassidyhhaas/colorsense/blob/main/src/colorsense/palette/reconcile.py) (`DELTA_E_MATCH`,
-`DELTA_E_MATCH_MEASURED`),
-and the 60/30/10 role-scoring weights in
-[`palette/roles.py`](https://github.com/cassidyhhaas/colorsense/blob/main/src/colorsense/palette/roles.py) (e.g. `W_AREA`, `SOFTMAX_T`,
-`TARGET_SPLIT`).
+`DELTA_E_MATCH_MEASURED`).

@@ -3,8 +3,8 @@
 Every palette ranking stage ends the same way: normalize raw prominence weights into a
 probability distribution, prune entries below a minimum share, renormalize the
 survivors, and — if pruning would empty a non-empty input — keep the single argmax at
-probability 1.0 instead. This module implements that step once, so the three call sites
-(``palette/usage.py``, ``palette/roles.py``, ``palette/reconcile.py``) cannot drift:
+probability 1.0 instead. This module implements that step once, so the two call sites
+(``palette/usage.py``, ``palette/reconcile.py``) cannot drift:
 every argmax fallback breaks exact-probability ties by the caller-supplied ``tie_key``
 — the color ``hex`` at all call sites, smallest winning, which is the codebase's
 determinism convention.
