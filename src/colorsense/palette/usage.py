@@ -235,9 +235,10 @@ def build_usage(clusters: list[ColorCluster]) -> UsagePalette:
     """Build the **measured** role-keyed usage projection from the color inventory.
 
     For each usage role, the participating clusters (those with nonzero raw vote mass routed
-    to the role via `ROLE_COMPONENTS`) are scored by prominence — screenshot area for
-    background-family roles, ``log1p`` of in-role vote mass for the text/border-family ones
-    (see the module docstring) — normalized to probabilities, pruned below `MIN_SHARE`
+    to the role via `ROLE_COMPONENTS`) are scored by prominence — screenshot area for the
+    structural-surface roles (``page``/``surface``/``banner``), ``log1p`` of in-role vote mass
+    for every other (element-color) role (see `_AREA_RANKED_ROLES`) — normalized to
+    probabilities, pruned below `MIN_SHARE`
     (argmax kept if pruning empties the role), and ranked by ``(-probability, hex)``. A role
     with no mass anywhere maps to ``()`` (the [`UsagePalette`][colorsense.UsagePalette]
     validator backfills it). An empty cluster list yields an empty (all-``()``) palette.
