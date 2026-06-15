@@ -1,6 +1,6 @@
 [project]
 name = "colorsense"
-version = "0.5.0"
+version = "0.6.0"
 description = "Extract the rendered color palette from any website as a typed result."
 readme = "README.md"
 requires-python = ">=3.12"

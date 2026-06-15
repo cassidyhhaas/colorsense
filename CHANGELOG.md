@@ -7,6 +7,22 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-06-14
+
+A **breaking** release that redesigns the measured "usage" view. The old 4-value
+`UsageCategory` (surface/text/interactive/border) is replaced by the 8-value developer-facing
+`UsageRole` (`page`, `surface`, `banner`, `cta`, `action`, `text`, `link`, `border`) with a
+first-class `PropertyFamily` rollup, each `ThemePalette` gains a new color-keyed `colors`
+index, and the derived 60/30/10 composition view (`ThemePalette.roles`/`fit_score`,
+`RoleResults`, `PaletteRole`, `PaletteCandidate`, `palette/roles.py`) is removed entirely —
+see the migration notes in the breaking entry below. Riding the redesign are three
+attribution-accuracy fixes that make the per-role colors correct: button-styled anchors' label
+text no longer leaks into the `link` role, the `cta`/`action` roles rank by DOM vote mass
+instead of screenshot area (so brand CTAs surface instead of the page background, now
+deterministic across OSes), and inventory clustering is segregated by `PropertyFamily` so a
+background color can no longer be reported in a text or border slot. Golden snapshots were
+regenerated.
+
 ### Changed
 
 - **Button-styled anchors' labels no longer leak into the `link` role.** A clickable `<a>`
@@ -666,7 +682,8 @@ Initial public release.
 - Bundled, overridable palette configuration (`config_path=` / `load_config`).
 - Fully typed (`py.typed`), Python 3.12+.
 
-[Unreleased]: https://github.com/cassidyhhaas/colorsense/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/cassidyhhaas/colorsense/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/cassidyhhaas/colorsense/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/cassidyhhaas/colorsense/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/cassidyhhaas/colorsense/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/cassidyhhaas/colorsense/compare/v0.3.0...v0.4.0
