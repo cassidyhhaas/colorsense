@@ -237,7 +237,9 @@ component_classifier:
     - {match: "role=main",         votes: {page_bg: 3.0, page_text: 3.0}}
     - {match: "article",           votes: {page_bg: 2.5, page_text: 2.5}}
     - {match: "body",              votes: {page_bg: 5.0, page_text: 4.0}}
-    - {match: "a",                 votes: {link: 4.5}}
+    # `a` (anchor) routing lives in the interactivity family below, fill-gated: a
+    # button-styled anchor's label is a CTA label (cta_text, no usage role), only a
+    # bare anchor is a `link`. See the `a & button_surface` / `a & !button_surface` rules.
     - {match: "button",            votes: {cta_bg: 3.5}}
     - {match: "role=button",       votes: {cta_bg: 3.0}}
     # input[submit] matches only inputs whose type attribute is button-like
@@ -340,6 +342,13 @@ component_classifier:
     - {when: "clickable",               votes: {cta_bg: 1.5, link: 1.0}}
     - {when: "input[submit|button]",    votes: {cta_bg: 2.0}}
     - {when: "has_hover_color_change",  votes: {cta_bg: 1.5}}   # strong accent signal
+    # Anchor routing (replaces the old semantic `a` -> link rule). A button-styled anchor
+    # — one that paints a solid bg or a border — is a CTA whose label text is `cta_text`
+    # (a CTA label, carried by no usage role), NOT a `link`. A bare anchor (no such surface,
+    # box-shadow alone does not count) is a genuine inline text link. The 4.5 preserves the
+    # former semantic `a` weight so unfilled inline links are unchanged.
+    - {when: "a & !button_surface",     votes: {link: 4.5}}
+    - {when: "a & button_surface",      votes: {cta_text: 4.5}}
 
   # --- Feature family 4b: border presence. ------------------------------------
   # Applied to any element whose harvested `border` is non-None — the harvester
@@ -354,7 +363,7 @@ component_classifier:
   # Applied to any NON-clickable element with `has_text` (>=1 direct child text node
   # with non-whitespace content; descendant text doesn't count). Clickable elements
   # are deliberately excluded: their typography is interactive by definition and
-  # already routed via the `a`/link rules. The 2.0 stays below every semantic *_text
+  # already routed via the anchor / clickable link rules. The 2.0 stays below every semantic *_text
   # vote so semantic rules dominate where they apply (derivation: docs/how-it-works.md).
   text_presence:
     votes: {page_text: 2.0}

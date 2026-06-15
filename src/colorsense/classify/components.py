@@ -112,6 +112,26 @@ def _paints_fill(element: HarvestedElement) -> bool:
     )
 
 
+def _paints_button_surface(element: HarvestedElement) -> bool:
+    """Whether the element paints a **button-like** surface: a non-transparent bg or a border.
+
+    A button surface is a solid/opaque ``bg``, a ``border``, or a gradient fill
+    (``bg_gradient_stops`` — populated only on clickable gradient pill CTAs, whose computed
+    ``bg`` is transparent; see `HarvestedElement`). It DIFFERS from `_paints_fill` (they do not
+    nest): this counts gradient stops but a box-shadow alone does NOT count, whereas
+    `_paints_fill` counts a box-shadow but not gradient stops. It gates the anchor routing (the
+    ``a & button_surface`` interactivity predicate) — a filled, outlined, or gradient-pill
+    anchor is a button-styled CTA whose label text is `cta_text` (a CTA label, carried by no
+    usage role), while a bare anchor — even an elevated, shadow-only one such as a text link
+    with a focus ring — stays a genuine inline ``link``.
+    """
+    return (
+        (element.bg is not None and element.bg.alpha > 0.0)
+        or element.border is not None
+        or len(element.bg_gradient_stops) > 0
+    )
+
+
 def _matches_semantic_tag(rule: VoteRule, element: HarvestedElement) -> bool:
     """Return whether a semantic-tag rule matches the element's tag/role/input type.
 
@@ -142,6 +162,12 @@ def _matches_interactivity(rule: WhenRule, element: HarvestedElement) -> bool:
         return element.tag == "button" and element.clickable
     if when == "has_hover_color_change":
         return element.has_hover_color_change
+    if when == "a & button_surface":
+        # A button-styled anchor (solid bg or border): its label text is a CTA label.
+        return element.tag == "a" and _paints_button_surface(element)
+    if when == "a & !button_surface":
+        # A bare anchor (no button surface): a genuine inline text link.
+        return element.tag == "a" and not _paints_button_surface(element)
     # Unreachable for validated configs: Config rejects unknown predicates at load time.
     return False
 

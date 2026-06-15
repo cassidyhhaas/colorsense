@@ -290,8 +290,9 @@ type belongs to exactly one of eight developer-facing **usage roles** — `page_
 `card_bg`/`modal_bg`/`hero_bg`/`input_bg` → `surface`; `header_bg`/`nav_bg`/`footer_bg` →
 `banner`; `cta_bg` → `cta`; `button_secondary`/`badge` → `action`; the `*_text` components →
 `text`; `link` → `link`; `border` → `border`. Two components route nowhere on purpose:
-`cta_text` (it never surfaces on real sites) and `third_party` (vendor-widget colors are
-excluded and surface separately on the result). The inverse map is built once and asserted
+`cta_text` (the button-label sink — a button-styled element's text color is part of the CTA,
+not an independent palette role, so it is emitted but carries no usage) and `third_party`
+(vendor-widget colors are excluded and surface separately on the result). The inverse map is built once and asserted
 to partition every routed component to exactly one role. This taxonomy is the redesign's
 core: it splits the two axes the old 4-value usage taxonomy conflated — *which CSS property
 paints the color* (a `property_family` rollup: background / text / border) versus *what kind

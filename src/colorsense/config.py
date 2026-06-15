@@ -64,6 +64,8 @@ _KNOWN_INTERACTIVITY_PREDICATES = frozenset(
         "clickable",
         "input[submit|button]",
         "has_hover_color_change",
+        "a & button_surface",
+        "a & !button_surface",
     }
 )
 _KNOWN_GEOMETRY_PREDICATES = frozenset(
