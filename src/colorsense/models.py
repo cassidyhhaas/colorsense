@@ -416,7 +416,7 @@ class TokenOrigin(StrEnum):
 
 
 class ClassifiedToken(BaseModel):
-    """Internal: a token tagged with its semantic role and a prior over usage roles.
+    """Internal: a token tagged with its semantic role and its usage intent over usage roles.
 
     Not part of the public contract — consumers see declared tokens only through
     [`DesignToken`][colorsense.DesignToken]. ``weight`` is an internal scoring
@@ -428,7 +428,7 @@ class ClassifiedToken(BaseModel):
     record: TokenRecord
     semantic_role: TokenSemanticRole
     weight: float
-    usage_prior: dict[UsageRole, float] = Field(default_factory=dict)
+    usage_intent: dict[UsageRole, float] = Field(default_factory=dict)
     origin: TokenOrigin = TokenOrigin.fallback
 
 

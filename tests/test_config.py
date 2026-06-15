@@ -8,12 +8,12 @@ import pytest
 from pydantic import ValidationError
 
 from colorsense.config import (
-    ChannelPrior,
+    ChannelRoute,
     Config,
-    DistributionPrior,
     PresenceRule,
     RelationalInfo,
     ScaleInfo,
+    UsageIntent,
     load_config,
     load_default_config,
 )
@@ -33,19 +33,19 @@ def test_load_returns_typed_config(config: Config) -> None:
 
 
 def test_distribution_rows_normalized_and_channels_recognized(config: Config) -> None:
-    priors = config.token_vocabulary.role_to_usage_prior
+    rows = config.token_vocabulary.semantic_role_to_usage_intent_or_channel
 
     channel_roles = {
         TokenSemanticRole.text_on,
         TokenSemanticRole.status,
         TokenSemanticRole.ignore,
     }
-    for role, row in priors.items():
+    for role, row in rows.items():
         if role in channel_roles:
-            assert isinstance(row, ChannelPrior)
+            assert isinstance(row, ChannelRoute)
             assert row.channel == role.value
         else:
-            assert isinstance(row, DistributionPrior)
+            assert isinstance(row, UsageIntent)
             total = sum(row.distribution.values())
             assert total == pytest.approx(1.0, abs=1e-6)
 
@@ -271,11 +271,11 @@ def _bundled_raw() -> dict:  # type: ignore[type-arg]
 @pytest.mark.parametrize(
     ("path", "value", "expected_fragment"),
     [
-        # A negative prior would survive normalization and reach reconcile's ``** alpha``
+        # A negative weight would survive normalization and reach reconcile's ``** alpha``
         # pooling, where a negative base under a fractional exponent yields a COMPLEX
         # number — must fail at load, not deep in the math.
         (
-            ("token_vocabulary", "role_to_usage_prior", "interactive"),
+            ("token_vocabulary", "semantic_role_to_usage_intent_or_channel", "interactive"),
             {"interactive": -1.0, "surface": 2.0},
             "must be >= 0",
         ),

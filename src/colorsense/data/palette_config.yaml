@@ -4,7 +4,7 @@
 #
 # Two config domains:
 #   1. token_vocabulary  — maps CSS custom-property NAMES -> semantic token roles,
-#                          then semantic roles -> usage-role priors.
+#                          then semantic roles -> usage intent (distributions over usage roles).
 #   2. component_classifier — rule-based scorer weights for classifying DOM
 #                          elements by visual COMPONENT (source).
 #
@@ -174,9 +174,10 @@ token_vocabulary:
     base_weight: 3.0
     scale_present_confidence_boost: 1.3
 
-  # --- Semantic token role -> prior distribution over usage roles. ------------
-  # *** This is the most consequential table. *** Each row is the prior on HOW a
-  # token's color is used when rendered, over the 8 developer-facing usage roles:
+  # --- Semantic token role -> usage intent (distribution over usage roles). ----
+  # *** This is the most consequential table. *** Each row is the usage intent: a
+  # belief about HOW a token's color is used when rendered (inferred from the
+  # token's name, before the page is measured), over the 8 developer-facing usage roles:
   #   page    (base canvas)         surface (cards/modals/hero/inputs)
   #   banner  (header/nav/footer)   cta     (primary action background)
   #   action  (secondary buttons/badges)    text (typography)
@@ -185,14 +186,14 @@ token_vocabulary:
   # ignore channels are not usage roles — they are reported on the classified
   # token, not used in usage ranking.
   #
-  # These priors were derived from the previous 4-category table (surface / text /
+  # These distributions were derived from the previous 4-category table (surface / text /
   # interactive / border) by SPLITTING each old category's mass across the roles it
   # became, preserving author intent — old `surface` -> page/surface/banner, old
   # `interactive` -> cta/link/action, old `text` -> text, old `border` -> border —
   # and weighting the split toward the most-likely role for each semantic (e.g. a
   # brand_primary's interactive mass leans cta>link>action; a brand_secondary's leans
   # action; surface_base leans page while surface_raised leans surface/banner).
-  role_to_usage_prior:
+  semantic_role_to_usage_intent_or_channel:
     brand_primary:   {cta: 0.30, link: 0.15, action: 0.05, surface: 0.20, banner: 0.15, page: 0.05, text: 0.10}
     brand_secondary: {surface: 0.25, banner: 0.20, page: 0.05, action: 0.15, cta: 0.10, link: 0.05, border: 0.20}
     brand_accent:    {cta: 0.45, link: 0.30, action: 0.15, surface: 0.07, banner: 0.03}

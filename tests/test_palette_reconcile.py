@@ -37,7 +37,7 @@ def _entry(
 def _token(
     name: str,
     css: str,
-    prior: dict[UsageRole, float],
+    usage_intent: dict[UsageRole, float],
     weight: float = 1.0,
     semantic_role: TokenSemanticRole = TokenSemanticRole.brand_accent,
     origin: TokenOrigin = TokenOrigin.name_rule,
@@ -51,7 +51,7 @@ def _token(
         ),
         semantic_role=semantic_role,
         weight=weight,
-        usage_prior=prior,
+        usage_intent=usage_intent,
         origin=origin,
     )
 
@@ -109,11 +109,11 @@ def test_declared_but_unused_appears_in_divergence() -> None:
 
 def _relational_token(name: str, css: str, weight: float = 1.0) -> ClassifiedToken:
     # The shape classify_tokens actually produces for --on-*/-foreground tokens: role
-    # text_on, EMPTY usage prior (the config row is a channel route, not a distribution).
+    # text_on, EMPTY usage intent (the config row is a channel route, not a distribution).
     return _token(
         name,
         css,
-        prior={},
+        usage_intent={},
         weight=weight,
         semantic_role=TokenSemanticRole.text_on,
         origin=TokenOrigin.relational,
@@ -124,7 +124,7 @@ def test_declared_but_unused_gated_to_high_intent_origins() -> None:
     # The divergence-noise fix: a scale-origin token (e.g. an unused --green-300 shade)
     # must NOT raise declared-but-unused — on token-heavy sites every unused shade of
     # every scale used to fire. A name_rule-origin token with the same color MUST, and
-    # so must a relational token (which classifies with an EMPTY usage prior, the shape
+    # so must a relational token (which classifies with an EMPTY usage intent, the shape
     # classify_tokens really emits — it reports through the dedicated relational pass).
     usage = UsagePalette(mapping={UsageRole.cta: (_entry("#2563eb", 1.0),)})
     unused = "#10b981"
@@ -148,7 +148,7 @@ def test_declared_but_unused_gated_to_high_intent_origins() -> None:
 def test_rendered_relational_token_color_is_not_undeclared() -> None:
     # The release-review false positive: a page whose dominant text color exactly
     # matches its declared --on-primary was reported "used but undeclared" because
-    # empty-prior tokens (relational, excluded status) were invisible to the
+    # empty-usage-intent tokens (relational, excluded status) were invisible to the
     # membership test. Undeclaredness is about the stylesheet, not intent mass.
     white = "#ffffff"
     usage = UsagePalette(
@@ -163,12 +163,12 @@ def test_rendered_relational_token_color_is_not_undeclared() -> None:
 
 
 def test_rendered_status_token_color_is_not_undeclared() -> None:
-    # Status tokens get an empty prior when status_excluded_from_palette is set; their
+    # Status tokens get an empty usage intent when status_excluded_from_palette is set; their
     # declared color must still count for the used-but-undeclared membership test.
     red = "#dc2626"
     usage = UsagePalette(mapping={UsageRole.cta: (_entry(red, 1.0),)})
     tokens = [
-        _token("--danger", red, prior={}, semantic_role=TokenSemanticRole.status),
+        _token("--danger", red, usage_intent={}, semantic_role=TokenSemanticRole.status),
     ]
     _, divergence = reconcile(usage, tokens, alpha=0.4)
 

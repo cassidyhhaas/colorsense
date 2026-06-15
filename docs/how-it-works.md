@@ -121,11 +121,13 @@ cycle protection). Each classified token records which path produced it — its 
 reconciliation treats only `relational` and `name_rule` classifications as direct
 evidence of author intent.
 
-The classified role is then mapped (via the YAML's `role_to_usage_prior` table) to a
-prior distribution over the eight usage roles — e.g. `brand_accent` leans
-cta/link/action (its old "interactive" mass, now split across those three roles), while
-`neutral` spreads across the background roles (page/surface/banner), text, and border. The
-priors were derived from the previous 4-category table by splitting each old category's
+The classified role is then mapped (via the YAML's `semantic_role_to_usage_intent_or_channel` table) to its
+usage intent — a distribution over the eight usage roles expressing where the color is
+expected to be used, inferred from the token's name before the page is measured. E.g.
+`brand_accent` leans cta/link/action (its old "interactive" mass, now split across those
+three roles), while `neutral` spreads across the background roles (page/surface/banner),
+text, and border. The distributions were derived from the previous 4-category table by
+splitting each old category's
 mass across the roles it became (old `surface` → page/surface/banner, old `interactive` →
 cta/link/action, `text` → text, `border` → border), weighted toward the most-likely role
 per semantic.
@@ -389,7 +391,7 @@ role view).
 signals about each usage role: the **measured** usage probabilities from §4 ("what actually
 rendered") and the **declared** token intent from §2 ("what the author said"). First,
 declared token colors are grouped with each other at a tight ΔE 0.08 (both sides are exact
-computed values), accumulating each group's weighted usage priors; measured entries then
+computed values), accumulating each group's weighted usage intent; measured entries then
 match declared groups at the looser 0.10 radius from §3.
 
 ### Log-linear pooling, unpacked

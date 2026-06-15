@@ -9,6 +9,15 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- **Internal rename for clarity (no behavior change):** the declared-token "usage prior"
+  concept is now uniformly called **usage intent** — a distribution over usage roles
+  expressing where a token's color is expected to be used, inferred from its name before the
+  page is measured. The YAML key `token_vocabulary.role_to_usage_prior` is now
+  `semantic_role_to_usage_intent_or_channel`; the config models `DistributionPrior`/`ChannelPrior`/`PriorRow`
+  are now `UsageIntent`/`ChannelRoute`/`UsageIntentOrChannel` (the last describing what each
+  semantic role maps to — a usage intent or a channel route); and `ClassifiedToken.role_distribution`
+  is now `ClassifiedToken.usage_intent`. These are internal (not part of the public
+  `colorsense` API); analysis output is unchanged.
 - Non-anchor CTA-button **labels** no longer leak into the `link` usage role. The harvester
   now records each element's composited *effective background* (the first fully-opaque
   background up its ancestor chain) and whether that background is painted by a clickable
