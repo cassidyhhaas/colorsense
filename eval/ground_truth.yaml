@@ -1,0 +1,929 @@
+# Human-reviewed expected palette for the real-site quality eval (eval/score.py).
+#
+# WHAT THIS IS
+# ------------
+# The eval's independent *anchor*: the colors each page ACTUALLY renders and how it uses them,
+# read from the frozen harvest (its declared design-token values + the measured computed color
+# of every element), reviewed and locked by a human. This is what makes the eval non-self-
+# referential, unlike the golden snapshots in tests/golden/ (which are regenerated from the
+# algorithm's own output and can only catch drift, never wrongness).
+#
+# CRITICAL — page-sourced, NOT brand-sourced. The ground truth is what is ON THE PAGE, full
+# stop. A color a brand declares as its "primary" but that the page does not actually paint in
+# that role is NOT in the GT (if every CTA on the page is white, white is the correct `cta`
+# answer). The algorithm sees only the page; if the GT required brand knowledge the algorithm
+# can't see (e.g. a hex looked up on the web), the algorithm could never match it and the EVAL
+# would be wrong, not the algorithm. Published brand guidelines may be consulted ONLY to LABEL
+# or disambiguate a color that is already on the page — never to add or require one that isn't.
+# There is no primary/secondary/accent framing here (the library dropped it for the same
+# reason): only usage roles, ranked as the page's own usage warrants.
+#
+# FORMAT — one canonical color-keyed table per site
+# -------------------------------------------------
+# Each site is authored ONCE, as the library's canonical color-keyed index shapes it:
+#
+#   colors:
+#     - hex: "#171717"
+#       source: "Geist --foreground"
+#       roles:                 # every UsageRole this color legitimately paints,
+#         text:   [page_text, card_text]   # each -> the ComponentType(s) that produce it
+#         link:   [link]
+#         border: [border]
+#
+# From this single table the scorer derives BOTH views the library emits and checks each:
+#   * usage  (role -> colors -> components): for each role, the set of colors that belong
+#     there, and the component breakdown expected for each.
+#   * colors (color -> usages -> role): for each color, the set of roles it appears in.
+#
+# This is the FULL expected shape, not a subset of roles — so the eval surfaces three things
+# the old role-subset GT was blind to:
+#   1. RECALL   — an expected color is missing from a role it should appear in.
+#   2. NOISE / MIS-BUCKETING — a color lands in a role (or a component votes a color into a
+#      role) that the GT does NOT list. Every unexpected output entry is flagged. A role that
+#      should be empty is declared empty simply by no color listing it.
+#   3. COMPONENTS — a color is attributed to component types the GT doesn't expect for it.
+#
+# A role with NO color listing it is expected to be EMPTY; any output there is noise.
+# We do NOT pin area/prominence/probability/divergence — only which colors are used, and how.
+# COMPONENT lists are an unscored DIAGNOSTIC (the scorer cannot judge them independently —
+# their only source is the algorithm's output — so they inform, they don't pass/fail).
+#
+# AUTHORING RULES (operationalized so two authors converge — use `eval/probe.py <site> <hex>`,
+# which computes all of this from the frozen harvest):
+#   * TOLERANCE is the eval's resolution: perceptual ΔE2000, default 1.0 (see colormetric.py).
+#     Author at it, not finer. Two colors a site renders that are < tolerance apart in ANY role
+#     are ONE color (a color is a color) — list one entry whose `roles` is their union. The
+#     scorer REJECTS the YAML at load if you list both. (Near-black is the exception that proves
+#     the rule: #000000 vs #0a0a0a are ΔE2000 1.59 — genuinely distinct, list both; #090909 vs
+#     #0a0a0a are 0.16 — one color. The split is decided by ΔE2000 vs tolerance, never by eye.)
+#     Prefer distinct GT colors >= 2x tolerance apart: a single output cluster can fall within
+#     tolerance of TWO GT colors in the (tol, 2*tol) band and be credited to both (bounded
+#     over-credit). The validator only forbids < tol; the 1.59 near-black pair is the one we accept.
+#   * REAL vs PHANTOM: a color the algorithm emits is authored only if real ELEMENTS paint it
+#     (probe counts them per channel). Zero elements + screenshot area can still be a PHANTOM
+#     (a median-cut quantizer blend of two real colors — probe detects this) OR a real area
+#     color with no element bg (gradient/image/body — probe flags it "AREA-ONLY, verify vs
+#     brand guideline"). List the latter, omit the former. A semi-transparent gradient stop is
+#     recorded by its STOP hex (the brand color, what the pipeline keys to), not the composited
+#     rendered pixel — design-intent, the one place the GT hex isn't the literal painted pixel.
+#   * REAL USE for cta/action/link: the color must be painted by CLICKABLE elements (probe
+#     reports the clickable share). A single non-clickable status dot is NOT a CTA.
+#   * ROLE + HEX both come from the PAGE: which elements paint the color (and whether they're
+#     clickable) decides the role; the rendered cluster color is the hex. A declared token name
+#     may help LABEL the role, but actual element usage is the truth — a token declared but not
+#     painted on the page earns no role.
+#
+# `category: quality` sites count toward the aggregate. `harvest_completeness` (login-walled,
+# < 100 elements) are reported but NOT aggregated — and the category is CHECKED against the
+# harvest's element count at load, so it can't be mis-tagged to dodge a bad score.
+#
+# STATUS: all 10 quality sites (shadcn, vercel, github, stripe, disconetwork, linear, supabase,
+# tailwindcss, resend, notion) are harvest-evidence authored and each cross-checked. The one
+# remaining is platform_disco (harvest_completeness, login-walled).
+
+sites:
+  # ===================================================================================
+  # shadcn/ui — base theme is Zinc (grays) end-to-end; near-black/white + zinc scale.
+  # Harvest-evidence validated (Session 22 + this session). Notable findings the eval
+  # is EXPECTED to flag with this GT (real code behavior, not GT errors):
+  #   * page role is EMPTY in the output (white files under card_bg, never page_bg) -> X.
+  #   * #5f5f5f appears as a `surface` (card_bg) entry but ZERO elements paint it — a
+  #     phantom quantizer-blended screenshot bin -> noise.
+  # ===================================================================================
+  shadcn:
+    category: quality
+    colors:
+      - hex: "#ffffff"
+        source: "--background (white): page canvas, cards, header, ghost buttons, badges"
+        roles:
+          page: [page_bg]
+          surface: [card_bg, hero_bg, input_bg]
+          banner: [header_bg]
+          cta: [cta_bg]        # outline/ghost buttons; the default solid button is near-black
+          action: [badge]      # outline badges
+      - hex: "#0a0a0a"
+        source: "--foreground as rendered (~zinc-950): the dominant body text + links. NOT a
+          button bg — 0 elements paint it as background (probe); the solid CTA button is #171717."
+        roles:
+          text: [page_text, card_text, hero_text]
+          link: [link]
+      - hex: "#000000"
+        source: "pure black: also present as body text / links (distinct from #0a0a0a: ΔE2000 1.59)"
+        roles:
+          text: [page_text, card_text, hero_text]
+          link: [link]
+          cta: [cta_bg]
+      - hex: "#737373"
+        source: "--muted-foreground (zinc-500): muted text + muted links (covers #666666)"
+        roles:
+          text: [page_text, card_text]
+          link: [link]
+      - hex: "#e5e5e5"
+        source: "--border (zinc-200): the canonical border/divider"
+        roles:
+          border: [border]
+      - hex: "#171717"
+        source: "zinc-900: the solid CTA button bg (3 clickable bg elements, probe) + borders of
+          small form controls (checkbox, switch). The macOS pipeline blends the small button into
+          a #090909 quantizer artifact and so under-emits this as cta — a known pipeline limit the
+          eval surfaces; the Linux render emits #171717 cta correctly."
+        roles:
+          cta: [cta_bg]
+          border: [border]
+
+  # ===================================================================================
+  # vercel — Geist design system. Signature Vercel blue lives ONLY in link/console text,
+  # never as a CTA bg or surface (Session 22). Findings the eval is EXPECTED to flag:
+  #   * `text` carries chromatic syntax-highlight colors (#bd2864 pink, #297a3a green,
+  #     #7820bc purple, blue) — code-sample decoration, NOT the site's text palette -> noise.
+  #   * `border` winner is #000000 (focus outlines / icon strokes) over the real gray
+  #     border #ebebeb -> noise + the real border merely present.
+  #   * `cta`/`action` carry #067a6e from a single 10x10 status dot misrouted -> noise.
+  #   * `link` carries #ffffff from 30 button labels (role=link buttons) — the A2
+  #     button-votes-link artifact -> noise.
+  # ===================================================================================
+  vercel:
+    category: quality
+    colors:
+      - hex: "#fafafa"
+        source: "Geist --background: page canvas, cards, hero, nav/footer, ghost buttons"
+        roles:
+          page: [page_bg]
+          surface: [card_bg, hero_bg]
+          banner: [nav_bg, footer_bg]
+          cta: [cta_bg]        # white ghost buttons; the default solid button is black
+          action: [badge]
+      - hex: "#171717"
+        source: "Geist --foreground: body text, black solid button, dark sections, dark borders"
+        roles:
+          text: [page_text, card_text, hero_text]
+          link: [link]
+          cta: [cta_bg]
+          surface: [card_bg, hero_bg]   # dark UI sections / hero band (8 elements)
+          border: [border]
+      - hex: "#4d4d4d"
+        source: "Geist gray (accents-5/6): muted text, muted links, dividers"
+        roles:
+          text: [page_text, card_text]
+          link: [link]
+          border: [border]
+      - hex: "#666666"
+        source: "Geist gray: muted text + nav/footer links"
+        roles:
+          text: [page_text]
+          link: [link]
+      - hex: "#7d7d7d"
+        source: "Geist gray: muted text"
+        roles:
+          text: [page_text]
+      - hex: "#8f8f8f"
+        source: "Geist gray: muted links"
+        roles:
+          link: [link]
+      - hex: "#a8a8a8"
+        source: "Geist gray: faint muted text"
+        roles:
+          text: [page_text]
+      - hex: "#ebebeb"
+        source: "Geist --accents-2 / border: the canonical gray border"
+        roles:
+          border: [border]
+      - hex: "#0072f5"
+        source: "--geist-link-color (#0072f5 / #0070f3): the signature Vercel blue, links only"
+        roles:
+          link: [link]
+
+  # ===================================================================================
+  # github — logged-out marketing homepage, DARK theme. Page canvas is near-black
+  # (#000000 dominant 0.70 area, #0d1017 secondary), Primer dark-mode UI on top.
+  # Harvest-evidence authored (probe + element inspection). Notable findings the eval
+  # is EXPECTED to flag (real pipeline behavior, not GT errors):
+  #   * WHITE TEXT BURIED: 549 elements paint #ffffff as text + 93 as clickable link,
+  #     yet the pipeline surfaces white only in border/surface — text/link recall MISS.
+  #   * #0d1017 (the page canvas) leaks into cta/action off ONE incidental clickable <a>
+  #     (1296px) over a dark section -> noise; the page canvas is not a CTA.
+  #   * #1f6feb (Primer accent blue) paints ONE 1px clickable <a> and 0 screenshot area —
+  #     below visibility, not a real on-page CTA; omitted, so its cta entry -> noise.
+  #   * white #ffffff also tagged surface/banner off 7 tiny (≈0 area) bg elements -> noise.
+  # ===================================================================================
+  github:
+    category: quality
+    colors:
+      - hex: "#000000"
+        source: "page canvas / dark hero+card+footer sections (13 bg elements, 0.70 area)"
+        roles:
+          page: [page_bg]
+          surface: [card_bg, hero_bg]
+          banner: [footer_bg]
+      - hex: "#0d1017"
+        source: "Primer dark canvas-inset: secondary page/hero/footer bg (6 bg, 0.08 area).
+          The lone clickable <a> over it is incidental — NOT a CTA."
+        roles:
+          page: [page_bg]
+          surface: [hero_bg]
+          banner: [footer_bg]
+      - hex: "#08872b"
+        source: "Primer Brand green: the 'Sign up for free' primary CTA (2 clickable <button>, 8872px)"
+        roles:
+          cta: [cta_bg]
+      - hex: "#ffffff"
+        source: "white: dominant body/heading text (549 text, 93 clickable link) + white button
+          borders (15 border, 7 clickable). Pipeline buries the text/link use — recall surfaces it."
+        roles:
+          text: [page_text, hero_text, card_text]
+          link: [link]
+          border: [border]
+      - hex: "#f0f6fc"
+        source: "Primer --fgColor-default near-white: text + links (79 text, 10 clickable)"
+        roles:
+          text: [page_text, hero_text, card_text]
+          link: [link]
+      - hex: "#9198a1"
+        source: "Primer --fgColor-muted gray: muted text + links (96 text, 68 clickable)"
+        roles:
+          text: [page_text]
+          link: [link]
+      - hex: "#a4aea6"
+        source: "muted gray-green: text + links (50 text, 9 clickable)"
+        roles:
+          text: [page_text]
+          link: [link]
+      - hex: "#8dd6ff"
+        source: "Primer link blue on dark: links only (92 clickable text)"
+        roles:
+          link: [link]
+      - hex: "#59636e"
+        source: "Primer muted gray link: its 2 text elements are BOTH clickable -> link, not body text"
+        roles:
+          link: [link]
+      # OMITTED #5fed83 (success green): its only real glyph is a decorative
+      # `Testimonial__quoteMarkGlyph`; the rest are `Primer_Brand__Icon` green icons /
+      # images — decoration, not text. The pipeline's `text` entry for it is noise.
+      - hex: "#7c8980"
+        source: "muted gray-green text variant (2 text elements)"
+        roles:
+          text: [page_text]
+      - hex: "#24292f"
+        source: "Primer near-black, dark text on light chips/badges (2 text elements)"
+        roles:
+          text: [page_text]
+      - hex: "#484f58"
+        source: "Primer --borderColor on dark: the canonical divider/border (5 border elements)"
+        roles:
+          border: [border]
+      - hex: "#d1d9e0"
+        source: "light Primer border on a light inset (1 clickable border element)"
+        roles:
+          border: [border]
+      - hex: "#191f1b"
+        source: "near-black subtle border (1 clickable border element)"
+        roles:
+          border: [border]
+      - hex: "#818b98"
+        source: "muted border-gray (1 border element)"
+        roles:
+          border: [border]
+      - hex: "#8c93fb"
+        source: "Primer accent-violet border / focus accent (1 border element)"
+        roles:
+          border: [border]
+
+  # ===================================================================================
+  # stripe — LIGHT theme. White page canvas (0.72 area) + a dark-navy section/footer
+  # (#0d1838, 0.19 area). Signature "blurple" #533afd is the primary CTA AND the link
+  # color. Harvest-evidence authored. Findings the eval is EXPECTED to flag:
+  #   * DECORATIVE GRAPHIC LEAK: #00d66f (green) and #000000 (black) each paint exactly
+  #     ONE clickable bg — both the same `payments-graphic__checkout-instant-button` mock
+  #     INSIDE a product illustration, not a real site CTA -> their cta entries are noise.
+  #   * #000eff: a single non-clickable saturated-blue text element (below resolution) the
+  #     pipeline files under link -> noise.
+  # ===================================================================================
+  stripe:
+    category: quality
+    colors:
+      - hex: "#ffffff"
+        source: "white: page canvas (0.72 area), cards/inputs, nav/footer, white ghost + Google
+          sign-in CTAs (hds-button), white text/links on the dark section"
+        roles:
+          page: [page_bg]
+          surface: [card_bg, hero_bg, input_bg]
+          banner: [nav_bg, footer_bg]
+          cta: [cta_bg]
+          text: [page_text, card_text]
+          link: [link]
+      - hex: "#0d1838"
+        source: "Stripe dark-navy section + footer bg (1 bg, 0.19 area, non-clickable)"
+        roles:
+          surface: [card_bg]
+          banner: [footer_bg]
+      - hex: "#533afd"
+        source: "Stripe blurple: primary CTA buttons (7 clickable hds-button--primary) + inline
+          links (367 clickable text)"
+        roles:
+          cta: [cta_bg]
+          link: [link]
+      - hex: "#000000"
+        source: "black: dominant body/heading text (805 text) + links (433 clickable). The lone
+          black clickable-bg is the decorative checkout-graphic mock, NOT a CTA."
+        roles:
+          text: [page_text, card_text, hero_text]
+          link: [link]
+      - hex: "#061b31"
+        source: "Stripe dark-navy text + dark links (120 text, 77 clickable)"
+        roles:
+          text: [page_text]
+          link: [link]
+      - hex: "#50617a"
+        source: "Stripe slate text + links (153 text, 132 clickable — mostly links)"
+        roles:
+          text: [page_text]
+          link: [link]
+      - hex: "#64748d"
+        source: "Stripe muted slate: body text + some links (68 text, 21 clickable)"
+        roles:
+          text: [page_text]
+          link: [link]
+      - hex: "#839bc8"
+        source: "faint blue-gray text (4 text, non-clickable)"
+        roles:
+          text: [page_text]
+      - hex: "#a3b5d6"
+        source: "fainter blue-gray text (3 text, non-clickable)"
+        roles:
+          text: [page_text]
+      - hex: "#3c4f69"
+        source: "slate link (18 text, all clickable)"
+        roles:
+          link: [link]
+      - hex: "#273951"
+        source: "dark slate link (16 text, all clickable)"
+        roles:
+          link: [link]
+      - hex: "#1a2c44"
+        source: "darker slate link (14 text, all clickable)"
+        roles:
+          link: [link]
+      - hex: "#7d8ba4"
+        source: "muted slate link (5 text, all clickable)"
+        roles:
+          link: [link]
+      - hex: "#7f7dfc"
+        source: "light blurple link (3 text, all clickable)"
+        roles:
+          link: [link]
+      - hex: "#ff6118"
+        source: "Stripe coral/orange accent link (14 text, all clickable)"
+        roles:
+          link: [link]
+      - hex: "#e5edf5"
+        source: "Stripe pale-gray: the canonical divider/border (21 border) — the 15 'bg'
+          elements are bento-card BORDER-frame divs (class `...bento-card__border`), not fills"
+        roles:
+          border: [border]
+      - hex: "#d6d9fc"
+        source: "pale lavender border (9 border)"
+        roles:
+          border: [border]
+      - hex: "#b9b9f9"
+        source: "light purple border / button outline (10 clickable border)"
+        roles:
+          border: [border]
+      - hex: "#182659"
+        source: "dark navy border (1 border)"
+        roles:
+          border: [border]
+      - hex: "#4834db"
+        source: "deep blurple border (1 clickable border)"
+        roles:
+          border: [border]
+
+  # ===================================================================================
+  # disconetwork — LIGHT theme marketing page. White canvas (0.83 area) + one dark
+  # full-width content <section> (#050505, 0.15 area). Colorful palette: blue/purple
+  # gradient CTAs, category-colored badges (blue/purple/teal/amber), a green pill CTA,
+  # a black pill CTA. Harvest-evidence authored AND visually cross-checked against a live
+  # 1280px screenshot (hero purple + black CTAs, repeated purple 'Book a Demo', the dark
+  # bottom section, the blue->purple gradient 'Everywhere.' heading all confirmed).
+  # blue/purple each legitimately span cta (gradient stops on clickable pills) + action
+  # (non-clickable category badges) + text/link.
+  # ===================================================================================
+  disconetwork:
+    category: quality
+    colors:
+      - hex: "#ffffff"
+        source: "white: page canvas (0.83 area), cards, nav/footer, white ghost CTAs,
+          white text/links on the dark section"
+        roles:
+          page: [page_bg]
+          surface: [card_bg, hero_bg]
+          banner: [nav_bg, footer_bg]
+          cta: [cta_bg]
+          text: [page_text, card_text]
+          link: [link]
+      - hex: "#050505"
+        source: "dark full-width content <section> band (1 bg, 0.15 area, non-clickable)"
+        roles:
+          surface: [card_bg]
+      - hex: "#030711"
+        source: "near-black: the black pill CTA ('Reach New Customers', 2 clickable rounded-full
+          <a>) + dominant body/heading text (482 text) + links (69 clickable)"
+        roles:
+          cta: [cta_bg]
+          text: [page_text, card_text, hero_text]
+          link: [link]
+      - hex: "#7c3bed"
+        source: "violet: gradient pill CTAs ('Monetize Your Traffic', 'Book a Demo') via
+          gradient stops on 3 clickable pills + category badges (26 bg; the clickable ones are
+          `h-5 w-5` corner icon chips, not pill CTAs) + text/links (50 text, 17 clickable)"
+        roles:
+          cta: [cta_bg]
+          action: [badge]
+          text: [page_text]
+          link: [link]
+      - hex: "#3c83f6"
+        source: "blue: gradient pill-CTA stop (paints 3 clickable) + category badges (21
+          non-clickable bg) + text/links (32 text, 5 clickable)"
+        roles:
+          cta: [cta_bg]
+          action: [badge]
+          text: [page_text]
+          link: [link]
+      - hex: "#5e8e3e"
+        source: "green pill CTA (1 clickable rounded-full <a> button, 7257px)"
+        roles:
+          cta: [cta_bg]
+      - hex: "#10b77f"
+        source: "teal: category badges (4 non-clickable bg) + text/links (17 text, 12 clickable)"
+        roles:
+          action: [badge]
+          text: [page_text]
+          link: [link]
+      - hex: "#f59e0b"
+        source: "amber badge (1 clickable bg-amber-500 pill <span>)"
+        roles:
+          action: [badge]
+      - hex: "#65758b"
+        source: "muted slate: body text + links (90 text, 28 clickable)"
+        roles:
+          text: [page_text]
+          link: [link]
+      - hex: "#a3a3a3"
+        source: "faint gray text (3 text, non-clickable)"
+        roles:
+          text: [page_text]
+      - hex: "#e5e7eb"
+        source: "the canonical light divider/border (11 border)"
+        roles:
+          border: [border]
+
+  # ===================================================================================
+  # linear — DARK theme. Near-black canvas (#08090b, 0.89 area) end to end; white
+  # primary CTAs + a grayscale text ramp; one bright lime feature-card surface. Harvest-
+  # evidence authored AND visually cross-checked (1280px screenshot: dark canvas, white
+  # CTAs, the lime panel near the bottom, colorful code/diagram accents confirmed).
+  # Findings the eval is EXPECTED to flag (real pipeline behavior, not GT errors):
+  #   * #e0e7bb (pale lime) is a QUANTIZER BLEND of white+lime (#e4f222), 0 elements —
+  #     the pipeline ranks it cta; the real surface is the lime card #e4f222 (1 clickable
+  #     bg), which the pipeline buries -> #e0e7bb noise + #e4f222 surface recall miss.
+  #   * #2e3031 (gray) is a 0-element blend of black+white the pipeline ranks cta/action
+  #     -> phantom noise.
+  #   * the chromatic code-sample / illustration accents (#f79ce0 pink, #f7bf8b orange,
+  #     #83dcdc cyan, #8fa6ff blue, #6d78d5 indigo, #27a644, #eb5757) are decoration, not
+  #     the site's text palette (cf. vercel) -> any text/action entry for them is noise.
+  #     Evidence: every #f79ce0 span carries class `code-diff_keyword`, every #f7bf8b span
+  #     `code-diff_variable` — syntax highlighting inside a code-diff illustration, 0 clickable.
+  # Deliberately EXCLUDED (decoration, not the marketing page's own surfaces): the dark
+  # #0f1011/#101112/#121314/#161718 panels are embedded Linear-APP mockup frames
+  # (`Frame_frameBackground`/`*_panel`/`Build_agentsPanel`), non-clickable product-UI demos
+  # (≤0.01 area each) — the app's chrome, not this page's palette (same basis as code samples).
+  # ===================================================================================
+  linear:
+    category: quality
+    colors:
+      - hex: "#08090b"
+        source: "near-black: the page canvas, all cards/hero, and header/nav/footer chrome
+          (8 bg, 0.89 area). Covers the merged #08090a variant (ΔE2000 0.43)."
+        roles:
+          page: [page_bg]
+          surface: [hero_bg, card_bg]
+          banner: [header_bg, nav_bg, footer_bg]
+      - hex: "#ffffff"
+        source: "white: primary CTA buttons (26 clickable bg), white links/labels (102
+          clickable text), white borders/outlines (71 border)"
+        roles:
+          cta: [cta_bg]
+          link: [link]
+          border: [border]
+      - hex: "#e4f222"
+        source: "bright lime feature-card surface (1 clickable bg; its rendered region quantizes
+          to the #e0e7bb white-blend, which the pipeline mis-surfaces instead)"
+        roles:
+          surface: [card_bg]
+      - hex: "#f7f8f8"
+        source: "near-white: the dominant body/heading text (1327 text) + links (63 clickable)"
+        roles:
+          text: [page_text, card_text]
+          link: [link]
+      - hex: "#d0d6e0"
+        source: "light gray: secondary text + links (168 text, 35 clickable)"
+        roles:
+          text: [page_text]
+          link: [link]
+      - hex: "#8a8f98"
+        source: "Linear muted gray: text + links (121 text, 76 clickable)"
+        roles:
+          text: [page_text]
+          link: [link]
+      - hex: "#62666d"
+        source: "Linear dim gray: muted text + links (322 text, 120 clickable)"
+        roles:
+          text: [page_text]
+          link: [link]
+      - hex: "#383b3f"
+        source: "dark divider/border (3 border)"
+        roles:
+          border: [border]
+      - hex: "#24282c"
+        source: "darker subtle border (1 clickable border)"
+        roles:
+          border: [border]
+      - hex: "#e5e5e6"
+        source: "light border/outline on light controls (2 clickable border)"
+        roles:
+          border: [border]
+
+  # ===================================================================================
+  # supabase — LIGHT theme. Near-white canvas (#fcfcfc, 0.96 area; absorbs #fdfdfd at
+  # ΔE2000 0.20). Signature Supabase green #3fcf8e is the primary CTA; a grayscale text
+  # ramp; black corner icon-badge chips. Harvest-evidence authored. Findings the eval is
+  # EXPECTED to flag (real pipeline behavior, not GT errors):
+  #   * #afcfc0 (pale green) is a QUANTIZER BLEND of gray+pale-green (0 elements, 0.005
+  #     area) the pipeline ranks cta/action -> phantom noise.
+  #   * #000000 paints 54 small (20x20 `h-5 w-5`) absolute-positioned corner icon BADGE
+  #     chips (action), not CTAs; the pipeline buries it -> action recall miss.
+  # ===================================================================================
+  supabase:
+    category: quality
+    colors:
+      - hex: "#fcfcfc"
+        source: "near-white: page canvas (0.96 area), card/panel surfaces, header/footer,
+          white ghost CTA buttons (2 clickable <a>). Absorbs the #fdfdfd variant."
+        roles:
+          page: [page_bg]
+          surface: [card_bg]
+          banner: [header_bg, footer_bg]
+          cta: [cta_bg]
+      - hex: "#3fcf8e"
+        source: "Supabase brand green: primary CTA buttons (3 clickable bg) + green links
+          (2 clickable text) + green focus borders (1 clickable)"
+        roles:
+          cta: [cta_bg]
+          link: [link]
+          border: [border]
+      - hex: "#000000"
+        source: "black: 54 small (20x20) absolute corner icon-badge chips on cards (clickable
+          via the card) — a badge, not a CTA"
+        roles:
+          action: [badge]
+      - hex: "#16b674"
+        source: "darker green: button/control focus outlines (5 clickable border)"
+        roles:
+          border: [border]
+      - hex: "#00bb68"
+        source: "deeper green link (1 clickable text)"
+        roles:
+          link: [link]
+      - hex: "#171717"
+        source: "near-black: the dominant body/heading text (1046 text) + links (700 clickable)
+          + one dark border"
+        roles:
+          text: [page_text, card_text, hero_text]
+          link: [link]
+          border: [border]
+      - hex: "#525252"
+        source: "neutral gray: secondary text + links (249 text, 222 clickable)"
+        roles:
+          text: [page_text, card_text]
+          link: [link]
+      - hex: "#707070"
+        source: "muted gray: text + links (344 text, 329 clickable) + one border"
+        roles:
+          text: [page_text, card_text]
+          link: [link]
+          border: [border]
+      - hex: "#b2b2b2"
+        source: "light gray: muted captions + muted link labels (260 text) + one border"
+        roles:
+          text: [card_text]
+          link: [link]
+          border: [border]
+      - hex: "#d4d4d4"
+        source: "the canonical light divider/border (9 clickable border)"
+        roles:
+          border: [border]
+      - hex: "#ededed"
+        source: "lighter border/divider (6 clickable border)"
+        roles:
+          border: [border]
+
+  # ===================================================================================
+  # tailwindcss — LIGHT theme (homepage). White canvas; dark code-block / CTA sections
+  # painted #030712; pink + black CTAs; a sky accent; a slate text ramp. Harvest-evidence
+  # authored AND visually cross-checked (1280px screenshot: white page, dark code blocks,
+  # the color-palette swatch grid, pink/dark CTAs). Findings the eval is EXPECTED to flag
+  # (real pipeline behavior, not GT errors):
+  #   * THE PAGE WINNER IS A PHANTOM: #0c0e18 (a 0-element blend of black + periwinkle,
+  #     0.03 area) is ranked the sole `page` color, while the real white page #ffffff
+  #     (62 bg, 0.68 area) is absent from page -> #0c0e18 noise + #ffffff page recall miss.
+  #   * #1c202b (a 0-element blend of #030712 + pink-white, 0.10 area) is surfaced as the
+  #     dark surface/banner instead of the REAL dark section color #030712 (46 bg, 1473
+  #     text) -> #1c202b noise + #030712 surface recall miss.
+  #   * the chromatic code text (#fb64b6, #78d4ff, #96f7e4, #00a5ea, #cbfbf1) is syntax
+  #     highlighting in dark code blocks (spans class `highlighted-word`/`font-mono`, 0
+  #     clickable), not the site text palette (cf. vercel/linear) -> noise. #e30076 is a
+  #     small mixed pink accent (~3 `text-pink-600` feature labels + `font-mono`/SVG),
+  #     omitted as a below-palette chromatic accent -> its text entry is likewise noise.
+  # ===================================================================================
+  tailwindcss:
+    category: quality
+    colors:
+      - hex: "#ffffff"
+        source: "white: page canvas (62 bg, 0.68 area), cards, header/footer, white CTA + white
+          text/links on the dark sections"
+        roles:
+          page: [page_bg]
+          surface: [card_bg]
+          banner: [header_bg, footer_bg]
+          cta: [cta_bg]
+          text: [page_text]
+          link: [link]
+      - hex: "#f9f9f9"
+        source: "off-white secondary section bg (area-only, 0.13 area — a real rendered surface
+          with no single element bg)"
+        roles:
+          surface: [card_bg]
+      - hex: "#030712"
+        source: "near-black: the REAL dark code-block / CTA section surfaces (46 bg) + the
+          dominant dark body text (1473 text) + dark links (208 clickable) + borders (19)"
+        roles:
+          surface: [card_bg]
+          text: [page_text, card_text]
+          link: [link]
+          border: [border]
+      - hex: "#000000"
+        source: "black: dark CTA buttons (3 clickable bg) + black text/links (39 text)"
+        roles:
+          cta: [cta_bg]
+          text: [page_text]
+          link: [link]
+      - hex: "#f6339a"
+        source: "Tailwind pink/fuchsia brand: CTA buttons (2 clickable bg)"
+        roles:
+          cta: [cta_bg]
+      - hex: "#00bbfd"
+        source: "sky-blue badge/swatch (4 bg, 1 clickable)"
+        roles:
+          action: [badge]
+      - hex: "#005986"
+        source: "dark cyan link (10 text, all clickable)"
+        roles:
+          link: [link]
+      - hex: "#90a1b9"
+        source: "Tailwind slate-400 text (114 text, non-clickable)"
+        roles:
+          text: [page_text]
+      - hex: "#cad5e2"
+        source: "Tailwind slate-300 light text on dark sections (88 text, non-clickable)"
+        roles:
+          text: [page_text]
+      - hex: "#4a5565"
+        source: "Tailwind slate-600 text (22 text, non-clickable)"
+        roles:
+          text: [page_text]
+      - hex: "#6a7282"
+        source: "Tailwind slate-500 text (12 text, non-clickable)"
+        roles:
+          text: [page_text]
+      - hex: "#1e2939"
+        source: "Tailwind slate-800 text (12 text, non-clickable)"
+        roles:
+          text: [page_text]
+      - hex: "#364153"
+        source: "Tailwind slate-700 text (8 text)"
+        roles:
+          text: [page_text]
+
+  # ===================================================================================
+  # resend — DARK theme. Near-black canvas (#000000, 0.86 area; absorbs #010101 at ΔE2000
+  # 0.16). Primary CTA is the signature `rainbow-border` gradient pill (cyan/violet/amber
+  # stops) plus a blue button; grayscale + neon-accent text; a pale-blue card border.
+  # Harvest-evidence authored. Findings the eval is EXPECTED to flag (real pipeline
+  # behavior, not GT errors):
+  #   * NO WHITE CTA: white bg is 0-clickable (4 non-clickable white cards) — the pipeline
+  #     ranks #ffffff the top `cta`, a card/surface leak -> noise.
+  #   * #00c65a (green) paints only two 8x8 `bg-green-500` status DOTS — not a CTA; the
+  #     pipeline files it cta/action -> noise.
+  #   * #010101 (= the page black) leaks into `action` as a 0.10-area badge -> noise.
+  #   * #a1fcea (neon-cyan) is Prism code-syntax (`token string font-mono`) + a small icon,
+  #     not the text palette (cf. vercel/linear/tailwind) -> its text/border entries are noise.
+  # ===================================================================================
+  resend:
+    category: quality
+    colors:
+      - hex: "#000000"
+        source: "near-black: the page canvas (0.86 area), cards/hero, footer (21 bg).
+          Absorbs the #010101 variant (ΔE2000 0.16)."
+        roles:
+          page: [page_bg]
+          surface: [card_bg, hero_bg]
+          banner: [footer_bg]
+      - hex: "#ffffff"
+        source: "white: small card surfaces (4 non-clickable bg) + light text (67) + white
+          links (9 clickable) + white borders (5 clickable). No white button -> not a CTA."
+        roles:
+          surface: [card_bg]
+          text: [page_text]
+          link: [link]
+          border: [border]
+      - hex: "#00a3ff"
+        source: "blue CTA button (1 clickable <a>, 4711px)"
+        roles:
+          cta: [cta_bg]
+      - hex: "#02fcef"
+        source: "cyan stop of the `rainbow-border` gradient CTA pill (paints a clickable <a>)"
+        roles:
+          cta: [cta_bg]
+      - hex: "#a02bfe"
+        source: "violet stop of the `rainbow-border` gradient CTA pill (paints a clickable <a>)"
+        roles:
+          cta: [cta_bg]
+      - hex: "#ffb52b"
+        source: "amber stop of the `rainbow-border` gradient CTA pill (paints a clickable <a>)"
+        roles:
+          cta: [cta_bg]
+      - hex: "#a1a4a5"
+        source: "muted gray: the dominant body text (303 text) + links (24 clickable)"
+        roles:
+          text: [page_text, card_text]
+          link: [link]
+      - hex: "#464a4d"
+        source: "dark gray text (84 text, non-clickable)"
+        roles:
+          text: [page_text]
+      - hex: "#6c6c6c"
+        source: "mid gray text (66 text, non-clickable)"
+        roles:
+          text: [page_text]
+      - hex: "#ebeced"
+        source: "near-white text (3 text, non-clickable)"
+        roles:
+          text: [page_text]
+      - hex: "#46fea5"
+        source: "neon-green accent: status-badge links + text (18 text, 13 clickable;
+          glyphs class `bg-success text-success` — genuine UI, not code syntax)"
+        roles:
+          text: [page_text]
+          link: [link]
+      # OMITTED #a1fcea (neon-cyan): its text glyphs are Prism `token string font-mono`
+      # code-syntax inside a code sample, plus a `text-[#A1FCEA]` icon and a `rounded-sm`
+      # icon border — decoration, not the site text/border palette (cf. vercel/linear/
+      # tailwind). The pipeline's text/border entries for it are therefore noise.
+      - hex: "#d6ebfd"
+        source: "pale-blue: the canonical card divider/border (105 border)"
+        roles:
+          border: [border]
+      - hex: "#262a2d"
+        source: "dark subtle border (1 border)"
+        roles:
+          border: [border]
+
+  # ===================================================================================
+  # notion — LIGHT theme. White + a merged cream off-white (#f6f5f3, absorbs #f7f7f5 /
+  # #f6f5f4 at ΔE2000 <= 0.9) alternate as section backgrounds; one dark-navy section +
+  # footer (#02083a). Primary CTA is blue (`buttonVariantPrimary`); a black CTA; warm-gray
+  # text ramp. Harvest-evidence authored (CTA + decorative-blue calls are class-backed).
+  # Findings the eval is EXPECTED to flag (real pipeline behavior, not GT errors):
+  #   * #62aef0 and #097fe8 (blues) appear ONLY as decorative filled-icon graphics (spans
+  #     class `graphic_graphic__/isFilled`, in agent/bento illustrations), not as the site's
+  #     text/link/CTA palette -> their text/link entries are noise.
+  #   * RECALL MISSES (real page-truth the pipeline buries): #f6f5f3 surface (the cream
+  #     section bg, 11 bg / 0.40 area incl. a `homepage_lightGrayBg` div, collapsed into
+  #     white); #a39e98 text (surfaced only as link); #ffffff link (22 clickable white-text
+  #     elements not surfaced as links).
+  # ===================================================================================
+  notion:
+    category: quality
+    colors:
+      - hex: "#ffffff"
+        source: "white: page canvas (33 bg, 0.44 area), cards, header/footer, white ghost CTA
+          buttons (6 clickable bg), white links/borders"
+        roles:
+          page: [page_bg]
+          surface: [card_bg]
+          banner: [header_bg, footer_bg]
+          cta: [cta_bg]
+          link: [link]
+          border: [border]
+      - hex: "#f6f5f3"
+        source: "Notion cream off-white: alternating section/card surfaces (11 bg, 0.40 area) +
+          light text/links on the dark navy section (116 text, 30 clickable). Absorbs the
+          #f7f7f5 / #f6f5f4 variants."
+        roles:
+          surface: [card_bg, hero_bg]
+          text: [page_text]
+          link: [link]
+      - hex: "#02083a"
+        source: "dark-navy section + footer bg (3 bg, 0.08 area, non-clickable)"
+        roles:
+          surface: [hero_bg, card_bg]
+          banner: [footer_bg]
+      - hex: "#455dd3"
+        source: "Notion blue: the primary CTA button (2 clickable `buttonVariantPrimary` <a>)"
+        roles:
+          cta: [cta_bg]
+      - hex: "#213183"
+        source: "darker-blue CTA button / gradient variant (1 clickable bg)"
+        roles:
+          cta: [cta_bg]
+      - hex: "#000000"
+        source: "black: a black CTA button (2 clickable bg) + the dominant body text (356 text,
+          126 clickable links) + borders (8)"
+        roles:
+          cta: [cta_bg]
+          text: [page_text, card_text, hero_text]
+          link: [link]
+          border: [border]
+      - hex: "#615d59"
+        source: "Notion warm-gray secondary text + links (17 text, 3 clickable)"
+        roles:
+          text: [page_text]
+          link: [link]
+      - hex: "#a39e98"
+        source: "Notion lighter warm-gray: muted text + links (78 text, 15 clickable)"
+        roles:
+          text: [page_text]
+          link: [link]
+
+  # ===================================================================================
+  # platform_disco — LOGIN WALL (29 elements -> category: harvest_completeness, NOT
+  # aggregated). A purple->blue gradient page background (3D illustration) behind a white
+  # login card. Harvest-evidence authored AND visually cross-checked (1280px screenshot:
+  # gradient bg, white "Welcome back!" card, blue Log In button, blue links). The point of
+  # this site is to TRACK the thin-harvest gaps, which the eval is EXPECTED to surface:
+  #   * PAGE GRADIENT NOT SURFACED: the page bg is a real purple(#6761f7)->blue(#0b69ff)
+  #     gradient with no page_bg ELEMENT (a CSS/body gradient), so the pipeline's `page`
+  #     role is EMPTY -> both page colors are recall misses.
+  #   * REAL CTA BURIED: the actual Log In button is #0b69ff (a flat-blue clickable
+  #     `login-view-login-button`, 3552px, 0 screenshot area), but the pipeline can't
+  #     surface it (nearest cluster #6761f7 at ΔE 8.2) and instead ranks an area-only
+  #     page-gradient bin (#6761f7, 0.015 area) as the `cta` winner -> cta noise + miss.
+  # The page colors below are the gradient's DOMINANT rendered bins (area-truth); the
+  # continuous purple->blue gradient has no single representative hex and no page element,
+  # so they are area-only anchors, not element-sourced.
+  # ===================================================================================
+  platform_disco:
+    category: harvest_completeness
+    colors:
+      - hex: "#578ffd"
+        source: "blue: the dominant rendered bin of the page background gradient (0.20 area,
+          the single largest bin). A CSS/body gradient with no page ELEMENT."
+        roles:
+          page: [page_bg]
+      - hex: "#5828b4"
+        source: "purple: the dominant rendered purple bin of the page background gradient
+          (0.12 area)"
+        roles:
+          page: [page_bg]
+      - hex: "#0b69ff"
+        source: "the real Log In CTA button (flat-blue clickable `login-view-login-button`,
+          3552px). 0 page area — NOT a page-gradient color, cta only."
+        roles:
+          cta: [cta_bg]
+      - hex: "#ffffff"
+        source: "white: the login card + input field surfaces (3 bg, non-clickable)"
+        roles:
+          surface: [card_bg, input_bg]
+      - hex: "#5793ff"
+        source: "blue links ('Forgot Password?' / 'Sign up', 2 clickable text)"
+        roles:
+          link: [link]
+      - hex: "#000000"
+        source: "black: the 'Welcome back!' heading + form text (20 text, non-clickable)"
+        roles:
+          text: [hero_text, page_text]
+      - hex: "#7e858e"
+        source: "gray field labels (5 text, non-clickable)"
+        roles:
+          text: [page_text]
+      - hex: "#576171"
+        source: "darker gray text (1 text, non-clickable)"
+        roles:
+          text: [page_text]
+      - hex: "#d7dee9"
+        source: "the input field borders (2 border)"
+        roles:
+          border: [border]
+      - hex: "#f8f8f8"
+        source: "near-white link/label (1 clickable text)"
+        roles:
+          link: [link]
