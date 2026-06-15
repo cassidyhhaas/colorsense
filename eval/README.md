@@ -18,10 +18,15 @@ This eval closes that gap with two design choices:
    changes (the "harvest-once / classify-many" technique) and lets the eval run offline and
    deterministically, matching the repo's network-free testing ethos.
 2. **A human-reviewed ground truth** (`ground_truth.yaml`). Expected colors are sourced
-   *independently* of the algorithm — from each site's own declared design tokens, confirmed
-   against published brand guidelines ("tokens-primary, guidelines-confirm") — and reviewed
-   by a human. That independence is what makes the score meaningful: unlike goldens, it
-   cannot rubber-stamp the algorithm with its own output.
+   *independently* of the algorithm — but from the **page itself** (the harvest's declared
+   design-token values and the measured computed color of every element), reviewed by a human.
+   That independence is what makes the score meaningful: unlike goldens, it cannot rubber-stamp
+   the algorithm with its own output. Crucially it is *page*-sourced, not *brand*-sourced: it
+   records what the page actually paints and how, never what a brand "should" use. A color a
+   brand declares but the page does not render in a role is not in the GT — holding the
+   algorithm (which sees only the page) to brand knowledge it can't see would make the eval
+   wrong, not the algorithm. Published guidelines may *label* a color already on the page, never
+   add one. There is no primary/secondary/accent notion here, by design.
 
 The ground truth is the **full expected shape**, not a subset of roles: each site is authored
 once as a canonical **color-keyed** table (`color -> roles -> components`, mirroring the
@@ -38,6 +43,7 @@ uv run python eval/score.py                 # full panel scorecard
 uv run python eval/score.py stripe github   # named sites
 uv run python eval/score.py --json          # machine-readable
 
+uv run python eval/probe.py github '#08872b'  # authoring aid: is this color real? (see below)
 uv run python eval/harvest_panel.py         # re-capture frozen harvests (needs network + Chromium)
 ```
 
@@ -50,7 +56,9 @@ reviewed signal.
 ## Reading the scorecard
 
 Every one of the eight roles is scored (not just those with expectations), and each predicted
-color is matched to the GT within an OKLab ΔE tolerance (default 0.06, overridable per site).
+color is matched to the GT within a perceptual **ΔE2000** tolerance (default 1.0, overridable
+per site — see `colormetric.py` for why CIEDE2000 rather than OKLab, and the cross-OS jitter
+measurement behind the 1.0).
 Per output entry:
 
 - `W` — **won**: this entry is an expected color *and* the role's top-ranked one.
@@ -59,19 +67,55 @@ Per output entry:
   where it doesn't belong (or into a role the GT says should be empty). This is the
   precision signal a role-subset GT cannot give.
 - `X missing` — an expected color absent from the role's output list (the recall failure).
-- `comp+=…` — the entry's component evidence includes a type the GT doesn't list for it.
-- `BLEED` — a text/link/border winner equals a background-role color (a surface hex leaking
-  into an element-color answer).
+  Recall is computed per *expected* color (does any entry match it?), so it is overlap-safe
+  and independent of the order colors are listed in the YAML.
+- `comp+=…` — the entry's component evidence includes a type the GT doesn't list for it
+  (an unscored diagnostic — see below).
+- `BLEED` — a text/link/border *winner* equals a known background color that the GT does **not**
+  also sanction for that element role (a surface hex leaking into an element answer). A neutral
+  the GT legitimately lists as both text and a dark surface is not a bleed.
 
-Below the per-role lines, **colors-index disagreements** report the same facts from the
-color axis: a GT color whose `usages` roles in the color-keyed index don't match the GT
-(`missing`/`extra` roles, or `absent` from the index entirely).
+Below the per-role lines, **colors-index disagreements** report the same facts from the color
+axis (a GT color whose `usages` roles in the color-keyed index don't match the GT).
 
-The headline metrics: **recall** (expected colors present), **role winners correct**,
-**NOISE** (count of wrongly-bucketed entries), **component mis-attributions**, and
-**family-bleed**. The aggregate covers `category: quality` sites only. `category: harvest_completeness` sites
-(consent/login-walled, too few elements to analyze — e.g. `platform_disco` at ~29 elements)
-are reported but excluded from the aggregate; they track the separate "thin harvest" problem.
+The headline metrics: **recall** (expected colors present), **role winners correct** (the top
+entry of a role is an expected color — a page whose CTAs are white correctly "wins" `cta` with
+white; there is no notion of a brand color that "should" lead), **NOISE** (wrongly-bucketed
+entries), and **family-bleed**. Component mismatches are printed as an *unscored diagnostic*:
+the expected component lists can only come from the algorithm's own output, so scoring them
+would be self-referential. The aggregate covers `category: quality` sites only; `harvest_completeness` sites
+(consent/login-walled, **< 100 elements** — e.g. `platform_disco` at ~29) are reported but
+excluded. That threshold is computed from the harvest, so a large site cannot be hand-tagged
+`harvest_completeness` to dodge a bad aggregate (the scorer rejects the mis-tag at load).
+
+## Authoring ground truth (how to stay independent)
+
+The whole value of this eval is that the ground truth is sourced *independently* of the
+algorithm but entirely from the **page** — never from off-page brand knowledge the algorithm
+can't see. To keep authoring from collapsing back into "copy the output," the rules are
+operationalized in [`probe.py`](probe.py) — run `uv run python eval/probe.py <site> '#hex' …`
+and it computes, from the frozen harvest, the evidence for each candidate color:
+
+- **Real vs phantom.** How many *elements* paint the color on each channel (bg/text/border).
+  Zero elements does **not** automatically mean "omit": the probe also reports the color's
+  screenshot **area** and whether it sits between two real colors (a quantizer **blend** =
+  phantom). A zero-element color with real area that is *not* a blend is an `AREA-ONLY` color
+  (gradient/background-image/body bg) — keep it once you've confirmed it's a real rendered
+  surface (not an artifact). Omitting these silently is the failure mode that would make the
+  eval drive the algorithm to *delete* real colors.
+- **Real use for cta/action/link.** The probe reports the **clickable** share of the painting
+  elements; a single non-clickable status dot does not earn a CTA role.
+- **One resolution.** The probe matches at the same tolerance the scorer uses, so what you author
+  is what gets scored. Two same-role colors closer than the tolerance are one color (the scorer
+  rejects the YAML otherwise).
+- **Role and hex both come from the page.** Which elements paint the color (and whether they're
+  clickable) decides the role; the rendered cluster color is the hex. A declared token *name*
+  may help label the role, but actual element usage is the truth — a token a brand declares but
+  the page does not paint earns no role. Published brand guidelines may only help *label* a
+  color already on the page; they never add or require one that isn't there.
+
+Record where each value came from in the `source:` note. The component lists beside each role
+are informational (unscored), so author them from the dump for documentation, not for scoring.
 
 ## Maintaining the panel
 

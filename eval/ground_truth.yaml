@@ -2,11 +2,21 @@
 #
 # WHAT THIS IS
 # ------------
-# The eval's independent *anchor*: expected colors sourced from each site's own declared
-# design tokens + published brand guidelines (tokens-primary, guidelines-confirm), reviewed
-# and locked by a human. This is what makes the eval non-self-referential, unlike the golden
-# snapshots in tests/golden/ (which are regenerated from the algorithm's own output and can
-# only catch drift, never wrongness).
+# The eval's independent *anchor*: the colors each page ACTUALLY renders and how it uses them,
+# read from the frozen harvest (its declared design-token values + the measured computed color
+# of every element), reviewed and locked by a human. This is what makes the eval non-self-
+# referential, unlike the golden snapshots in tests/golden/ (which are regenerated from the
+# algorithm's own output and can only catch drift, never wrongness).
+#
+# CRITICAL — page-sourced, NOT brand-sourced. The ground truth is what is ON THE PAGE, full
+# stop. A color a brand declares as its "primary" but that the page does not actually paint in
+# that role is NOT in the GT (if every CTA on the page is white, white is the correct `cta`
+# answer). The algorithm sees only the page; if the GT required brand knowledge the algorithm
+# can't see (e.g. a hex looked up on the web), the algorithm could never match it and the EVAL
+# would be wrong, not the algorithm. Published brand guidelines may be consulted ONLY to LABEL
+# or disambiguate a color that is already on the page — never to add or require one that isn't.
+# There is no primary/secondary/accent framing here (the library dropped it for the same
+# reason): only usage roles, ranked as the page's own usage warrants.
 #
 # FORMAT — one canonical color-keyed table per site
 # -------------------------------------------------
@@ -35,15 +45,37 @@
 #
 # A role with NO color listing it is expected to be EMPTY; any output there is noise.
 # We do NOT pin area/prominence/probability/divergence — only which colors are used, and how.
+# COMPONENT lists are an unscored DIAGNOSTIC (the scorer cannot judge them independently —
+# their only source is the algorithm's output — so they inform, they don't pass/fail).
 #
-# MATCHING: a predicted color matches an expected one within OKLab ΔE `tolerance` (default
-# 0.06 — covers anti-alias/quantization drift, rejects a genuinely different hue). NOTE:
-# OKLab ΔE is very sensitive near black — #000000 vs #0a0a0a is 0.145 (NOT a near-dupe) —
-# so list each near-black variant a site actually renders; do not assume they collapse.
-# Mid grays ~0.045 apart (e.g. #737373/#666666) do collapse under the default tolerance.
+# AUTHORING RULES (operationalized so two authors converge — use `eval/probe.py <site> <hex>`,
+# which computes all of this from the frozen harvest):
+#   * TOLERANCE is the eval's resolution: perceptual ΔE2000, default 1.0 (see colormetric.py).
+#     Author at it, not finer. Two colors a site renders that are < tolerance apart in ANY role
+#     are ONE color (a color is a color) — list one entry whose `roles` is their union. The
+#     scorer REJECTS the YAML at load if you list both. (Near-black is the exception that proves
+#     the rule: #000000 vs #0a0a0a are ΔE2000 1.59 — genuinely distinct, list both; #090909 vs
+#     #0a0a0a are 0.16 — one color. The split is decided by ΔE2000 vs tolerance, never by eye.)
+#     Prefer distinct GT colors >= 2x tolerance apart: a single output cluster can fall within
+#     tolerance of TWO GT colors in the (tol, 2*tol) band and be credited to both (bounded
+#     over-credit). The validator only forbids < tol; the 1.59 near-black pair is the one we accept.
+#   * REAL vs PHANTOM: a color the algorithm emits is authored only if real ELEMENTS paint it
+#     (probe counts them per channel). Zero elements + screenshot area can still be a PHANTOM
+#     (a median-cut quantizer blend of two real colors — probe detects this) OR a real area
+#     color with no element bg (gradient/image/body — probe flags it "AREA-ONLY, verify vs
+#     brand guideline"). List the latter, omit the former. A semi-transparent gradient stop is
+#     recorded by its STOP hex (the brand color, what the pipeline keys to), not the composited
+#     rendered pixel — design-intent, the one place the GT hex isn't the literal painted pixel.
+#   * REAL USE for cta/action/link: the color must be painted by CLICKABLE elements (probe
+#     reports the clickable share). A single non-clickable status dot is NOT a CTA.
+#   * ROLE + HEX both come from the PAGE: which elements paint the color (and whether they're
+#     clickable) decides the role; the rendered cluster color is the hex. A declared token name
+#     may help LABEL the role, but actual element usage is the truth — a token declared but not
+#     painted on the page earns no role.
 #
-# `category: quality` sites count toward the aggregate scorecard. `harvest_completeness`
-# sites (consent/login-walled, too few elements) are reported but NOT aggregated.
+# `category: quality` sites count toward the aggregate. `harvest_completeness` (consent/login-
+# walled, < 100 elements) are reported but NOT aggregated — and the category is CHECKED against
+# the harvest's element count at load, so it can't be mis-tagged to dodge a bad score.
 #
 # STATUS: shadcn + vercel are harvest-evidence-validated worked examples (the format
 # template). The other 10 sites are NOT YET authored in this shape — pending.
@@ -66,16 +98,16 @@ sites:
           page: [page_bg]
           surface: [card_bg, hero_bg, input_bg]
           banner: [header_bg]
-          cta: [cta_bg]        # outline/ghost buttons (secondary); primary CTA is black
+          cta: [cta_bg]        # outline/ghost buttons; the default solid button is near-black
           action: [badge]      # outline badges
       - hex: "#0a0a0a"
-        source: "--foreground as rendered (~zinc-950): the dominant body text + primary button"
+        source: "--foreground as rendered (~zinc-950): the dominant body text + links. NOT a
+          button bg — 0 elements paint it as background (probe); the solid CTA button is #171717."
         roles:
           text: [page_text, card_text, hero_text]
           link: [link]
-          cta: [cta_bg]        # the primary (default) button is near-black
       - hex: "#000000"
-        source: "pure black: also present as body text / links (distinct from #0a0a0a in OKLab)"
+        source: "pure black: also present as body text / links (distinct from #0a0a0a: ΔE2000 1.59)"
         roles:
           text: [page_text, card_text, hero_text]
           link: [link]
@@ -90,8 +122,12 @@ sites:
         roles:
           border: [border]
       - hex: "#171717"
-        source: "zinc-900: borders of small form controls (checkbox, switch) — minor"
+        source: "zinc-900: the solid CTA button bg (3 clickable bg elements, probe) + borders of
+          small form controls (checkbox, switch). The macOS pipeline blends the small button into
+          a #090909 quantizer artifact and so under-emits this as cta — a known pipeline limit the
+          eval surfaces; the Linux render emits #171717 cta correctly."
         roles:
+          cta: [cta_bg]
           border: [border]
 
   # ===================================================================================
@@ -114,10 +150,10 @@ sites:
           page: [page_bg]
           surface: [card_bg, hero_bg]
           banner: [nav_bg, footer_bg]
-          cta: [cta_bg]        # white ghost buttons (secondary); primary CTA is black
+          cta: [cta_bg]        # white ghost buttons; the default solid button is black
           action: [badge]
       - hex: "#171717"
-        source: "Geist --foreground: body text, primary black button, dark sections, dark borders"
+        source: "Geist --foreground: body text, black solid button, dark sections, dark borders"
         roles:
           text: [page_text, card_text, hero_text]
           link: [link]

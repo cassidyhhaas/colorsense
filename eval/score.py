@@ -13,18 +13,31 @@ Why frozen harvests + a separate ground-truth file:
   page-to-page; pinning the harvested input isolates *code* changes from *page* changes
   (the "harvest-once / classify-many" technique) and lets the eval run with no network.
 * **Non-self-referential.** Goldens are regenerated from the algorithm's own output, so
-  they can only catch drift, never wrongness. The ground truth here is sourced
-  independently (each site's declared design tokens + published brand guidelines) and
-  reviewed by a human, so a panel-score change *means* something.
+  they can only catch drift, never wrongness. The ground truth here is sourced independently
+  but from the PAGE — the harvest's declared token values + the measured color of every
+  element, reviewed by a human — never from off-page brand knowledge the algorithm can't see,
+  so a panel-score change *means* something and is something the algorithm can actually reach.
 
 The ground truth is a single canonical **color-keyed** table per site (color -> roles ->
-components — see ``ground_truth.yaml``). From it the scorer derives BOTH views the library
-emits and checks each, surfacing three things a role-subset GT cannot:
+components — see ``ground_truth.yaml``). It records ONLY what the page actually renders and how
+it is used — never what a brand "should" use. From it the scorer derives BOTH views the library
+emits and checks each, surfacing things a role-subset GT cannot:
 
-* **recall**   — an expected color is absent from a role it should paint.
+* **recall**   — an expected color is absent from a role it should paint (computed per
+  expected color, so it is overlap-safe and order-independent).
 * **noise**    — a color lands in a role the GT does NOT list for it (mis-bucketing). A
   role no color lists is expected empty; any output there is noise.
-* **component** — a matched color is attributed to component types the GT doesn't expect.
+* **won**      — the role's top entry is an expected color. A page whose CTAs are white has
+  white as the correct `cta` answer; `won` does not assume a brand color "should" lead (the
+  library no longer has a primary/secondary/accent frame, and neither does this eval).
+
+Component attribution is reported as an *unscored diagnostic only*: the expected component
+lists can only be sourced from the algorithm's own output, so scoring them would be self-
+referential (the trap this eval exists to avoid). Matching uses one tolerance shared with the
+authoring probe (``eval/probe.py``); two colors closer than it in one role are merged, enforced
+at load. The harvest is scored on its own captured viewport. ``category`` is derived from the
+harvest's element count, not trusted from the YAML, so a large site can't be hand-tagged
+``harvest_completeness`` to escape the aggregate.
 
 Run:  ``uv run python eval/score.py``                (full panel scorecard)
       ``uv run python eval/score.py shadcn vercel``  (named sites)
@@ -44,10 +57,11 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+from colormetric import IDENTITY_TOLERANCE, pdelta  # same dir; perceptual ΔE2000 metric
 
 from colorsense.classify.components import classify_components
 from colorsense.classify.tokens import classify_tokens
-from colorsense.color.primitives import delta_e, parse_css_color
+from colorsense.color.primitives import parse_css_color
 from colorsense.config import load_default_config
 from colorsense.models import (
     Color,
@@ -65,10 +79,30 @@ EVAL_DIR = Path(__file__).parent
 HARVEST_DIR = EVAL_DIR / "harvests"
 GROUND_TRUTH = EVAL_DIR / "ground_truth.yaml"
 
-# Default per-site OKLab ΔE tolerance for "this predicted color matches the expected one".
-# 0.06 comfortably covers anti-alias/quantization drift (sub-0.04, per the golden tol of
-# 0.10) without accepting a genuinely different hue; overridable per site in the YAML.
-DEFAULT_TOLERANCE: float = 0.06
+# Default per-site ΔE2000 tolerance for "this predicted color matches the expected one".
+# In CIEDE2000 units via `pdelta` (see colormetric.py for why perceptual, not OKLab): measured
+# cross-OS jitter for GT colors is ~0 and the tightest legitimately-distinct GT pair is 1.59, so
+# 1.0 sits in that gap. Overridable per site in the YAML.
+#
+# This tolerance is the eval's *resolution*: it is the SAME tolerance authors must use when
+# deciding whether two rendered colors are "the same" while authoring ground_truth.yaml.
+# Authoring at a finer resolution than the scorer can distinguish (e.g. listing two near-
+# identical grays the scorer will merge) makes the GT author-dependent and corrupts recall —
+# so two colors closer than this (in any role) are one color, enforced globally at load time.
+DEFAULT_TOLERANCE: float = IDENTITY_TOLERANCE
+
+# A harvest with fewer than this many visible elements is too thin to score for *quality*
+# (consent/login walls, lazy SPAs) — it is reported under `harvest_completeness` and excluded
+# from the aggregate. Computed from the harvest, not trusted from the YAML, so a large site
+# cannot be hand-tagged `harvest_completeness` to dodge a bad aggregate score.
+COMPLETENESS_MAX_ELEMENTS: int = 100
+
+# Family-bleed = the SAME color reported as both a background and an element-color winner.
+# "Same" here is the identity tolerance: ΔE2000 is perceptually uniform, so (unlike OKLab) it
+# does not over-compress near-blacks, and one tolerance serves both matching and bleed — a
+# winner within IDENTITY_TOLERANCE of a GT background color (and not itself a sanctioned
+# element color) is a leaked surface hex.
+BLEED_EPS: float = IDENTITY_TOLERANCE
 
 # Background roles, used by the family-bleed check: a text/link/border winner that matches
 # one of these roles' colors has leaked a surface hex into an element-color answer.
@@ -95,7 +129,6 @@ class GTColor:
 class GTSite:
     category: str
     tolerance: float
-    viewport: dict[str, Any]
     colors: tuple[GTColor, ...]
 
     def expected_for(self, role: UsageRole) -> list[GTColor]:
@@ -108,6 +141,29 @@ def _parse_color(hx: str) -> Color:
     if color is None:
         raise ValueError(f"ground_truth.yaml: unparseable color {hx!r}")
     return color
+
+
+def _validate_separation(name: str, colors: tuple[GTColor, ...], tol: float) -> None:
+    """Reject two GT colors closer than ``tol`` — GLOBALLY, across all roles.
+
+    The GT is color-keyed: one entry per color, carrying every role it paints. Two distinct
+    entries within ``tol`` are the same color to the scorer regardless of role — in
+    ``_score_color_view`` both match the single emitted cluster within tolerance, so one entry
+    has its roles satisfied and the other spuriously reports absent/missing_roles. A role-scoped
+    check misses this when the two colors sit in *different* roles, yet they still collide on the
+    one output entry. A color is a color: merge them into ONE GT entry whose ``roles`` is the
+    union. (The near-black lesson still holds the other way: variants > tol apart stay split.)
+    """
+    for i, a in enumerate(colors):
+        for b in colors[i + 1 :]:
+            d = pdelta(a.color, b.color)
+            if d <= tol:  # `<=`, matching the scorer's `<= tol` so a pair at exactly tol (which
+                # the matcher would merge onto one cluster) is rejected here too.
+                raise ValueError(
+                    f"ground_truth.yaml: {name} lists {a.hex} and {b.hex} only ΔE {d:.4f} apart "
+                    f"(<= tolerance {tol}); the scorer matches both to one output cluster — merge "
+                    f"them into one GT color whose `roles` is the union of theirs."
+                )
 
 
 def _load_gt() -> dict[str, GTSite]:
@@ -128,11 +184,13 @@ def _load_gt() -> dict[str, GTSite]:
                     roles=roles,
                 )
             )
+        tolerance = float(spec.get("tolerance", DEFAULT_TOLERANCE))
+        colors_t = tuple(colors)
+        _validate_separation(name, colors_t, tolerance)
         sites[name] = GTSite(
             category=spec.get("category", "quality"),
-            tolerance=float(spec.get("tolerance", DEFAULT_TOLERANCE)),
-            viewport=spec.get("viewport", {}),
-            colors=tuple(colors),
+            tolerance=tolerance,
+            colors=colors_t,
         )
     return sites
 
@@ -210,12 +268,16 @@ def _run_pipeline(harvest: Harvest, viewport: Viewport) -> ThemePalette:
 
 
 def _nearest(predicted: Color, candidates: list[GTColor], tol: float) -> GTColor | None:
-    """The closest GT color within ``tol``, or None (so we can read its accepted comps)."""
+    """The closest GT color within ``tol``, or None (so we can read its accepted comps).
+
+    Deterministic: strictly-closer wins, ties broken by hex so the result never depends on
+    YAML row order (the scorer must be reproducible regardless of how the GT was typed).
+    """
     best: GTColor | None = None
-    best_d = tol
+    best_d = tol + 1.0
     for cand in candidates:
-        d = delta_e(predicted, cand.color)
-        if d <= best_d:
+        d = pdelta(predicted, cand.color)
+        if d <= tol and (d < best_d or (d == best_d and best is not None and cand.hex < best.hex)):
             best, best_d = cand, d
     return best
 
@@ -227,20 +289,21 @@ def _score_role(
     bg_colors: list[Color],
     tol: float,
 ) -> RoleScore:
-    accepted = {c.hex for c in expected}
     scored: list[EntryScore] = []
-    found: set[str] = set()
     for i, e in enumerate(entries):
         match = _nearest(e.color, expected, tol)
         if match is not None:
-            found.add(match.hex)
             extra = tuple(sorted(c.value for c in e.components if c not in match.roles[role]))
         else:
             extra = ()
+        # A bleed is a background color leaking into an element-color WINNER — but only when
+        # that color isn't itself sanctioned for this element role (a neutral the GT lists as
+        # both text and a dark surface, e.g. vercel #171717, is legit dual-use, not a leak).
         bled = (
             role in _ELEMENT_COLOR_ROLES
             and i == 0
-            and any(delta_e(e.color, bg) <= 1e-6 for bg in bg_colors)
+            and match is None
+            and any(pdelta(e.color, bg) <= BLEED_EPS for bg in bg_colors)
         )
         scored.append(
             EntryScore(
@@ -251,7 +314,11 @@ def _score_role(
                 extra_components=extra,
             )
         )
-    missing = tuple(sorted(h for h in accepted if h not in found))
+    # Recall is computed per EXPECTED color independently (overlap-safe): a GT color is
+    # "present" iff ANY output entry is within tol of it. The old "credit only the nearest
+    # entry's match" logic under-counted when one prediction sat between two GT colors.
+    found = {gtc.hex for gtc in expected if any(pdelta(e.color, gtc.color) <= tol for e in entries)}
+    missing = tuple(sorted(c.hex for c in expected if c.hex not in found))
     present = tuple(sorted(found))
     return RoleScore(
         role=role.value,
@@ -263,19 +330,25 @@ def _score_role(
 
 
 def _score_color_view(palette: ThemePalette, gt: GTSite) -> tuple[ColorViewMismatch, ...]:
-    """Check the color-keyed index: each GT color's roles vs its `usages`."""
+    """Check the color-keyed index: each GT color's roles vs its `usages`.
+
+    Matching is union-over-tolerance, NOT nearest-only. When the pipeline emits more than one
+    cluster within ``tolerance`` of a single GT color (e.g. anti-alias variants of one surface
+    that cluster apart but both fall within the identity tolerance of the GT hex), those clusters
+    are indistinguishable to the scorer — they are "the same color." The GT color's roles are
+    therefore checked against the UNION of every within-tolerance cluster's roles. Nearest-only
+    would credit just one cluster and spuriously flag the roles carried by the others as missing —
+    the symmetric counterpart of the GT-side global-separation rule, and consistent with the
+    overlap-safe per-color recall in ``_score_role``.
+    """
     out: list[ColorViewMismatch] = []
     for gtc in gt.colors:
-        match = min(
-            (cu for cu in palette.colors if delta_e(cu.color, gtc.color) <= gt.tolerance),
-            key=lambda cu: delta_e(cu.color, gtc.color),
-            default=None,
-        )
-        if match is None:
+        matches = [cu for cu in palette.colors if pdelta(cu.color, gtc.color) <= gt.tolerance]
+        if not matches:
             out.append(ColorViewMismatch(gtc.hex, absent=True, missing_roles=(), extra_roles=()))
             continue
         gt_roles = set(gtc.roles)
-        out_roles = {u.role for u in match.usages}
+        out_roles = {u.role for cu in matches for u in cu.usages}
         missing = tuple(sorted(r.value for r in gt_roles - out_roles))
         extra = tuple(sorted(r.value for r in out_roles - gt_roles))
         if missing or extra:
@@ -288,15 +361,35 @@ def _score_color_view(palette: ThemePalette, gt: GTSite) -> tuple[ColorViewMisma
 def _score_site(name: str, gt: GTSite) -> SiteScore:
     with gzip.open(HARVEST_DIR / f"{name}.json.gz") as fh:
         harvest = Harvest.model_validate_json(fh.read())
-    viewport = Viewport(
-        width=gt.viewport.get("width", 1280),
-        height=gt.viewport.get("height", 800),
-        device_scale_factor=gt.viewport.get("dsf", 1.0),
-    )
-    palette = _run_pipeline(harvest, viewport)
 
+    # The category is derived from the harvest, not trusted from the YAML: a site with enough
+    # elements to score for quality cannot be hand-tagged `harvest_completeness` to dodge the
+    # aggregate. (A thin site tagged `quality` is allowed but warned — the author may want the
+    # recall signal anyway.)
+    n = len(harvest.elements)
+    auto = "harvest_completeness" if n < COMPLETENESS_MAX_ELEMENTS else "quality"
+    category = gt.category
+    if gt.category == "harvest_completeness" and auto == "quality":
+        raise ValueError(
+            f"ground_truth.yaml: {name} is tagged harvest_completeness but has {n} elements "
+            f"(>= {COMPLETENESS_MAX_ELEMENTS}); it cannot be excluded from the quality aggregate."
+        )
+    if gt.category == "quality" and auto == "harvest_completeness":
+        print(
+            f"warning: {name} tagged quality but only {n} elements (< "
+            f"{COMPLETENESS_MAX_ELEMENTS}) — likely a thin/walled harvest",
+            file=sys.stderr,
+        )
+
+    # Run on the viewport the harvest was actually captured at — classification area-fraction
+    # gates depend on it, so a mismatched default would silently change the output.
+    palette = _run_pipeline(harvest, harvest.viewport)
+
+    # Family-bleed compares an element-color winner against the GT's *known background*
+    # colors — not against the output's background entries, which can themselves contain the
+    # very leak (or a phantom) we're trying to detect, making the check circular.
     bg_colors: list[Color] = [
-        entry.color for role in _BG_ROLES for entry in palette.usage.mapping.get(role, ())
+        c.color for c in gt.colors if any(role in c.roles for role in _BG_ROLES)
     ]
 
     # Score EVERY role (not just the ones with expectations) so a color landing in a role
@@ -313,8 +406,8 @@ def _score_site(name: str, gt: GTSite) -> SiteScore:
     )
     return SiteScore(
         site=name,
-        category=gt.category,
-        elements=len(harvest.elements),
+        category=category,
+        elements=n,
         roles=role_scores,
         color_view=_score_color_view(palette, gt),
     )
@@ -376,7 +469,7 @@ def _print_human(scores: list[SiteScore]) -> None:
             bled += sum(e.bled for e in r.entries)
 
     def pct(n: int, d: int) -> str:
-        return f"{100 * n // d}%" if d else "n/a"
+        return f"{round(100 * n / d)}%" if d else "n/a"
 
     recall = f"{present_facts}/{expected_facts}  ({pct(present_facts, expected_facts)})"
     winners = f"{won_roles}/{roles_with_exp}  ({pct(won_roles, roles_with_exp)})"
@@ -385,8 +478,11 @@ def _print_human(scores: list[SiteScore]) -> None:
     print(f"  recall (expected colors present) : {recall}")
     print(f"  role winners correct             : {winners}")
     print(f"  NOISE (colors in a wrong/empty role): {noise}")
-    print(f"  component mis-attributions       : {comp_mismatch}")
     print(f"  family-bleed                     : {bled}")
+    print(
+        f"  [diagnostic] component mismatches: {comp_mismatch}  "
+        "(derived from the algorithm's own output — informational, not a scored signal)"
+    )
     print("  legend: W=won(expected top)  +=present(expected)  !=NOISE  X=missing expected")
 
 
