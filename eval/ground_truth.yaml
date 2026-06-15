@@ -853,5 +853,57 @@ sites:
           text: [page_text]
           link: [link]
 
-  # --- NOT YET AUTHORED in the full-shape format (pending harvest-evidence pass) ---
-  # platform_disco (harvest_completeness)
+  # ===================================================================================
+  # platform_disco — LOGIN WALL (29 elements -> category: harvest_completeness, NOT
+  # aggregated). A purple->blue gradient page background (3D illustration) behind a white
+  # login card. Harvest-evidence authored AND visually cross-checked (1280px screenshot:
+  # gradient bg, white "Welcome back!" card, blue Log In button, blue links). The point of
+  # this site is to TRACK the thin-harvest gaps, which the eval is EXPECTED to surface:
+  #   * PAGE GRADIENT NOT SURFACED: the page bg is a real purple(#6761f7)->blue(#0b69ff)
+  #     gradient with no page_bg ELEMENT (a CSS/body gradient), so the pipeline's `page`
+  #     role is EMPTY -> both page colors are recall misses.
+  #   * REAL CTA BURIED: the actual Log In button is #0b69ff (a flat-blue clickable
+  #     `login-view-login-button`, 3552px), but the pipeline ranks the area-only page-
+  #     gradient purple #6761f7 as the `cta` winner -> #6761f7 cta noise + #0b69ff miss.
+  # ===================================================================================
+  platform_disco:
+    category: harvest_completeness
+    colors:
+      - hex: "#6761f7"
+        source: "purple stop of the page background gradient (area-only, 0.015 area, no element)"
+        roles:
+          page: [page_bg]
+      - hex: "#0b69ff"
+        source: "blue: the page-gradient blue stop AND the real Log In CTA button (flat-blue
+          clickable `login-view-login-button`, 3552px)"
+        roles:
+          page: [page_bg]
+          cta: [cta_bg]
+      - hex: "#ffffff"
+        source: "white: the login card + input field surfaces (3 bg, non-clickable)"
+        roles:
+          surface: [card_bg, input_bg]
+      - hex: "#5793ff"
+        source: "blue links ('Forgot Password?' / 'Sign up', 2 clickable text)"
+        roles:
+          link: [link]
+      - hex: "#000000"
+        source: "black: the 'Welcome back!' heading + form text (20 text, non-clickable)"
+        roles:
+          text: [hero_text, page_text]
+      - hex: "#7e858e"
+        source: "gray field labels (5 text, non-clickable)"
+        roles:
+          text: [page_text]
+      - hex: "#576171"
+        source: "darker gray text (1 text, non-clickable)"
+        roles:
+          text: [page_text]
+      - hex: "#d7dee9"
+        source: "the input field borders (2 border)"
+        roles:
+          border: [border]
+      - hex: "#f8f8f8"
+        source: "near-white link/label (1 clickable text)"
+        roles:
+          link: [link]
