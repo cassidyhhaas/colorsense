@@ -789,6 +789,68 @@ sites:
         roles:
           border: [border]
 
+  # ===================================================================================
+  # notion — LIGHT theme. White + a merged cream off-white (#f6f5f3, absorbs #f7f7f5 /
+  # #f6f5f4 at ΔE2000 <= 0.9) alternate as section backgrounds; one dark-navy section +
+  # footer (#02083a). Primary CTA is blue (`buttonVariantPrimary`); a black CTA; warm-gray
+  # text ramp. Harvest-evidence authored (CTA + decorative-blue calls are class-backed).
+  # Findings the eval is EXPECTED to flag (real pipeline behavior, not GT errors):
+  #   * #62aef0 and #097fe8 (blues) appear ONLY as decorative filled-icon graphics (spans
+  #     class `graphic_graphic__/isFilled`, in agent/bento illustrations), not as the site's
+  #     text/link/CTA palette -> their text/link entries are noise.
+  # ===================================================================================
+  notion:
+    category: quality
+    colors:
+      - hex: "#ffffff"
+        source: "white: page canvas (33 bg, 0.44 area), cards, header/footer, white ghost CTA
+          buttons (6 clickable bg), white links/borders"
+        roles:
+          page: [page_bg]
+          surface: [card_bg]
+          banner: [header_bg, footer_bg]
+          cta: [cta_bg]
+          link: [link]
+          border: [border]
+      - hex: "#f6f5f3"
+        source: "Notion cream off-white: alternating section/card surfaces (11 bg, 0.40 area) +
+          light text/links on the dark navy section (116 text, 30 clickable). Absorbs the
+          #f7f7f5 / #f6f5f4 variants."
+        roles:
+          surface: [card_bg, hero_bg]
+          text: [page_text]
+          link: [link]
+      - hex: "#02083a"
+        source: "dark-navy section + footer bg (3 bg, 0.08 area, non-clickable)"
+        roles:
+          surface: [hero_bg, card_bg]
+          banner: [footer_bg]
+      - hex: "#455dd3"
+        source: "Notion blue: the primary CTA button (2 clickable `buttonVariantPrimary` <a>)"
+        roles:
+          cta: [cta_bg]
+      - hex: "#213183"
+        source: "darker-blue CTA button / gradient variant (1 clickable bg)"
+        roles:
+          cta: [cta_bg]
+      - hex: "#000000"
+        source: "black: a black CTA button (2 clickable bg) + the dominant body text (356 text,
+          126 clickable links) + borders (8)"
+        roles:
+          cta: [cta_bg]
+          text: [page_text, card_text, hero_text]
+          link: [link]
+          border: [border]
+      - hex: "#615d59"
+        source: "Notion warm-gray secondary text + links (17 text, 3 clickable)"
+        roles:
+          text: [page_text]
+          link: [link]
+      - hex: "#a39e98"
+        source: "Notion lighter warm-gray: muted text + links (78 text, 15 clickable)"
+        roles:
+          text: [page_text]
+          link: [link]
+
   # --- NOT YET AUTHORED in the full-shape format (pending harvest-evidence pass) ---
-  # notion (quality)
   # klarna, platform_disco (harvest_completeness)
