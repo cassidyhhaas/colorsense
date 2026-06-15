@@ -34,14 +34,17 @@ from __future__ import annotations
 
 import math
 
+from colorsense.color.primitives import ciede2000, contrast_ratio
 from colorsense.config import (
     Config,
+    ContrastRelabelConfig,
     GeometryThresholds,
     VoteRule,
     WhenRule,
 )
 from colorsense.models import (
     ClassifiedElement,
+    Color,
     ComponentType,
     HarvestedElement,
     Viewport,
@@ -129,6 +132,99 @@ def _paints_button_surface(element: HarvestedElement) -> bool:
         (element.bg is not None and element.bg.alpha > 0.0)
         or element.border is not None
         or len(element.bg_gradient_stops) > 0
+    )
+
+
+def _derive_page_canvas(elements: list[HarvestedElement]) -> Color | None:
+    """Best-effort page canvas color: the surface a genuine inline link reads against.
+
+    Classify does not otherwise know the page background. Derived deterministically with a
+    cheap pre-pass: prefer the ``<html>``/``<body>`` element's own opaque ``bg`` (the
+    canonical canvas), else the largest-area element that paints an opaque background.
+    Returns ``None`` only when nothing on the page paints an opaque background — in which
+    case the CTA-label relabel cannot fire (no canvas to compare against) and every
+    clickable label keeps its ``link`` vote. ``elements`` is in deterministic document
+    order, so the ``max``-area tie-break (first-seen on equal area) is stable.
+    """
+
+    def opaque_bg(element: HarvestedElement) -> Color | None:
+        bg = element.bg
+        return bg if bg is not None and bg.alpha >= 1.0 else None
+
+    # Canonical canvas: the root document elements, outermost first.
+    for tag in ("html", "body"):
+        for element in elements:
+            if element.tag == tag:
+                bg = opaque_bg(element)
+                if bg is not None:
+                    return bg
+
+    # Fallback: the largest opaque painted surface.
+    best: Color | None = None
+    best_area = -1.0
+    for element in elements:
+        bg = opaque_bg(element)
+        if bg is None:
+            continue
+        area = element.rect.width * element.rect.height
+        if area > best_area:
+            best_area = area
+            best = bg
+    return best
+
+
+def _is_cta_label(
+    element: HarvestedElement,
+    page_canvas: Color | None,
+    relabel: ContrastRelabelConfig,
+) -> bool:
+    """Whether a non-anchor clickable's text is a CTA-button LABEL, not an inline link.
+
+    The theme/contrast-relative discriminator. Four clauses, each guarding a distinct
+    failure mode so that genuine inline links survive — confirmed against the eval panel:
+
+    1. **Sits on an interactive fill** (``effective_bg_from_clickable``): the composited
+       background was painted by a clickable ancestor (the button), not a passive page or
+       section surface. Protects a non-anchor link inside a passive dark hero/section,
+       whose effective background is the section, not a button.
+    2. **The fill is a distinct surface** (``ciede2000(effective_bg, page_canvas) >
+       canvas_delta_e``): a clickable element whose fill IS the page color is effectively
+       on the page (text reads against the canvas) — keep it a link. This is an *identity*
+       comparison, so it uses **CIEDE2000** (not OKLab ``delta_e``): page canvases are
+       near-white/near-black, exactly where OKLab ΔE is least accurate.
+    3. **The text is legible on the fill** (``contrast_ratio(text, effective_bg) >=
+       wcag_min_contrast``): a real label's color is chosen to READ on its button. A
+       brand-colored link that merely overlaps a soft tinted clickable card (e.g. stripe's
+       orange ``#ff6118`` on a peach ``#ffe0d1`` fill, contrast ~2.4) is decorative
+       low-contrast styling, not a label — keep it a link.
+    4. **The text is illegible on the canvas** (``contrast_ratio(text, page_canvas) <
+       wcag_min_contrast``): a genuine inline link must be readable as page text. If the
+       text reads fine on the canvas it is not exclusively a button label — keep it a link
+       (protects dark text on a light tinted button, which is also a valid body/link color).
+
+    Anchors are excluded (``tag != "a"``): they are already routed by the
+    ``a & button_surface`` / ``a & !button_surface`` rules.
+
+    Known boundary (intentional): a fully *clickable card* — an entire content tile wrapped
+    in a link, its text on the card's own dark fill — relabels its text to ``cta_text`` too.
+    That is acceptable: a clickable element's text never reaches the ``text`` role anyway
+    (text-presence excludes clickables), so before this rule the card text landed only in
+    ``link`` (not a genuine inline link either); routing it to the CTA-label sink is at least
+    as correct, and no panel site regresses.
+    """
+    if element.tag == "a" or not element.clickable:
+        return False
+    if not element.effective_bg_from_clickable:
+        return False
+    text = element.text
+    effective_bg = element.effective_bg
+    if text is None or effective_bg is None or page_canvas is None:
+        return False
+    if ciede2000(effective_bg, page_canvas) <= relabel.canvas_delta_e:
+        return False
+    return (
+        contrast_ratio(text, effective_bg) >= relabel.wcag_min_contrast
+        and contrast_ratio(text, page_canvas) < relabel.wcag_min_contrast
     )
 
 
@@ -433,6 +529,8 @@ def classify_components(
     thresholds = classifier_config.geometry.thresholds
 
     repetition_members = _repetition_member_indices(elements, config)
+    page_canvas = _derive_page_canvas(elements)
+    relabel_config = classifier_config.contrast_relabel
 
     results: list[ClassifiedElement] = []
     for index, element in enumerate(elements):
@@ -482,6 +580,24 @@ def classify_components(
             _add_votes(vote_totals, classifier_config.third_party.votes_shadow_host)
         if element.vendor_match:
             _add_votes(vote_totals, classifier_config.third_party.votes_vendor_match)
+
+        # 7. CTA-label contrast relabel. A non-anchor clickable whose label text sits on its
+        # OWN distinct interactive fill (legible there, illegible on the page canvas) is a
+        # CTA-button LABEL, not an inline link. RELABEL all its accumulated text-channel
+        # `link` mass to `cta_text` (the unrouted button-label sink). A structural mass-MOVE,
+        # not a per-rule tweak, because `link` reaches such an element from several feature
+        # families at once (the generic `clickable` rule AND the `area<=small_area & clickable`
+        # geometry rule are both link sources on a small CTA label); moving the accumulated
+        # total is the only way to fully re-route it. The move preserves total text-channel
+        # mass (`channel_for(cta_text) == channel_for(link) == "text"`), so the per-channel
+        # recombination weights are unchanged and the bg channel never gains mass — the hard
+        # S27 lesson that DELETING link regresses cta/surface noise.
+        if _is_cta_label(element, page_canvas, relabel_config):
+            link_mass = vote_totals.pop(ComponentType.link, 0.0)
+            if link_mass > 0.0:
+                vote_totals[ComponentType.cta_text] = (
+                    vote_totals.get(ComponentType.cta_text, 0.0) + link_mass
+                )
 
         # Suppressors, then softmax/prune/renormalize.
         _apply_suppressors(vote_totals, element, config)

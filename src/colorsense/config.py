@@ -362,6 +362,36 @@ class ThirdPartyConfig(BaseModel):
     vendor_prefixes: tuple[str, ...]
 
 
+class ContrastRelabelConfig(BaseModel):
+    """Thresholds for the CTA-label contrast relabel (see ``classify.components``).
+
+    A non-anchor clickable element whose label text sits on its own distinct interactive
+    fill — legible against that fill but illegible on the page canvas — is a CTA *label*,
+    not an inline link: its text-channel ``link`` vote is relabeled to ``cta_text``
+    (channel-preserving). The predicate compares the element's composited ``effective_bg``
+    against the derived page canvas with ``ciede2000`` and tests text legibility with the
+    WCAG ``contrast_ratio``. Both thresholds are principled constants, not panel-fitted:
+    ``wcag_min_contrast`` is the WCAG 2.x legibility floor and ``canvas_delta_e`` is the
+    perceptual just-noticeable-difference floor that defines color identity.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    # WCAG legibility floor separating "text is readable on this background" from "it is
+    # not". 4.5 is AA for normal text (3.0 = AA large text, 7.0 = AAA); the panel delta is
+    # flat across that range — the discriminating cases sit far from any plausible cut — so
+    # the canonical AA value is chosen.
+    wcag_min_contrast: float = Field(gt=1.0, le=21.0)
+    # CIEDE2000 ΔE above which ``effective_bg`` counts as a NON-canvas fill. This is an
+    # identity comparison ("is this fill the same color as the page?"), so it uses CIEDE2000
+    # — OKLab ``delta_e`` is materially less accurate near white/black, where page canvases
+    # live. 1.0 is the just-noticeable-difference floor, matching the eval's measured,
+    # OS-jitter-validated ``IDENTITY_TOLERANCE`` (``eval/colormetric.py``): below it two
+    # colors are "the same color", so an ``effective_bg`` within 1.0 ΔE2000 of the canvas IS
+    # the canvas (the element sits on the page, not on a distinct button fill).
+    canvas_delta_e: float = Field(gt=0.0)
+
+
 class Suppressor(BaseModel):
     """A multiplicative veto applied after vote summation.
 
@@ -396,6 +426,7 @@ class ComponentClassifierConfig(BaseModel):
     third_party: ThirdPartyConfig
     suppressors: dict[str, Suppressor]
     brand_components: tuple[str, ...]
+    contrast_relabel: ContrastRelabelConfig
 
     @model_validator(mode="after")
     def _validate_dispatch_names(self) -> ComponentClassifierConfig:

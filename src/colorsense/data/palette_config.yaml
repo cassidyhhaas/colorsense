@@ -349,6 +349,16 @@ component_classifier:
     # former semantic `a` weight so unfilled inline links are unchanged.
     - {when: "a & !button_surface",     votes: {link: 4.5}}
     - {when: "a & button_surface",      votes: {cta_text: 4.5}}
+    # Non-anchor companion to the anchor rules. The rules above feed EVERY clickable a
+    # text-channel `link` vote (the generic `clickable` rule's `link:1.0`, the small-clickable
+    # geometry rule's `link:1.5`); for a button LABEL that is a span/div/svg/path descendant of
+    # a CTA, that white-on-dark text wrongly lands in `link`. `classify.components` relabels it
+    # to `cta_text` (channel-preserving) when its composited `effective_bg` is a distinct
+    # interactive fill the text is legible on but illegible on the page canvas — the
+    # contrast-relative signature of a CTA label vs a genuine inline link (legible on the page's
+    # own reading surface). Thresholds live in `contrast_relabel` below; there is no additive
+    # vote rule here because the effect is the in-code relabel, gated on harvested signals
+    # (`effective_bg`, `effective_bg_from_clickable`) a YAML predicate cannot express.
 
   # --- Feature family 4b: border presence. ------------------------------------
   # Applied to any element whose harvested `border` is non-None — the harvester
@@ -402,3 +412,16 @@ component_classifier:
   brand_components:
     [header_bg, header_text, hero_bg, hero_text, cta_bg, cta_text, link,
      card_bg, card_text, page_bg, page_text, border]
+
+  # --- CTA-label contrast relabel thresholds. ---------------------------------
+  # Drives the in-code relabel documented in the interactivity block above. A non-anchor
+  # clickable whose composited `effective_bg` is a non-canvas fill (CIEDE2000 ΔE >
+  # canvas_delta_e from the derived page canvas), whose text is legible there
+  # (contrast >= wcag_min_contrast) but illegible on the canvas (contrast < wcag_min_contrast),
+  # is a CTA *label*: its `link` vote is relabeled to `cta_text`. 4.5 is the WCAG AA
+  # normal-text floor. canvas_delta_e is a color-IDENTITY threshold, so it is CIEDE2000 (not
+  # OKLab — OKLab ΔE is inaccurate near white/black, where canvases live): 1.0 ΔE2000 is the
+  # just-noticeable-difference floor, matching the eval's measured `IDENTITY_TOLERANCE`.
+  contrast_relabel:
+    wcag_min_contrast: 4.5
+    canvas_delta_e: 1.0

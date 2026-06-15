@@ -7,6 +7,20 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- Non-anchor CTA-button **labels** no longer leak into the `link` usage role. The harvester
+  now records each element's composited *effective background* (the first fully-opaque
+  background up its ancestor chain) and whether that background is painted by a clickable
+  ancestor (`HarvestedElement.effective_bg` / `effective_bg_from_clickable`). Using this
+  theme/contrast-relative signal, the classifier relabels a non-anchor clickable's `link`
+  vote to `cta_text` when its text sits on a distinct interactive fill it is legible on (WCAG
+  contrast ≥ 4.5) but illegible on the page canvas — the signature of a button label rather
+  than a genuine inline link. Brand-colored links on tinted clickable cards, links inside
+  passive dark sections, and ordinary dark-on-light text are all protected. This completes
+  the "A2" attribution work begun in 0.6.0 (which handled button-styled *anchors*). Golden
+  snapshots were regenerated (`ds_site`, `legacy_site`: button labels left the `link` role).
+
 ## [0.6.0] - 2026-06-14
 
 A **breaking** release that redesigns the measured "usage" view. The old 4-value

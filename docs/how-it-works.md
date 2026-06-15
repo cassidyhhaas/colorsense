@@ -201,6 +201,29 @@ interactive by definition and already routed through the link rules — letting 
 gap: typography in plain `<p>`/`<span>` content was previously never measured
 (github.com's muted `#59636e` was absent from `usage.text`).
 
+**CTA-label contrast relabel** — the generic `clickable` rule casts a `link: 1.0` vote on
+*every* clickable, so a button's text color lands in the `link` role. For a genuine inline
+anchor that is correct; for a button *label* — the `<span>`/`<svg>`/`<div>` descendants of a
+CTA that carry the button's text color — it is noise (vercel.com's white button labels showed
+up as a white "link"). Anchors are already split by the `a & button_surface` rule, but the
+non-anchor descendants are not. The distinguishing signal is *theme/contrast-relative*: a
+genuine inline link's text is legible against the page's own reading surface, whereas a CTA
+label's text is legible only against the button it sits on. The harvester records each
+element's composited **effective background** (the first fully-opaque background up its
+ancestor chain) and whether that background is itself clickable; the classifier then relabels
+a non-anchor clickable's `link` mass to `cta_text` (the unrouted button-label sink) when its
+text sits on a *distinct interactive fill* (effective background from a clickable ancestor,
+perceptually apart from the page canvas — a color-identity test, so CIEDE2000, which stays
+accurate near the white/black where canvases live, unlike OKLab ΔE), is **legible on that
+fill** (WCAG contrast ≥ 4.5),
+and is **illegible on the page canvas** (contrast < 4.5). Each clause guards a real case: the
+"from clickable" test keeps a link inside a passive dark hero; the legible-on-fill test keeps
+a brand-colored link on a soft tinted card (stripe.com's orange `#ff6118`, contrast ~2.4 on
+its peach fill — decorative styling, not a readable label); the illegible-on-canvas test keeps
+dark text that would also read as ordinary body text. The relabel *moves* the vote within the
+text channel rather than deleting it, so the per-channel recombination weights are unchanged
+and no mass shifts onto the background channel.
+
 ## 3. Building the color inventory
 
 `palette/inventory.py` fuses the screenshot's *area truth* with the elements' *semantic

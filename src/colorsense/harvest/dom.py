@@ -3,7 +3,9 @@
 Walks the rendered DOM in-page, capturing for each element its computed ``background-color`` /
 ``color`` / ``border-color`` (parsed to [`Color`][colorsense.Color]), bounding rect, position,
 tag/role/id/class tokens, the input ``type`` attribute (``<input>`` only), the opaque stops of
-a gradient that fills it (only for clickable pill CTAs), and structural flags
+a gradient that fills it (only for clickable pill CTAs), its composited *effective*
+background (the first fully-opaque ``background-color`` up the ancestor chain, plus whether
+that ancestor is itself clickable), and structural flags
 (iframe, cross-origin, shadow host, clickable, box shadow, direct text content, vendor match,
 visible, aria-hidden). Hidden, zero-area, or aria-hidden elements are excluded from the returned
 list (their flags are still computed on what is returned).
@@ -113,6 +115,8 @@ class _RawElement(TypedDict):
     input_type: str | None
     min_corner_radius: float
     bg_image_colors: list[str]
+    effective_bg: str
+    effective_bg_from_clickable: bool
     has_box_shadow: bool
     has_text: bool
     is_iframe: bool
@@ -166,6 +170,44 @@ _COLLECT_DOM_JS: str = r"""
             node = parent;
         }
         return parts.join(' > ');
+    };
+
+    // Whether a node renders as interactive (matches the per-element `clickable` rule
+    // below). Used both for the element's own flag and to tag the ancestor that paints
+    // an element's effective background.
+    const isClickable = (node, s) => {
+        const t = node.tagName.toLowerCase();
+        const r = node.getAttribute('role');
+        const it = (node.getAttribute('type') || '').toLowerCase();
+        const submit = t === 'input' && ['submit', 'button', 'reset', 'image'].includes(it);
+        return t === 'a' || t === 'button' || r === 'button'
+            || node.hasAttribute('onclick') || submit || s.cursor === 'pointer';
+    };
+
+    // The element's COMPOSITED background: the first fully-opaque background-color found
+    // walking the element itself and then its ancestors to the document root, plus whether
+    // the node that contributed it is itself clickable/button-styled. An inline element's
+    // own background-color is almost always transparent (alpha 0), so this recovers the
+    // surface its text is actually painted on — distinguishing a genuine inline link (text
+    // on a passive page/section surface) from a CTA-button label (text on the button's own
+    // interactive fill). Background-images/gradients are ignored: solid fills are the case
+    // this signal needs, and a gradient fill is already captured via bg_image_colors. ''
+    // (-> None in Python) means no opaque background exists up the chain.
+    const effectiveBg = (start) => {
+        let node = start;
+        while (node && node.nodeType === 1) {
+            const s = getComputedStyle(node);
+            const m = s.backgroundColor.match(/rgba?\(([^)]+)\)/);
+            if (m) {
+                const parts = m[1].split(',').map((x) => parseFloat(x));
+                const alpha = parts.length > 3 ? parts[3] : 1;
+                if (alpha >= 0.999) {
+                    return {color: s.backgroundColor, fromClickable: isClickable(node, s)};
+                }
+            }
+            node = node.parentElement;
+        }
+        return {color: '', fromClickable: false};
     };
 
     for (const el of document.querySelectorAll('*')) {
@@ -264,6 +306,8 @@ _COLLECT_DOM_JS: str = r"""
             (el.id || '') + ' ' + classList.join(' ') + ' ' + (el.getAttribute('src') || '')
         ).toLowerCase();
 
+        const effBg = effectiveBg(el);
+
         out.push({
             selector: cssSelector(el),
             tag: tag,
@@ -280,6 +324,8 @@ _COLLECT_DOM_JS: str = r"""
             input_type: (tag === 'input' && inputType !== '') ? inputType : null,
             min_corner_radius: minCornerRadius,
             bg_image_colors: bgImageColors,
+            effective_bg: effBg.color,
+            effective_bg_from_clickable: effBg.fromClickable,
             has_box_shadow: hasBoxShadow,
             has_text: hasText,
             is_iframe: isIframe,
@@ -357,6 +403,8 @@ async def harvest_elements(
                 input_type=raw["input_type"],
                 min_corner_radius=raw["min_corner_radius"],
                 bg_gradient_stops=gradient_stops,
+                effective_bg=parse_css_color(raw["effective_bg"]),
+                effective_bg_from_clickable=raw["effective_bg_from_clickable"],
                 has_box_shadow=raw["has_box_shadow"],
                 has_text=raw["has_text"],
                 is_iframe=raw["is_iframe"],

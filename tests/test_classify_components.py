@@ -7,12 +7,14 @@ import math
 import pytest
 
 from colorsense.classify.components import (
+    _derive_page_canvas,
     _finalize_distribution,
     _matches_interactivity,
     _matches_semantic_tag,
     _softmax_prune_renormalize,
     classify_components,
 )
+from colorsense.color.primitives import parse_css_color
 from colorsense.config import VoteRule, WhenRule, load_default_config
 from colorsense.models import (
     Color,
@@ -47,6 +49,8 @@ def _element(
     input_type: str | None = None,
     min_corner_radius: float = 0.0,
     bg_gradient_stops: tuple[Color, ...] = (),
+    effective_bg: Color | None = None,
+    effective_bg_from_clickable: bool = False,
     has_box_shadow: bool = False,
     has_text: bool = False,
     is_iframe: bool = False,
@@ -73,6 +77,8 @@ def _element(
         input_type=input_type,
         min_corner_radius=min_corner_radius,
         bg_gradient_stops=bg_gradient_stops,
+        effective_bg=effective_bg,
+        effective_bg_from_clickable=effective_bg_from_clickable,
         has_box_shadow=has_box_shadow,
         has_text=has_text,
         is_iframe=is_iframe,
@@ -370,6 +376,108 @@ def test_unfilled_anchor_is_link_filled_anchor_label_is_cta_text() -> None:
     [gradient_result] = classify_components([gradient], CONFIG, VIEWPORT)
     assert ComponentType.cta_text in gradient_result.component_dist
     assert ComponentType.link not in gradient_result.component_dist
+
+
+# --- CTA-label contrast relabel (A2 follow-on: the theme/contrast-relative signal) -------
+
+# Real-coord colors: the relabel reads cached OKLCH (delta_e) and sRGB luminance
+# (contrast_ratio), so fixtures must be parsed from hex, not the dummy-coord `_color`.
+_WHITE = parse_css_color("#ffffff")
+_DARK_FILL = parse_css_color("#171717")
+_LIGHT_CANVAS = parse_css_color("#fafafa")
+_ORANGE = parse_css_color("#ff6118")
+_PEACH_FILL = parse_css_color("#ffe0d1")
+assert _WHITE and _DARK_FILL and _LIGHT_CANVAS and _ORANGE and _PEACH_FILL  # parse never fails
+
+
+def _canvas_element() -> HarvestedElement:
+    """A full-page opaque body so `_derive_page_canvas` resolves to the light canvas."""
+    return _element(
+        tag="body",
+        bg=_LIGHT_CANVAS,
+        rect=Rect(x=0.0, y=0.0, width=1280.0, height=4000.0),
+    )
+
+
+def test_cta_label_on_own_fill_relabels_link_to_cta_text() -> None:
+    """A non-anchor white-text label on a dark CLICKABLE fill is a CTA label, not a link.
+
+    The motivating vercel case: a clickable ``<span>`` with white text whose composited
+    background is the button's own dark fill (``from_clickable=True``), legible on that fill
+    but illegible on the page canvas. Its ``link`` vote is relabeled to ``cta_text``.
+    """
+    label = _element(
+        tag="span",
+        text=_WHITE,
+        clickable=True,
+        effective_bg=_DARK_FILL,
+        effective_bg_from_clickable=True,
+    )
+    result = classify_components([label, _canvas_element()], CONFIG, VIEWPORT)[0]
+    assert ComponentType.cta_text in result.component_dist
+    assert ComponentType.link not in result.component_dist
+
+
+def test_genuine_inline_link_on_canvas_keeps_link() -> None:
+    """A clickable whose effective bg is the page canvas (not a button fill) stays a link."""
+    link = _element(
+        tag="span",
+        text=parse_css_color("#0072f5"),
+        clickable=True,
+        effective_bg=_LIGHT_CANVAS,
+        effective_bg_from_clickable=False,
+    )
+    result = classify_components([link, _canvas_element()], CONFIG, VIEWPORT)[0]
+    assert ComponentType.link in result.component_dist
+    assert ComponentType.cta_text not in result.component_dist
+
+
+def test_brand_link_on_tinted_clickable_card_keeps_link() -> None:
+    """Stripe ``#ff6118``: orange text low-contrast on a peach clickable card is NOT a label.
+
+    ``from_clickable=True`` and the fill is distinct from the canvas, but the text is NOT
+    legible on the fill (contrast ~2.4 < 4.5) — decorative brand-colored styling, not a
+    readable button label — so clause 3 protects it and it keeps ``link``.
+    """
+    brand_link = _element(
+        tag="div",
+        text=_ORANGE,
+        clickable=True,
+        effective_bg=_PEACH_FILL,
+        effective_bg_from_clickable=True,
+    )
+    result = classify_components([brand_link, _canvas_element()], CONFIG, VIEWPORT)[0]
+    assert ComponentType.link in result.component_dist
+    assert ComponentType.cta_text not in result.component_dist
+
+
+def test_text_legible_on_canvas_keeps_link() -> None:
+    """Dark text that reads fine on the canvas is a valid link color, even on a button fill.
+
+    Clause 4: a genuine inline link must be readable as page text. Dark ``#171717`` text on
+    a light fill is also legible on the light canvas, so it is not exclusively a button
+    label — keep it a link.
+    """
+    dark_on_light = _element(
+        tag="span",
+        text=_DARK_FILL,
+        clickable=True,
+        effective_bg=parse_css_color("#e5e5e5"),
+        effective_bg_from_clickable=True,
+    )
+    result = classify_components([dark_on_light, _canvas_element()], CONFIG, VIEWPORT)[0]
+    assert ComponentType.link in result.component_dist
+    assert ComponentType.cta_text not in result.component_dist
+
+
+def test_derive_page_canvas_prefers_body_over_largest_surface() -> None:
+    """`_derive_page_canvas` returns the <body> opaque bg even if a larger element exists."""
+    body = _element(tag="body", bg=_LIGHT_CANVAS, rect=Rect(x=0, y=0, width=100, height=100))
+    bigger = _element(tag="div", bg=_DARK_FILL, rect=Rect(x=0, y=0, width=2000, height=2000))
+    assert _derive_page_canvas([bigger, body]) == _LIGHT_CANVAS
+    # No opaque background anywhere -> None (relabel cannot fire).
+    transparent = _element(tag="div", bg=None)
+    assert _derive_page_canvas([transparent]) is None
 
 
 def test_anchor_is_dominant_link() -> None:

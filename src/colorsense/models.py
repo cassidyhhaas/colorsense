@@ -3,7 +3,19 @@
 These models are the single shared-contract surface for the pipeline. This file is
 **frozen** by design: downstream code must not modify it. A change to a contract here
 must be made centrally and re-validated against every dependent module, never patched
-locally by a consumer. (Most recent central change: the **usage-role payload redesign** —
+locally by a consumer. (Most recent central change:
+``HarvestedElement`` gained ``effective_bg: Color | None = None`` and
+``effective_bg_from_clickable: bool = False`` — the element's *composited* background
+(the first fully-opaque ``background-color`` found walking the element and its ancestors
+to the document root) and whether the ancestor that contributed it is itself
+clickable/button-styled. They give downstream classification the theme/contrast-relative
+context an inline element's own (usually transparent) ``bg`` lacks — distinguishing a
+genuine inline link, whose text sits on a passive page/section surface, from a CTA-button
+*label*, whose text sits on the button's own interactive fill. Both mirror the
+``has_text``/``input_type`` precedent (defaulted, the DOM harvester always sets them;
+``effective_bg`` is ``None`` only when no opaque background exists up the chain) and were
+re-validated against ``harvest.dom``, ``classify.components``, and every test constructing
+``HarvestedElement``. Previous central change: the **usage-role payload redesign** —
 the old 4-value ``UsageCategory`` (surface/text/interactive/border) was deleted and
 replaced by the 8-value developer-facing ``UsageRole``
 (page/surface/banner/cta/action/text/link/border), plus a first-class ``PropertyFamily``
@@ -349,6 +361,8 @@ class HarvestedElement(BaseModel):
     input_type: str | None = None
     min_corner_radius: float = 0.0
     bg_gradient_stops: tuple[Color, ...] = ()
+    effective_bg: Color | None = None
+    effective_bg_from_clickable: bool = False
     has_box_shadow: bool = False
     has_text: bool = False
     is_iframe: bool

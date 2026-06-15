@@ -7,7 +7,6 @@
         "banner",
         "border",
         "cta",
-        "link",
         "page",
         "surface",
         "text"
@@ -22,9 +21,6 @@
         ],
         "cta": [
           "#6a5e45"
-        ],
-        "link": [
-          "#ffffff"
         ],
         "page": [
           "#ffffff"
