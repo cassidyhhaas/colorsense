@@ -256,10 +256,9 @@ sites:
         source: "Primer muted gray link: its 2 text elements are BOTH clickable -> link, not body text"
         roles:
           link: [link]
-      - hex: "#5fed83"
-        source: "Primer success green as text accent (5 text elements)"
-        roles:
-          text: [page_text]
+      # OMITTED #5fed83 (success green): its only real glyph is a decorative
+      # `Testimonial__quoteMarkGlyph`; the rest are `Primer_Brand__Icon` green icons /
+      # images — decoration, not text. The pipeline's `text` entry for it is noise.
       - hex: "#7c8980"
         source: "muted gray-green text variant (2 text elements)"
         roles:
@@ -433,9 +432,9 @@ sites:
           text: [page_text, card_text, hero_text]
           link: [link]
       - hex: "#7c3bed"
-        source: "violet: solid + gradient pill CTAs ('Monetize Your Traffic', 'Book a Demo';
-          6 clickable bg + gradient stops on 3) + category badges (20 non-clickable bg) +
-          text/links (50 text, 17 clickable)"
+        source: "violet: gradient pill CTAs ('Monetize Your Traffic', 'Book a Demo') via
+          gradient stops on 3 clickable pills + category badges (26 bg; the clickable ones are
+          `h-5 w-5` corner icon chips, not pill CTAs) + text/links (50 text, 17 clickable)"
         roles:
           cta: [cta_bg]
           action: [badge]
@@ -493,6 +492,10 @@ sites:
   #     the site's text palette (cf. vercel) -> any text/action entry for them is noise.
   #     Evidence: every #f79ce0 span carries class `code-diff_keyword`, every #f7bf8b span
   #     `code-diff_variable` — syntax highlighting inside a code-diff illustration, 0 clickable.
+  # Deliberately EXCLUDED (decoration, not the marketing page's own surfaces): the dark
+  # #0f1011/#101112/#121314/#161718 panels are embedded Linear-APP mockup frames
+  # (`Frame_frameBackground`/`*_panel`/`Build_agentsPanel`), non-clickable product-UI demos
+  # (≤0.01 area each) — the app's chrome, not this page's palette (same basis as code samples).
   # ===================================================================================
   linear:
     category: quality
@@ -635,9 +638,11 @@ sites:
   #   * #1c202b (a 0-element blend of #030712 + pink-white, 0.10 area) is surfaced as the
   #     dark surface/banner instead of the REAL dark section color #030712 (46 bg, 1473
   #     text) -> #1c202b noise + #030712 surface recall miss.
-  #   * the chromatic code text (#fb64b6, #78d4ff, #96f7e4, #00a5ea, #e30076, #cbfbf1) is
-  #     syntax highlighting in dark code blocks (spans class `highlighted-word`/`font-mono`,
-  #     0 clickable), not the site text palette (cf. vercel/linear) -> noise.
+  #   * the chromatic code text (#fb64b6, #78d4ff, #96f7e4, #00a5ea, #cbfbf1) is syntax
+  #     highlighting in dark code blocks (spans class `highlighted-word`/`font-mono`, 0
+  #     clickable), not the site text palette (cf. vercel/linear) -> noise. #e30076 is a
+  #     small mixed pink accent (~3 `text-pink-600` feature labels + `font-mono`/SVG),
+  #     omitted as a below-palette chromatic accent -> its text entry is likewise noise.
   # ===================================================================================
   tailwindcss:
     category: quality
@@ -719,6 +724,8 @@ sites:
   #   * #00c65a (green) paints only two 8x8 `bg-green-500` status DOTS — not a CTA; the
   #     pipeline files it cta/action -> noise.
   #   * #010101 (= the page black) leaks into `action` as a 0.10-area badge -> noise.
+  #   * #a1fcea (neon-cyan) is Prism code-syntax (`token string font-mono`) + a small icon,
+  #     not the text palette (cf. vercel/linear/tailwind) -> its text/border entries are noise.
   # ===================================================================================
   resend:
     category: quality
@@ -772,15 +779,15 @@ sites:
         roles:
           text: [page_text]
       - hex: "#46fea5"
-        source: "neon-green accent: links (18 text, 13 clickable) + text"
+        source: "neon-green accent: status-badge links + text (18 text, 13 clickable;
+          glyphs class `bg-success text-success` — genuine UI, not code syntax)"
         roles:
           text: [page_text]
           link: [link]
-      - hex: "#a1fcea"
-        source: "neon-cyan accent text (15 text, non-clickable) + one border"
-        roles:
-          text: [page_text]
-          border: [border]
+      # OMITTED #a1fcea (neon-cyan): its text glyphs are Prism `token string font-mono`
+      # code-syntax inside a code sample, plus a `text-[#A1FCEA]` icon and a `rounded-sm`
+      # icon border — decoration, not the site text/border palette (cf. vercel/linear/
+      # tailwind). The pipeline's text/border entries for it are therefore noise.
       - hex: "#d6ebfd"
         source: "pale-blue: the canonical card divider/border (105 border)"
         roles:
@@ -799,6 +806,10 @@ sites:
   #   * #62aef0 and #097fe8 (blues) appear ONLY as decorative filled-icon graphics (spans
   #     class `graphic_graphic__/isFilled`, in agent/bento illustrations), not as the site's
   #     text/link/CTA palette -> their text/link entries are noise.
+  #   * RECALL MISSES (real page-truth the pipeline buries): #f6f5f3 surface (the cream
+  #     section bg, 11 bg / 0.40 area incl. a `homepage_lightGrayBg` div, collapsed into
+  #     white); #a39e98 text (surfaced only as link); #ffffff link (22 clickable white-text
+  #     elements not surfaced as links).
   # ===================================================================================
   notion:
     category: quality
@@ -863,21 +874,30 @@ sites:
   #     gradient with no page_bg ELEMENT (a CSS/body gradient), so the pipeline's `page`
   #     role is EMPTY -> both page colors are recall misses.
   #   * REAL CTA BURIED: the actual Log In button is #0b69ff (a flat-blue clickable
-  #     `login-view-login-button`, 3552px), but the pipeline ranks the area-only page-
-  #     gradient purple #6761f7 as the `cta` winner -> #6761f7 cta noise + #0b69ff miss.
+  #     `login-view-login-button`, 3552px, 0 screenshot area), but the pipeline can't
+  #     surface it (nearest cluster #6761f7 at ΔE 8.2) and instead ranks an area-only
+  #     page-gradient bin (#6761f7, 0.015 area) as the `cta` winner -> cta noise + miss.
+  # The page colors below are the gradient's DOMINANT rendered bins (area-truth); the
+  # continuous purple->blue gradient has no single representative hex and no page element,
+  # so they are area-only anchors, not element-sourced.
   # ===================================================================================
   platform_disco:
     category: harvest_completeness
     colors:
-      - hex: "#6761f7"
-        source: "purple stop of the page background gradient (area-only, 0.015 area, no element)"
+      - hex: "#578ffd"
+        source: "blue: the dominant rendered bin of the page background gradient (0.20 area,
+          the single largest bin). A CSS/body gradient with no page ELEMENT."
+        roles:
+          page: [page_bg]
+      - hex: "#5828b4"
+        source: "purple: the dominant rendered purple bin of the page background gradient
+          (0.12 area)"
         roles:
           page: [page_bg]
       - hex: "#0b69ff"
-        source: "blue: the page-gradient blue stop AND the real Log In CTA button (flat-blue
-          clickable `login-view-login-button`, 3552px)"
+        source: "the real Log In CTA button (flat-blue clickable `login-view-login-button`,
+          3552px). 0 page area — NOT a page-gradient color, cta only."
         roles:
-          page: [page_bg]
           cta: [cta_bg]
       - hex: "#ffffff"
         source: "white: the login card + input field surfaces (3 bg, non-clickable)"
