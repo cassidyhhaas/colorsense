@@ -548,6 +548,247 @@ sites:
         roles:
           border: [border]
 
+  # ===================================================================================
+  # supabase — LIGHT theme. Near-white canvas (#fcfcfc, 0.96 area; absorbs #fdfdfd at
+  # ΔE2000 0.20). Signature Supabase green #3fcf8e is the primary CTA; a grayscale text
+  # ramp; black corner icon-badge chips. Harvest-evidence authored. Findings the eval is
+  # EXPECTED to flag (real pipeline behavior, not GT errors):
+  #   * #afcfc0 (pale green) is a QUANTIZER BLEND of gray+pale-green (0 elements, 0.005
+  #     area) the pipeline ranks cta/action -> phantom noise.
+  #   * #000000 paints 54 small (20x20 `h-5 w-5`) absolute-positioned corner icon BADGE
+  #     chips (action), not CTAs; the pipeline buries it -> action recall miss.
+  # ===================================================================================
+  supabase:
+    category: quality
+    colors:
+      - hex: "#fcfcfc"
+        source: "near-white: page canvas (0.96 area), card/panel surfaces, header/footer,
+          white ghost CTA buttons (2 clickable <a>). Absorbs the #fdfdfd variant."
+        roles:
+          page: [page_bg]
+          surface: [card_bg]
+          banner: [header_bg, footer_bg]
+          cta: [cta_bg]
+      - hex: "#3fcf8e"
+        source: "Supabase brand green: primary CTA buttons (3 clickable bg) + green links
+          (2 clickable text) + green focus borders (1 clickable)"
+        roles:
+          cta: [cta_bg]
+          link: [link]
+          border: [border]
+      - hex: "#000000"
+        source: "black: 54 small (20x20) absolute corner icon-badge chips on cards (clickable
+          via the card) — a badge, not a CTA"
+        roles:
+          action: [badge]
+      - hex: "#16b674"
+        source: "darker green: button/control focus outlines (5 clickable border)"
+        roles:
+          border: [border]
+      - hex: "#00bb68"
+        source: "deeper green link (1 clickable text)"
+        roles:
+          link: [link]
+      - hex: "#171717"
+        source: "near-black: the dominant body/heading text (1046 text) + links (700 clickable)
+          + one dark border"
+        roles:
+          text: [page_text, card_text, hero_text]
+          link: [link]
+          border: [border]
+      - hex: "#525252"
+        source: "neutral gray: secondary text + links (249 text, 222 clickable)"
+        roles:
+          text: [page_text, card_text]
+          link: [link]
+      - hex: "#707070"
+        source: "muted gray: text + links (344 text, 329 clickable) + one border"
+        roles:
+          text: [page_text, card_text]
+          link: [link]
+          border: [border]
+      - hex: "#b2b2b2"
+        source: "light gray: muted captions + muted link labels (260 text) + one border"
+        roles:
+          text: [card_text]
+          link: [link]
+          border: [border]
+      - hex: "#d4d4d4"
+        source: "the canonical light divider/border (9 clickable border)"
+        roles:
+          border: [border]
+      - hex: "#ededed"
+        source: "lighter border/divider (6 clickable border)"
+        roles:
+          border: [border]
+
+  # ===================================================================================
+  # tailwindcss — LIGHT theme (homepage). White canvas; dark code-block / CTA sections
+  # painted #030712; pink + black CTAs; a sky accent; a slate text ramp. Harvest-evidence
+  # authored AND visually cross-checked (1280px screenshot: white page, dark code blocks,
+  # the color-palette swatch grid, pink/dark CTAs). Findings the eval is EXPECTED to flag
+  # (real pipeline behavior, not GT errors):
+  #   * THE PAGE WINNER IS A PHANTOM: #0c0e18 (a 0-element blend of black + periwinkle,
+  #     0.03 area) is ranked the sole `page` color, while the real white page #ffffff
+  #     (62 bg, 0.68 area) is absent from page -> #0c0e18 noise + #ffffff page recall miss.
+  #   * #1c202b (a 0-element blend of #030712 + pink-white, 0.10 area) is surfaced as the
+  #     dark surface/banner instead of the REAL dark section color #030712 (46 bg, 1473
+  #     text) -> #1c202b noise + #030712 surface recall miss.
+  #   * the chromatic code text (#fb64b6, #78d4ff, #96f7e4, #00a5ea, #e30076, #cbfbf1) is
+  #     syntax highlighting in dark code blocks (spans class `highlighted-word`/`font-mono`,
+  #     0 clickable), not the site text palette (cf. vercel/linear) -> noise.
+  # ===================================================================================
+  tailwindcss:
+    category: quality
+    colors:
+      - hex: "#ffffff"
+        source: "white: page canvas (62 bg, 0.68 area), cards, header/footer, white CTA + white
+          text/links on the dark sections"
+        roles:
+          page: [page_bg]
+          surface: [card_bg]
+          banner: [header_bg, footer_bg]
+          cta: [cta_bg]
+          text: [page_text]
+          link: [link]
+      - hex: "#f9f9f9"
+        source: "off-white secondary section bg (area-only, 0.13 area — a real rendered surface
+          with no single element bg)"
+        roles:
+          surface: [card_bg]
+      - hex: "#030712"
+        source: "near-black: the REAL dark code-block / CTA section surfaces (46 bg) + the
+          dominant dark body text (1473 text) + dark links (208 clickable) + borders (19)"
+        roles:
+          surface: [card_bg]
+          text: [page_text, card_text]
+          link: [link]
+          border: [border]
+      - hex: "#000000"
+        source: "black: dark CTA buttons (3 clickable bg) + black text/links (39 text)"
+        roles:
+          cta: [cta_bg]
+          text: [page_text]
+          link: [link]
+      - hex: "#f6339a"
+        source: "Tailwind pink/fuchsia brand: CTA buttons (2 clickable bg)"
+        roles:
+          cta: [cta_bg]
+      - hex: "#00bbfd"
+        source: "sky-blue badge/swatch (4 bg, 1 clickable)"
+        roles:
+          action: [badge]
+      - hex: "#005986"
+        source: "dark cyan link (10 text, all clickable)"
+        roles:
+          link: [link]
+      - hex: "#90a1b9"
+        source: "Tailwind slate-400 text (114 text, non-clickable)"
+        roles:
+          text: [page_text]
+      - hex: "#cad5e2"
+        source: "Tailwind slate-300 light text on dark sections (88 text, non-clickable)"
+        roles:
+          text: [page_text]
+      - hex: "#4a5565"
+        source: "Tailwind slate-600 text (22 text, non-clickable)"
+        roles:
+          text: [page_text]
+      - hex: "#6a7282"
+        source: "Tailwind slate-500 text (12 text, non-clickable)"
+        roles:
+          text: [page_text]
+      - hex: "#1e2939"
+        source: "Tailwind slate-800 text (12 text, non-clickable)"
+        roles:
+          text: [page_text]
+      - hex: "#364153"
+        source: "Tailwind slate-700 text (8 text)"
+        roles:
+          text: [page_text]
+
+  # ===================================================================================
+  # resend — DARK theme. Near-black canvas (#000000, 0.86 area; absorbs #010101 at ΔE2000
+  # 0.16). Primary CTA is the signature `rainbow-border` gradient pill (cyan/violet/amber
+  # stops) plus a blue button; grayscale + neon-accent text; a pale-blue card border.
+  # Harvest-evidence authored. Findings the eval is EXPECTED to flag (real pipeline
+  # behavior, not GT errors):
+  #   * NO WHITE CTA: white bg is 0-clickable (4 non-clickable white cards) — the pipeline
+  #     ranks #ffffff the top `cta`, a card/surface leak -> noise.
+  #   * #00c65a (green) paints only two 8x8 `bg-green-500` status DOTS — not a CTA; the
+  #     pipeline files it cta/action -> noise.
+  #   * #010101 (= the page black) leaks into `action` as a 0.10-area badge -> noise.
+  # ===================================================================================
+  resend:
+    category: quality
+    colors:
+      - hex: "#000000"
+        source: "near-black: the page canvas (0.86 area), cards/hero, footer (21 bg).
+          Absorbs the #010101 variant (ΔE2000 0.16)."
+        roles:
+          page: [page_bg]
+          surface: [card_bg, hero_bg]
+          banner: [footer_bg]
+      - hex: "#ffffff"
+        source: "white: small card surfaces (4 non-clickable bg) + light text (67) + white
+          links (9 clickable) + white borders (5 clickable). No white button -> not a CTA."
+        roles:
+          surface: [card_bg]
+          text: [page_text]
+          link: [link]
+          border: [border]
+      - hex: "#00a3ff"
+        source: "blue CTA button (1 clickable <a>, 4711px)"
+        roles:
+          cta: [cta_bg]
+      - hex: "#02fcef"
+        source: "cyan stop of the `rainbow-border` gradient CTA pill (paints a clickable <a>)"
+        roles:
+          cta: [cta_bg]
+      - hex: "#a02bfe"
+        source: "violet stop of the `rainbow-border` gradient CTA pill (paints a clickable <a>)"
+        roles:
+          cta: [cta_bg]
+      - hex: "#ffb52b"
+        source: "amber stop of the `rainbow-border` gradient CTA pill (paints a clickable <a>)"
+        roles:
+          cta: [cta_bg]
+      - hex: "#a1a4a5"
+        source: "muted gray: the dominant body text (303 text) + links (24 clickable)"
+        roles:
+          text: [page_text, card_text]
+          link: [link]
+      - hex: "#464a4d"
+        source: "dark gray text (84 text, non-clickable)"
+        roles:
+          text: [page_text]
+      - hex: "#6c6c6c"
+        source: "mid gray text (66 text, non-clickable)"
+        roles:
+          text: [page_text]
+      - hex: "#ebeced"
+        source: "near-white text (3 text, non-clickable)"
+        roles:
+          text: [page_text]
+      - hex: "#46fea5"
+        source: "neon-green accent: links (18 text, 13 clickable) + text"
+        roles:
+          text: [page_text]
+          link: [link]
+      - hex: "#a1fcea"
+        source: "neon-cyan accent text (15 text, non-clickable) + one border"
+        roles:
+          text: [page_text]
+          border: [border]
+      - hex: "#d6ebfd"
+        source: "pale-blue: the canonical card divider/border (105 border)"
+        roles:
+          border: [border]
+      - hex: "#262a2d"
+        source: "dark subtle border (1 border)"
+        roles:
+          border: [border]
+
   # --- NOT YET AUTHORED in the full-shape format (pending harvest-evidence pass) ---
-  # tailwindcss, supabase, resend, notion (quality)
+  # notion (quality)
   # klarna, platform_disco (harvest_completeness)
