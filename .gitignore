@@ -221,3 +221,6 @@ __marimo__/
 
 # Local-only orchestration notes (not part of the published project)
 ORCHESTRATOR_INSTRUCTIONS.md
+
+# macOS
+.DS_Store
