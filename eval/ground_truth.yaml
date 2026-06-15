@@ -73,12 +73,13 @@
 #     may help LABEL the role, but actual element usage is the truth — a token declared but not
 #     painted on the page earns no role.
 #
-# `category: quality` sites count toward the aggregate. `harvest_completeness` (consent/login-
-# walled, < 100 elements) are reported but NOT aggregated — and the category is CHECKED against
-# the harvest's element count at load, so it can't be mis-tagged to dodge a bad score.
+# `category: quality` sites count toward the aggregate. `harvest_completeness` (login-walled,
+# < 100 elements) are reported but NOT aggregated — and the category is CHECKED against the
+# harvest's element count at load, so it can't be mis-tagged to dodge a bad score.
 #
-# STATUS: shadcn + vercel are harvest-evidence-validated worked examples (the format
-# template). The other 10 sites are NOT YET authored in this shape — pending.
+# STATUS: all 10 quality sites (shadcn, vercel, github, stripe, disconetwork, linear, supabase,
+# tailwindcss, resend, notion) are harvest-evidence authored and each cross-checked. The one
+# remaining is platform_disco (harvest_completeness, login-walled).
 
 sites:
   # ===================================================================================
@@ -853,4 +854,4 @@ sites:
           link: [link]
 
   # --- NOT YET AUTHORED in the full-shape format (pending harvest-evidence pass) ---
-  # klarna, platform_disco (harvest_completeness)
+  # platform_disco (harvest_completeness)

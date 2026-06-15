@@ -40,8 +40,7 @@ PANEL: dict[str, str] = {
     "linear": "https://linear.app",
     "notion": "https://www.notion.com",
     "disconetwork": "https://disconetwork.com",
-    # Harvest-completeness controls (consent/login-walled): kept to track thin harvests.
-    "klarna": "https://www.klarna.com",
+    # Harvest-completeness control (login-walled): kept to track thin harvests.
     "platform_disco": "https://platform.disconetwork.com",
 }
 
