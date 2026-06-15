@@ -319,10 +319,13 @@ def test_circular_avatar_is_not_a_badge() -> None:
 
 
 def test_pill_shaped_cta_stays_interactive() -> None:
-    """A pill-shaped <a> CTA stays dominantly interactive, not a badge.
+    """A pill-shaped, filled <a> CTA stays dominantly interactive, not a badge.
 
-    The badge vote (3.0) sits below the semantic ``a`` vote, so a fully-rounded, short,
-    text-bearing link keeps its interactive label even though it matches every badge gate.
+    The badge vote (3.0) sits below the anchor routing, so a fully-rounded, short,
+    text-bearing CTA keeps its interactive label even though it matches every badge gate.
+    Because it paints a button surface (``bg``), its label routes to ``cta_text`` (a CTA
+    label, no usage role) rather than ``link`` — the A2 fix — but it is still interactive,
+    not a badge.
     """
     cta = _element(
         tag="a",
@@ -334,7 +337,39 @@ def test_pill_shaped_cta_stays_interactive() -> None:
         rect=Rect(x=100.0, y=100.0, width=160.0, height=32.0),
     )
     [result] = classify_components([cta], CONFIG, VIEWPORT)
-    assert _argmax(result.component_dist) is ComponentType.link
+    assert _argmax(result.component_dist) is ComponentType.cta_text
+
+
+def test_unfilled_anchor_is_link_filled_anchor_label_is_cta_text() -> None:
+    """The A2 fill-gate: a bare anchor is a link; a button-styled anchor's label is cta_text.
+
+    A bare ``<a>`` (no bg/border) is a genuine inline text link, so it keeps ``link`` and
+    carries no ``cta_text``. A ``<a>`` that paints a button surface (here a solid bg) is a
+    CTA whose label routes to ``cta_text`` with no ``link`` mass — so a white/colored button
+    label no longer leaks into the ``link`` usage role.
+    """
+    bare = _element(tag="a", clickable=True, has_text=True)
+    [bare_result] = classify_components([bare], CONFIG, VIEWPORT)
+    assert ComponentType.link in bare_result.component_dist
+    assert ComponentType.cta_text not in bare_result.component_dist
+
+    filled = _element(tag="a", bg=_color("#7c3bed"), clickable=True, has_text=True)
+    [filled_result] = classify_components([filled], CONFIG, VIEWPORT)
+    assert ComponentType.cta_text in filled_result.component_dist
+    assert ComponentType.link not in filled_result.component_dist
+
+    # A gradient-pill CTA: computed bg is transparent, the fill lives in bg_gradient_stops —
+    # still a button surface, so its label is cta_text, not link.
+    gradient = _element(
+        tag="a",
+        bg=Color(hex="#000000", lightness=0.0, chroma=0.0, hue=0.0, alpha=0.0),
+        bg_gradient_stops=(_color("#02fcef"), _color("#a02bfe")),
+        clickable=True,
+        has_text=True,
+    )
+    [gradient_result] = classify_components([gradient], CONFIG, VIEWPORT)
+    assert ComponentType.cta_text in gradient_result.component_dist
+    assert ComponentType.link not in gradient_result.component_dist
 
 
 def test_anchor_is_dominant_link() -> None:
@@ -936,7 +971,8 @@ def test_gradient_pill_attributes_bg_channel_without_the_removed_hack() -> None:
     The removed hack force-fed ``cta_bg: 5.5`` to beat the global softmax. Per-channel, the
     pill's lone bg-channel vote (``cta_bg: 1.5`` from the clickable rule) is alone in the bg
     partition and normalizes to 1.0 there, so the gradient fill attributes at full
-    bg-channel strength purely from the channel weight.
+    bg-channel strength purely from the channel weight. The label dominates the text channel
+    as ``cta_text`` (the A2 routing — a gradient pill is a button surface), not ``link``.
     """
     transparent = Color(hex="#000000", lightness=0.0, chroma=0.0, hue=0.0, alpha=0.0)
     pill = _element(
@@ -951,6 +987,6 @@ def test_gradient_pill_attributes_bg_channel_without_the_removed_hack() -> None:
     )
     [result] = classify_components([pill], CONFIG, VIEWPORT)
     # Interactive label still dominant, but the bg-channel cta_bg now carries real mass.
-    assert _argmax(result.component_dist) is ComponentType.link
+    assert _argmax(result.component_dist) is ComponentType.cta_text
     assert result.component_dist.get(ComponentType.cta_bg, 0.0) > 0.05
     assert math.isclose(sum(result.component_dist.values()), 1.0, rel_tol=1e-9)

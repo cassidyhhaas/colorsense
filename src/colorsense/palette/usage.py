@@ -28,7 +28,9 @@ Design notes
   convention, exactly like the inventory's component → color-channel routing
   (``models.channel_for``): it describes what the taxonomy *means*, not a tunable weight,
   so it lives in code rather than the YAML config. ``cta_text`` and ``third_party`` are
-  deliberately absent from every role: ``cta_text`` never surfaces on real sites, and
+  deliberately absent from every role: ``cta_text`` is the button-LABEL sink — a
+  button-styled element's text color is part of the CTA, not an independent palette role,
+  so it carries no usage (the classifier routes button-styled anchors' labels there); and
   ``third_party`` flows to ``AnalysisResult.third_party_colors`` instead. The inverse
   (`COMPONENT_ROLE`) is built once and asserted to partition every routed component to
   exactly one role.

@@ -9,6 +9,15 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- **Button-styled anchors' labels no longer leak into the `link` role.** A clickable `<a>`
+  that paints a button surface (a solid background, a border, or a gradient-pill fill) is a
+  CTA whose label text is routed to `cta_text` — an emitted-but-unrouted button-label sink —
+  rather than `link`; a bare anchor (no such surface; a box-shadow alone does not count, so a
+  focus-ringed inline link stays a link) keeps `link`. Previously every clickable anchor's
+  text-color vote was the sole occupant of its text channel, so a filled CTA's label color
+  (e.g. a white button label) surfaced in the `link` usage role. Anchor routing moved from the
+  semantic-tag family to a fill-gated pair of interactivity rules; the vote is relabeled within
+  the text channel (not deleted), so the per-channel recombination is unchanged.
 - **CTA/action usage roles are ranked by vote mass, not screenshot area.** The `cta` and
   `action` roles name *element* colors (button fills), not structural surfaces, so they now
   rank candidate colors by `log1p` of in-role vote mass — the same DOM-derived signal already
