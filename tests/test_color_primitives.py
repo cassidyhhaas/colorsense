@@ -6,6 +6,7 @@ import pytest
 from coloraide import Color as CAColor
 
 from colorsense.color.primitives import (
+    ciede2000,
     composite_over,
     contrast_ratio,
     delta_e,
@@ -48,6 +49,28 @@ def test_delta_e_different_colors_positive() -> None:
 def test_delta_e_black_white_is_about_one() -> None:
     # OKLab lightness spans [0, 1]; black vs white is a pure-lightness distance of ~1.
     assert delta_e(BLACK, WHITE) == pytest.approx(1.0, abs=1e-6)
+
+
+def test_ciede2000_identity_is_zero() -> None:
+    assert ciede2000(BLUE, BLUE) == pytest.approx(0.0, abs=1e-9)
+
+
+def test_ciede2000_matches_coloraide_2000() -> None:
+    for a, b in ((WHITE, BLACK), (BLUE, GRAY), (WHITE, _color("#f0f6fc"))):
+        expected = float(CAColor(a.hex).delta_e(CAColor(b.hex), method="2000"))
+        assert ciede2000(a, b) == pytest.approx(expected, abs=1e-7), (a.hex, b.hex)
+
+
+def test_ciede2000_is_more_accurate_than_oklab_near_white() -> None:
+    """The motivating case: two near-whites OKLab collapses but CIEDE2000 keeps distinct.
+
+    ``#ffffff`` vs Primer's ``#f0f6fc`` is OKLab ΔE ~0.03 (below the 0.05 cluster radius —
+    they merge) yet CIEDE2000 ~4 (clearly distinct). This is exactly why color-IDENTITY
+    comparisons (the CTA-label canvas-distinctness test) use CIEDE2000, not OKLab.
+    """
+    near_white = _color("#f0f6fc")
+    assert delta_e(WHITE, near_white) < 0.05
+    assert ciede2000(WHITE, near_white) > 3.0
 
 
 # A meaningful spread: saturated hues around the wheel, grays, near-black/near-white, and

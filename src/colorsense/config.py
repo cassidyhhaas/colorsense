@@ -369,10 +369,10 @@ class ContrastRelabelConfig(BaseModel):
     fill — legible against that fill but illegible on the page canvas — is a CTA *label*,
     not an inline link: its text-channel ``link`` vote is relabeled to ``cta_text``
     (channel-preserving). The predicate compares the element's composited ``effective_bg``
-    against the derived page canvas with ``delta_e`` (OKLab) and tests text legibility with
-    the WCAG ``contrast_ratio``. Both thresholds are principled constants, not panel-fitted:
+    against the derived page canvas with ``ciede2000`` and tests text legibility with the
+    WCAG ``contrast_ratio``. Both thresholds are principled constants, not panel-fitted:
     ``wcag_min_contrast`` is the WCAG 2.x legibility floor and ``canvas_delta_e`` is the
-    pipeline's own perceptual cluster radius.
+    perceptual just-noticeable-difference floor that defines color identity.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -382,10 +382,13 @@ class ContrastRelabelConfig(BaseModel):
     # flat across that range — the discriminating cases sit far from any plausible cut — so
     # the canonical AA value is chosen.
     wcag_min_contrast: float = Field(gt=1.0, le=21.0)
-    # OKLab ΔE above which ``effective_bg`` counts as a NON-canvas fill. Mirrors
-    # ``palette.inventory.DELTA_E_CLUSTER`` (0.05): two colors closer than it are "the same
-    # surface" elsewhere in the pipeline, so an ``effective_bg`` within it of the canvas IS
-    # the canvas (the element sits on the page, not on a button fill).
+    # CIEDE2000 ΔE above which ``effective_bg`` counts as a NON-canvas fill. This is an
+    # identity comparison ("is this fill the same color as the page?"), so it uses CIEDE2000
+    # — OKLab ``delta_e`` is materially less accurate near white/black, where page canvases
+    # live. 1.0 is the just-noticeable-difference floor, matching the eval's measured,
+    # OS-jitter-validated ``IDENTITY_TOLERANCE`` (``eval/colormetric.py``): below it two
+    # colors are "the same color", so an ``effective_bg`` within 1.0 ΔE2000 of the canvas IS
+    # the canvas (the element sits on the page, not on a distinct button fill).
     canvas_delta_e: float = Field(gt=0.0)
 
 

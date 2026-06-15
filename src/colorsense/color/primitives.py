@@ -142,6 +142,20 @@ def delta_e(a: Color, b: Color) -> float:
     return math.sqrt(dl * dl + da * da + db * db)
 
 
+def ciede2000(a: Color, b: Color) -> float:
+    """Perceptual distance between two colors via **CIEDE2000** (alpha ignored).
+
+    The CIE standard perceptual color-difference metric. Use this — not OKLab
+    `delta_e` — for *identity* questions ("are these two colors the same color?"), because
+    OKLab ``deltaEOK`` is materially less accurate near the lightness extremes (near-white /
+    near-black), which is exactly where page backgrounds and neutral palettes live. ΔE2000
+    units: ``~1`` is a just-noticeable difference, ``~2-3`` noticeable. This matches the
+    eval's identity metric (``eval/colormetric.py``'s ``pdelta`` + ``IDENTITY_TOLERANCE``),
+    so the library and the offline quality eval define color identity the same way.
+    """
+    return float(_to_coloraide(a).delta_e(_to_coloraide(b), method="2000"))
+
+
 def relative_luminance(c: Color) -> float:
     """WCAG 2.1 relative luminance of ``c`` (linearized sRGB, Rec. 709 weights).
 

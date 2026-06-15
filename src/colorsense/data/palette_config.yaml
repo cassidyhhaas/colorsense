@@ -415,11 +415,13 @@ component_classifier:
 
   # --- CTA-label contrast relabel thresholds. ---------------------------------
   # Drives the in-code relabel documented in the interactivity block above. A non-anchor
-  # clickable whose composited `effective_bg` is a non-canvas fill (OKLab ΔE > canvas_delta_e
-  # from the derived page canvas), whose text is legible there (contrast >= wcag_min_contrast)
-  # but illegible on the canvas (contrast < wcag_min_contrast), is a CTA *label*: its `link`
-  # vote is relabeled to `cta_text`. 4.5 is the WCAG AA normal-text floor; 0.05 is the OKLab
-  # cluster radius (`palette.inventory.DELTA_E_CLUSTER`).
+  # clickable whose composited `effective_bg` is a non-canvas fill (CIEDE2000 ΔE >
+  # canvas_delta_e from the derived page canvas), whose text is legible there
+  # (contrast >= wcag_min_contrast) but illegible on the canvas (contrast < wcag_min_contrast),
+  # is a CTA *label*: its `link` vote is relabeled to `cta_text`. 4.5 is the WCAG AA
+  # normal-text floor. canvas_delta_e is a color-IDENTITY threshold, so it is CIEDE2000 (not
+  # OKLab — OKLab ΔE is inaccurate near white/black, where canvases live): 1.0 ΔE2000 is the
+  # just-noticeable-difference floor, matching the eval's measured `IDENTITY_TOLERANCE`.
   contrast_relabel:
     wcag_min_contrast: 4.5
-    canvas_delta_e: 0.05
+    canvas_delta_e: 1.0

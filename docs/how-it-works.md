@@ -213,7 +213,9 @@ element's composited **effective background** (the first fully-opaque background
 ancestor chain) and whether that background is itself clickable; the classifier then relabels
 a non-anchor clickable's `link` mass to `cta_text` (the unrouted button-label sink) when its
 text sits on a *distinct interactive fill* (effective background from a clickable ancestor,
-perceptually apart from the page canvas), is **legible on that fill** (WCAG contrast ≥ 4.5),
+perceptually apart from the page canvas — a color-identity test, so CIEDE2000, which stays
+accurate near the white/black where canvases live, unlike OKLab ΔE), is **legible on that
+fill** (WCAG contrast ≥ 4.5),
 and is **illegible on the page canvas** (contrast < 4.5). Each clause guards a real case: the
 "from clickable" test keeps a link inside a passive dark hero; the legible-on-fill test keeps
 a brand-colored link on a soft tinted card (stripe.com's orange `#ff6118`, contrast ~2.4 on

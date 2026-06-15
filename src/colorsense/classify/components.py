@@ -34,7 +34,7 @@ from __future__ import annotations
 
 import math
 
-from colorsense.color.primitives import contrast_ratio, delta_e
+from colorsense.color.primitives import ciede2000, contrast_ratio
 from colorsense.config import (
     Config,
     ContrastRelabelConfig,
@@ -187,9 +187,11 @@ def _is_cta_label(
        background was painted by a clickable ancestor (the button), not a passive page or
        section surface. Protects a non-anchor link inside a passive dark hero/section,
        whose effective background is the section, not a button.
-    2. **The fill is a distinct surface** (``delta_e(effective_bg, page_canvas) >
+    2. **The fill is a distinct surface** (``ciede2000(effective_bg, page_canvas) >
        canvas_delta_e``): a clickable element whose fill IS the page color is effectively
-       on the page (text reads against the canvas) — keep it a link.
+       on the page (text reads against the canvas) — keep it a link. This is an *identity*
+       comparison, so it uses **CIEDE2000** (not OKLab ``delta_e``): page canvases are
+       near-white/near-black, exactly where OKLab ΔE is least accurate.
     3. **The text is legible on the fill** (``contrast_ratio(text, effective_bg) >=
        wcag_min_contrast``): a real label's color is chosen to READ on its button. A
        brand-colored link that merely overlaps a soft tinted clickable card (e.g. stripe's
@@ -218,7 +220,7 @@ def _is_cta_label(
     effective_bg = element.effective_bg
     if text is None or effective_bg is None or page_canvas is None:
         return False
-    if delta_e(effective_bg, page_canvas) <= relabel.canvas_delta_e:
+    if ciede2000(effective_bg, page_canvas) <= relabel.canvas_delta_e:
         return False
     return (
         contrast_ratio(text, effective_bg) >= relabel.wcag_min_contrast
