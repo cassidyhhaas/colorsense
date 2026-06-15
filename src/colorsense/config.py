@@ -362,6 +362,33 @@ class ThirdPartyConfig(BaseModel):
     vendor_prefixes: tuple[str, ...]
 
 
+class ContrastRelabelConfig(BaseModel):
+    """Thresholds for the CTA-label contrast relabel (see ``classify.components``).
+
+    A non-anchor clickable element whose label text sits on its own distinct interactive
+    fill — legible against that fill but illegible on the page canvas — is a CTA *label*,
+    not an inline link: its text-channel ``link`` vote is relabeled to ``cta_text``
+    (channel-preserving). The predicate compares the element's composited ``effective_bg``
+    against the derived page canvas with ``delta_e`` (OKLab) and tests text legibility with
+    the WCAG ``contrast_ratio``. Both thresholds are principled constants, not panel-fitted:
+    ``wcag_min_contrast`` is the WCAG 2.x legibility floor and ``canvas_delta_e`` is the
+    pipeline's own perceptual cluster radius.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    # WCAG legibility floor separating "text is readable on this background" from "it is
+    # not". 4.5 is AA for normal text (3.0 = AA large text, 7.0 = AAA); the panel delta is
+    # flat across that range — the discriminating cases sit far from any plausible cut — so
+    # the canonical AA value is chosen.
+    wcag_min_contrast: float = Field(gt=1.0, le=21.0)
+    # OKLab ΔE above which ``effective_bg`` counts as a NON-canvas fill. Mirrors
+    # ``palette.inventory.DELTA_E_CLUSTER`` (0.05): two colors closer than it are "the same
+    # surface" elsewhere in the pipeline, so an ``effective_bg`` within it of the canvas IS
+    # the canvas (the element sits on the page, not on a button fill).
+    canvas_delta_e: float = Field(gt=0.0)
+
+
 class Suppressor(BaseModel):
     """A multiplicative veto applied after vote summation.
 
@@ -396,6 +423,7 @@ class ComponentClassifierConfig(BaseModel):
     third_party: ThirdPartyConfig
     suppressors: dict[str, Suppressor]
     brand_components: tuple[str, ...]
+    contrast_relabel: ContrastRelabelConfig
 
     @model_validator(mode="after")
     def _validate_dispatch_names(self) -> ComponentClassifierConfig:
