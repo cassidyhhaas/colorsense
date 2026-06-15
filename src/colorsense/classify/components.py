@@ -202,6 +202,13 @@ def _is_cta_label(
 
     Anchors are excluded (``tag != "a"``): they are already routed by the
     ``a & button_surface`` / ``a & !button_surface`` rules.
+
+    Known boundary (intentional): a fully *clickable card* — an entire content tile wrapped
+    in a link, its text on the card's own dark fill — relabels its text to ``cta_text`` too.
+    That is acceptable: a clickable element's text never reaches the ``text`` role anyway
+    (text-presence excludes clickables), so before this rule the card text landed only in
+    ``link`` (not a genuine inline link either); routing it to the CTA-label sink is at least
+    as correct, and no panel site regresses.
     """
     if element.tag == "a" or not element.clickable:
         return False
