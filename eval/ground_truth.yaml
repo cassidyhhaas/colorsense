@@ -192,6 +192,362 @@ sites:
         roles:
           link: [link]
 
+  # ===================================================================================
+  # github — logged-out marketing homepage, DARK theme. Page canvas is near-black
+  # (#000000 dominant 0.70 area, #0d1017 secondary), Primer dark-mode UI on top.
+  # Harvest-evidence authored (probe + element inspection). Notable findings the eval
+  # is EXPECTED to flag (real pipeline behavior, not GT errors):
+  #   * WHITE TEXT BURIED: 549 elements paint #ffffff as text + 93 as clickable link,
+  #     yet the pipeline surfaces white only in border/surface — text/link recall MISS.
+  #   * #0d1017 (the page canvas) leaks into cta/action off ONE incidental clickable <a>
+  #     (1296px) over a dark section -> noise; the page canvas is not a CTA.
+  #   * #1f6feb (Primer accent blue) paints ONE 1px clickable <a> and 0 screenshot area —
+  #     below visibility, not a real on-page CTA; omitted, so its cta entry -> noise.
+  #   * white #ffffff also tagged surface/banner off 7 tiny (≈0 area) bg elements -> noise.
+  # ===================================================================================
+  github:
+    category: quality
+    colors:
+      - hex: "#000000"
+        source: "page canvas / dark hero+card+footer sections (13 bg elements, 0.70 area)"
+        roles:
+          page: [page_bg]
+          surface: [card_bg, hero_bg]
+          banner: [footer_bg]
+      - hex: "#0d1017"
+        source: "Primer dark canvas-inset: secondary page/hero/footer bg (6 bg, 0.08 area).
+          The lone clickable <a> over it is incidental — NOT a CTA."
+        roles:
+          page: [page_bg]
+          surface: [hero_bg]
+          banner: [footer_bg]
+      - hex: "#08872b"
+        source: "Primer Brand green: the 'Sign up for free' primary CTA (2 clickable <button>, 8872px)"
+        roles:
+          cta: [cta_bg]
+      - hex: "#ffffff"
+        source: "white: dominant body/heading text (549 text, 93 clickable link) + white button
+          borders (15 border, 7 clickable). Pipeline buries the text/link use — recall surfaces it."
+        roles:
+          text: [page_text, hero_text, card_text]
+          link: [link]
+          border: [border]
+      - hex: "#f0f6fc"
+        source: "Primer --fgColor-default near-white: text + links (79 text, 10 clickable)"
+        roles:
+          text: [page_text, hero_text, card_text]
+          link: [link]
+      - hex: "#9198a1"
+        source: "Primer --fgColor-muted gray: muted text + links (96 text, 68 clickable)"
+        roles:
+          text: [page_text]
+          link: [link]
+      - hex: "#a4aea6"
+        source: "muted gray-green: text + links (50 text, 9 clickable)"
+        roles:
+          text: [page_text]
+          link: [link]
+      - hex: "#8dd6ff"
+        source: "Primer link blue on dark: links only (92 clickable text)"
+        roles:
+          link: [link]
+      - hex: "#59636e"
+        source: "Primer muted gray link: its 2 text elements are BOTH clickable -> link, not body text"
+        roles:
+          link: [link]
+      - hex: "#5fed83"
+        source: "Primer success green as text accent (5 text elements)"
+        roles:
+          text: [page_text]
+      - hex: "#7c8980"
+        source: "muted gray-green text variant (2 text elements)"
+        roles:
+          text: [page_text]
+      - hex: "#24292f"
+        source: "Primer near-black, dark text on light chips/badges (2 text elements)"
+        roles:
+          text: [page_text]
+      - hex: "#484f58"
+        source: "Primer --borderColor on dark: the canonical divider/border (5 border elements)"
+        roles:
+          border: [border]
+      - hex: "#d1d9e0"
+        source: "light Primer border on a light inset (1 clickable border element)"
+        roles:
+          border: [border]
+      - hex: "#191f1b"
+        source: "near-black subtle border (1 clickable border element)"
+        roles:
+          border: [border]
+      - hex: "#818b98"
+        source: "muted border-gray (1 border element)"
+        roles:
+          border: [border]
+      - hex: "#8c93fb"
+        source: "Primer accent-violet border / focus accent (1 border element)"
+        roles:
+          border: [border]
+
+  # ===================================================================================
+  # stripe — LIGHT theme. White page canvas (0.72 area) + a dark-navy section/footer
+  # (#0d1838, 0.19 area). Signature "blurple" #533afd is the primary CTA AND the link
+  # color. Harvest-evidence authored. Findings the eval is EXPECTED to flag:
+  #   * DECORATIVE GRAPHIC LEAK: #00d66f (green) and #000000 (black) each paint exactly
+  #     ONE clickable bg — both the same `payments-graphic__checkout-instant-button` mock
+  #     INSIDE a product illustration, not a real site CTA -> their cta entries are noise.
+  #   * #000eff: a single non-clickable saturated-blue text element (below resolution) the
+  #     pipeline files under link -> noise.
+  # ===================================================================================
+  stripe:
+    category: quality
+    colors:
+      - hex: "#ffffff"
+        source: "white: page canvas (0.72 area), cards/inputs, nav/footer, white ghost + Google
+          sign-in CTAs (hds-button), white text/links on the dark section"
+        roles:
+          page: [page_bg]
+          surface: [card_bg, hero_bg, input_bg]
+          banner: [nav_bg, footer_bg]
+          cta: [cta_bg]
+          text: [page_text, card_text]
+          link: [link]
+      - hex: "#0d1838"
+        source: "Stripe dark-navy section + footer bg (1 bg, 0.19 area, non-clickable)"
+        roles:
+          surface: [card_bg]
+          banner: [footer_bg]
+      - hex: "#533afd"
+        source: "Stripe blurple: primary CTA buttons (7 clickable hds-button--primary) + inline
+          links (367 clickable text)"
+        roles:
+          cta: [cta_bg]
+          link: [link]
+      - hex: "#000000"
+        source: "black: dominant body/heading text (805 text) + links (433 clickable). The lone
+          black clickable-bg is the decorative checkout-graphic mock, NOT a CTA."
+        roles:
+          text: [page_text, card_text, hero_text]
+          link: [link]
+      - hex: "#061b31"
+        source: "Stripe dark-navy text + dark links (120 text, 77 clickable)"
+        roles:
+          text: [page_text]
+          link: [link]
+      - hex: "#50617a"
+        source: "Stripe slate text + links (153 text, 132 clickable — mostly links)"
+        roles:
+          text: [page_text]
+          link: [link]
+      - hex: "#64748d"
+        source: "Stripe muted slate: body text + some links (68 text, 21 clickable)"
+        roles:
+          text: [page_text]
+          link: [link]
+      - hex: "#839bc8"
+        source: "faint blue-gray text (4 text, non-clickable)"
+        roles:
+          text: [page_text]
+      - hex: "#a3b5d6"
+        source: "fainter blue-gray text (3 text, non-clickable)"
+        roles:
+          text: [page_text]
+      - hex: "#3c4f69"
+        source: "slate link (18 text, all clickable)"
+        roles:
+          link: [link]
+      - hex: "#273951"
+        source: "dark slate link (16 text, all clickable)"
+        roles:
+          link: [link]
+      - hex: "#1a2c44"
+        source: "darker slate link (14 text, all clickable)"
+        roles:
+          link: [link]
+      - hex: "#7d8ba4"
+        source: "muted slate link (5 text, all clickable)"
+        roles:
+          link: [link]
+      - hex: "#7f7dfc"
+        source: "light blurple link (3 text, all clickable)"
+        roles:
+          link: [link]
+      - hex: "#ff6118"
+        source: "Stripe coral/orange accent link (14 text, all clickable)"
+        roles:
+          link: [link]
+      - hex: "#e5edf5"
+        source: "Stripe pale-gray: the canonical divider/border (21 border) — the 15 'bg'
+          elements are bento-card BORDER-frame divs (class `...bento-card__border`), not fills"
+        roles:
+          border: [border]
+      - hex: "#d6d9fc"
+        source: "pale lavender border (9 border)"
+        roles:
+          border: [border]
+      - hex: "#b9b9f9"
+        source: "light purple border / button outline (10 clickable border)"
+        roles:
+          border: [border]
+      - hex: "#182659"
+        source: "dark navy border (1 border)"
+        roles:
+          border: [border]
+      - hex: "#4834db"
+        source: "deep blurple border (1 clickable border)"
+        roles:
+          border: [border]
+
+  # ===================================================================================
+  # disconetwork — LIGHT theme marketing page. White canvas (0.83 area) + one dark
+  # full-width content <section> (#050505, 0.15 area). Colorful palette: blue/purple
+  # gradient CTAs, category-colored badges (blue/purple/teal/amber), a green pill CTA,
+  # a black pill CTA. Harvest-evidence authored AND visually cross-checked against a live
+  # 1280px screenshot (hero purple + black CTAs, repeated purple 'Book a Demo', the dark
+  # bottom section, the blue->purple gradient 'Everywhere.' heading all confirmed).
+  # blue/purple each legitimately span cta (gradient stops on clickable pills) + action
+  # (non-clickable category badges) + text/link.
+  # ===================================================================================
+  disconetwork:
+    category: quality
+    colors:
+      - hex: "#ffffff"
+        source: "white: page canvas (0.83 area), cards, nav/footer, white ghost CTAs,
+          white text/links on the dark section"
+        roles:
+          page: [page_bg]
+          surface: [card_bg, hero_bg]
+          banner: [nav_bg, footer_bg]
+          cta: [cta_bg]
+          text: [page_text, card_text]
+          link: [link]
+      - hex: "#050505"
+        source: "dark full-width content <section> band (1 bg, 0.15 area, non-clickable)"
+        roles:
+          surface: [card_bg]
+      - hex: "#030711"
+        source: "near-black: the black pill CTA ('Reach New Customers', 2 clickable rounded-full
+          <a>) + dominant body/heading text (482 text) + links (69 clickable)"
+        roles:
+          cta: [cta_bg]
+          text: [page_text, card_text, hero_text]
+          link: [link]
+      - hex: "#7c3bed"
+        source: "violet: solid + gradient pill CTAs ('Monetize Your Traffic', 'Book a Demo';
+          6 clickable bg + gradient stops on 3) + category badges (20 non-clickable bg) +
+          text/links (50 text, 17 clickable)"
+        roles:
+          cta: [cta_bg]
+          action: [badge]
+          text: [page_text]
+          link: [link]
+      - hex: "#3c83f6"
+        source: "blue: gradient pill-CTA stop (paints 3 clickable) + category badges (21
+          non-clickable bg) + text/links (32 text, 5 clickable)"
+        roles:
+          cta: [cta_bg]
+          action: [badge]
+          text: [page_text]
+          link: [link]
+      - hex: "#5e8e3e"
+        source: "green pill CTA (1 clickable rounded-full <a> button, 7257px)"
+        roles:
+          cta: [cta_bg]
+      - hex: "#10b77f"
+        source: "teal: category badges (4 non-clickable bg) + text/links (17 text, 12 clickable)"
+        roles:
+          action: [badge]
+          text: [page_text]
+          link: [link]
+      - hex: "#f59e0b"
+        source: "amber badge (1 clickable bg-amber-500 pill <span>)"
+        roles:
+          action: [badge]
+      - hex: "#65758b"
+        source: "muted slate: body text + links (90 text, 28 clickable)"
+        roles:
+          text: [page_text]
+          link: [link]
+      - hex: "#a3a3a3"
+        source: "faint gray text (3 text, non-clickable)"
+        roles:
+          text: [page_text]
+      - hex: "#e5e7eb"
+        source: "the canonical light divider/border (11 border)"
+        roles:
+          border: [border]
+
+  # ===================================================================================
+  # linear — DARK theme. Near-black canvas (#08090b, 0.89 area) end to end; white
+  # primary CTAs + a grayscale text ramp; one bright lime feature-card surface. Harvest-
+  # evidence authored AND visually cross-checked (1280px screenshot: dark canvas, white
+  # CTAs, the lime panel near the bottom, colorful code/diagram accents confirmed).
+  # Findings the eval is EXPECTED to flag (real pipeline behavior, not GT errors):
+  #   * #e0e7bb (pale lime) is a QUANTIZER BLEND of white+lime (#e4f222), 0 elements —
+  #     the pipeline ranks it cta; the real surface is the lime card #e4f222 (1 clickable
+  #     bg), which the pipeline buries -> #e0e7bb noise + #e4f222 surface recall miss.
+  #   * #2e3031 (gray) is a 0-element blend of black+white the pipeline ranks cta/action
+  #     -> phantom noise.
+  #   * the chromatic code-sample / illustration accents (#f79ce0 pink, #f7bf8b orange,
+  #     #83dcdc cyan, #8fa6ff blue, #6d78d5 indigo, #27a644, #eb5757) are decoration, not
+  #     the site's text palette (cf. vercel) -> any text/action entry for them is noise.
+  #     Evidence: every #f79ce0 span carries class `code-diff_keyword`, every #f7bf8b span
+  #     `code-diff_variable` — syntax highlighting inside a code-diff illustration, 0 clickable.
+  # ===================================================================================
+  linear:
+    category: quality
+    colors:
+      - hex: "#08090b"
+        source: "near-black: the page canvas, all cards/hero, and header/nav/footer chrome
+          (8 bg, 0.89 area). Covers the merged #08090a variant (ΔE2000 0.43)."
+        roles:
+          page: [page_bg]
+          surface: [hero_bg, card_bg]
+          banner: [header_bg, nav_bg, footer_bg]
+      - hex: "#ffffff"
+        source: "white: primary CTA buttons (26 clickable bg), white links/labels (102
+          clickable text), white borders/outlines (71 border)"
+        roles:
+          cta: [cta_bg]
+          link: [link]
+          border: [border]
+      - hex: "#e4f222"
+        source: "bright lime feature-card surface (1 clickable bg; its rendered region quantizes
+          to the #e0e7bb white-blend, which the pipeline mis-surfaces instead)"
+        roles:
+          surface: [card_bg]
+      - hex: "#f7f8f8"
+        source: "near-white: the dominant body/heading text (1327 text) + links (63 clickable)"
+        roles:
+          text: [page_text, card_text]
+          link: [link]
+      - hex: "#d0d6e0"
+        source: "light gray: secondary text + links (168 text, 35 clickable)"
+        roles:
+          text: [page_text]
+          link: [link]
+      - hex: "#8a8f98"
+        source: "Linear muted gray: text + links (121 text, 76 clickable)"
+        roles:
+          text: [page_text]
+          link: [link]
+      - hex: "#62666d"
+        source: "Linear dim gray: muted text + links (322 text, 120 clickable)"
+        roles:
+          text: [page_text]
+          link: [link]
+      - hex: "#383b3f"
+        source: "dark divider/border (3 border)"
+        roles:
+          border: [border]
+      - hex: "#24282c"
+        source: "darker subtle border (1 clickable border)"
+        roles:
+          border: [border]
+      - hex: "#e5e5e6"
+        source: "light border/outline on light controls (2 clickable border)"
+        roles:
+          border: [border]
+
   # --- NOT YET AUTHORED in the full-shape format (pending harvest-evidence pass) ---
-  # github, stripe, tailwindcss, supabase, resend, linear, notion, disconetwork (quality)
+  # tailwindcss, supabase, resend, notion (quality)
   # klarna, platform_disco (harvest_completeness)
