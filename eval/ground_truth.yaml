@@ -508,10 +508,12 @@ sites:
           surface: [hero_bg, card_bg]
           banner: [header_bg, nav_bg, footer_bg]
       - hex: "#ffffff"
-        source: "white: primary CTA buttons (26 clickable bg), white links/labels (102
+        source: "white: primary CTA buttons (26 clickable bg), white SECONDARY buttons
+          (2 `Button_variant-secondary`, 85x32 + 144x44; audit S31), white links/labels (102
           clickable text), white borders/outlines (71 border)"
         roles:
           cta: [cta_bg]
+          action: [button_secondary]
           link: [link]
           border: [border]
       - hex: "#e4f222"
@@ -567,19 +569,23 @@ sites:
     colors:
       - hex: "#fcfcfc"
         source: "near-white: page canvas (0.96 area), card/panel surfaces, header/footer,
-          white ghost CTA buttons (2 clickable <a>). Absorbs the #fdfdfd variant."
+          white ghost CTA buttons (2 clickable <a>) + opaque white SECONDARY buttons
+          (3 `button[role=tab]` pills + 8 <a> link-buttons, alpha=1; audit S31). Absorbs #fdfdfd."
         roles:
           page: [page_bg]
           surface: [card_bg]
           banner: [header_bg, footer_bg]
           cta: [cta_bg]
+          action: [button_secondary]
       - hex: "#3fcf8e"
         source: "Supabase brand green: primary CTA buttons (3 clickable bg) + green links
-          (2 clickable text) + green focus borders (1 clickable)"
+          (2 clickable text) + green focus borders (1 clickable) + brand-green TEXT
+          (3 has_text `text-brand` spans: a 604x72 hero headline + 2 inline; audit S31)"
         roles:
           cta: [cta_bg]
           link: [link]
           border: [border]
+          text: [hero_text, page_text]
       - hex: "#000000"
         source: "black: 54 small (20x20) absolute corner icon-badge chips on cards (clickable
           via the card) — a badge, not a CTA"
@@ -709,9 +715,11 @@ sites:
         roles:
           text: [page_text]
       - hex: "#364153"
-        source: "Tailwind slate-700 text (8 text)"
+        source: "Tailwind slate-700 text (8 text) + a real clickable `<a hover:underline>` link
+          painting the same color (audit S31)"
         roles:
           text: [page_text]
+          link: [link]
 
   # ===================================================================================
   # resend — DARK theme. Near-black canvas (#000000, 0.86 area; absorbs #010101 at ΔE2000
@@ -774,8 +782,30 @@ sites:
         source: "mid gray text (66 text, non-clickable)"
         roles:
           text: [page_text]
-      - hex: "#ebeced"
-        source: "near-white text (3 text, non-clickable)"
+      # Near-white TEXT palette (audit S31): the real text tokens are the Radix gray/slate scale,
+      # NOT #ffffff (which paints mostly SVG icon-fill). Each is a distinct token > 1.0 ΔE2000
+      # apart. The pipeline OKLab-merges them into ONE near-white cluster, so the eval is EXPECTED
+      # to flag recall misses here until near-white clustering + mass-weighted representative
+      # selection is fixed (gt-is-page-truth, not a GT error). Removed prior #ebeced (its 3 glyphs
+      # are Prism `token function font-mono` code-syntax, not real text).
+      - hex: "#f0f0f0"
+        source: "`text-gray-12` (set on <body>): the dominant body + heading text
+          (65 has_text: h1/h2/p/blockquote/span)"
+        roles:
+          text: [page_text, card_text]
+      - hex: "#fcfdff"
+        source: "`text-slate-12`: high-contrast heading/display text (36 has_text, h2/h4
+          font-display)"
+        roles:
+          text: [page_text, card_text]
+      - hex: "#f1f7fe"
+        source: "`text-slate-11`: nav/muted interactive text + links (90 has_text, 63 clickable;
+          default of `hover:text-slate-12`)"
+        roles:
+          text: [page_text]
+          link: [link]
+      - hex: "#e5edfd"
+        source: "`text-slate-10`: dim muted label text (11 has_text, non-clickable)"
         roles:
           text: [page_text]
       - hex: "#46fea5"
@@ -816,12 +846,14 @@ sites:
     colors:
       - hex: "#ffffff"
         source: "white: page canvas (33 bg, 0.44 area), cards, header/footer, white ghost CTA
-          buttons (6 clickable bg), white links/borders"
+          buttons (6 clickable bg), white SECONDARY buttons (`button_ghost`/`buttonVariantTertiary`/
+          `actionButton`; audit S31), white links/borders"
         roles:
           page: [page_bg]
           surface: [card_bg]
           banner: [header_bg, footer_bg]
           cta: [cta_bg]
+          action: [button_secondary]
           link: [link]
           border: [border]
       - hex: "#f6f5f3"
