@@ -43,31 +43,34 @@ def _by_name(classified: list[ClassifiedToken], name: str) -> ClassifiedToken:
     return matches[0]
 
 
-def _argmax_role(prior: dict[UsageRole, float]) -> UsageRole:
-    """Return the usage role with the largest probability mass."""
-    assert prior, "usage_prior is empty"
-    return max(prior, key=lambda role: prior[role])
+def _get_usage_role_with_largest_probability_mass(
+    usage_intent: dict[UsageRole, float],
+) -> UsageRole:
+    assert usage_intent, "usage_intent is empty"
+    return max(usage_intent, key=lambda role: usage_intent[role])
 
 
 def test_color_primary_is_cta_dominant() -> None:
-    """--color-primary strips to 'primary' -> brand_primary -> cta-dominant prior."""
+    """--color-primary strips to 'primary' -> brand_primary -> cta-dominant usage intent."""
     classified = classify_tokens([_record("--color-primary")], CONFIG)
     token = _by_name(classified, "--color-primary")
     assert token.semantic_role is TokenSemanticRole.brand_primary
     assert token.origin is TokenOrigin.name_rule
-    assert _argmax_role(token.usage_prior) is UsageRole.cta
+    assert _get_usage_role_with_largest_probability_mass(token.usage_intent) is UsageRole.cta
 
 
-def test_gray_scale_gets_plain_neutral_prior() -> None:
-    """A gray scale token is neutral with the plain YAML prior (no lightness special-case).
+def test_gray_scale_gets_plain_neutral_usage_intent() -> None:
+    """A gray scale token is neutral with the plain YAML usage_intent
+    (no lightness special-case).
 
-    The neutral prior spans page/surface/banner/text/border (the old surface mass split
-    across the three background roles) — the resolved lightness no longer reroutes it.
+    The neutral usage_intent spans page/surface/banner/text/border (the
+    old surface mass split across the three background roles) — the resolved
+    lightness no longer reroutes it.
     """
     light = parse_css_color("#f3f4f6")
     dark = parse_css_color("#111827")
     assert light is not None and dark is not None
-    classified = classify_tokens(
+    classified_tokens = classify_tokens(
         [
             _record("--gray-100", "#f3f4f6", resolved=light),
             _record("--gray-900", "#111827", resolved=dark),
@@ -75,34 +78,34 @@ def test_gray_scale_gets_plain_neutral_prior() -> None:
         CONFIG,
     )
     for name in ("--gray-100", "--gray-900"):
-        token = _by_name(classified, name)
+        token = _by_name(classified_tokens, name)
         assert token.semantic_role is TokenSemanticRole.neutral
         # "gray" is a name rule, which outranks scale detection in the precedence.
         assert token.origin is TokenOrigin.name_rule
-        assert set(token.usage_prior) == {
+        assert set(token.usage_intent) == {
             UsageRole.page,
             UsageRole.surface,
             UsageRole.banner,
             UsageRole.text,
             UsageRole.border,
         }
-        # Text carries the most neutral mass in the remapped prior.
-        assert _argmax_role(token.usage_prior) is UsageRole.text
-    # Light and dark resolve to the SAME prior now: no measured-lightness rerouting.
+        # Text carries the most neutral mass in the remapped usage intent
+        assert _get_usage_role_with_largest_probability_mass(token.usage_intent) is UsageRole.text
+    # Light and dark resolve to the SAME usage intent now: no measured-lightness rerouting.
     assert (
-        _by_name(classified, "--gray-100").usage_prior
-        == _by_name(classified, "--gray-900").usage_prior
+        _by_name(classified_tokens, "--gray-100").usage_intent
+        == _by_name(classified_tokens, "--gray-900").usage_intent
     )
 
 
-def test_destructive_is_status_with_empty_prior() -> None:
-    """--destructive -> status: empty prior (status_excluded_from_palette)."""
+def test_destructive_is_status_with_empty_usage_intent() -> None:
+    """--destructive -> status: empty usage intent (status_excluded_from_palette)."""
     red = parse_css_color("#ef4444")
     assert red is not None
     classified = classify_tokens([_record("--destructive", "#ef4444", resolved=red)], CONFIG)
     token = _by_name(classified, "--destructive")
     assert token.semantic_role is TokenSemanticRole.status
-    assert token.usage_prior == {}
+    assert token.usage_intent == {}
     # Still classified (not dropped): it surfaces to consumers via DesignToken.
     assert token.record.resolved == red
 
@@ -113,7 +116,7 @@ def test_alias_inherits_brand_accent_with_alias_origin() -> None:
     The aliasing token must NOT match a name rule on its own (otherwise that rule
     wins per the spec precedence), so we use an opaque name that self-classifies to
     ignore; it then inherits brand_accent from --accent and an interactive-dominant
-    prior — but carries origin ``alias`` (the alias itself was never matched).
+    usage intent — but carries origin ``alias`` (the alias itself was never matched).
     """
     # Sanity: the aliasing name self-classifies to ignore on its own.
     solo = classify_tokens([_record("--zxqw")], CONFIG)
@@ -127,18 +130,18 @@ def test_alias_inherits_brand_accent_with_alias_origin() -> None:
     aliased = _by_name(classified, "--zxqw")
     assert aliased.semantic_role is TokenSemanticRole.brand_accent
     assert aliased.origin is TokenOrigin.alias
-    assert _argmax_role(aliased.usage_prior) is UsageRole.cta
+    assert _get_usage_role_with_largest_probability_mass(aliased.usage_intent) is UsageRole.cta
     # The target itself keeps its own (name_rule) origin.
     assert _by_name(classified, "--accent").origin is TokenOrigin.name_rule
 
 
 def test_relational_text_on_classification() -> None:
-    """--on-primary routes to text_on with an empty prior and relational origin."""
+    """--on-primary routes to text_on with an empty usage intent and relational origin."""
     classified = classify_tokens([_record("--on-primary")], CONFIG)
     token = _by_name(classified, "--on-primary")
     assert token.semantic_role is TokenSemanticRole.text_on
     assert token.origin is TokenOrigin.relational
-    assert token.usage_prior == {}
+    assert token.usage_intent == {}
 
 
 def test_chromatic_scale_origin_is_scale() -> None:
@@ -147,7 +150,7 @@ def test_chromatic_scale_origin_is_scale() -> None:
     token = _by_name(classified, "--blue-500")
     assert token.semantic_role is TokenSemanticRole.brand_accent
     assert token.origin is TokenOrigin.scale
-    assert _argmax_role(token.usage_prior) is UsageRole.cta
+    assert _get_usage_role_with_largest_probability_mass(token.usage_intent) is UsageRole.cta
 
 
 def test_neutral_scale_family_origin_is_scale() -> None:
@@ -165,7 +168,7 @@ def test_unmatched_token_is_ignored_with_fallback_origin() -> None:
     assert token.semantic_role is TokenSemanticRole.ignore
     assert token.origin is TokenOrigin.fallback
     assert token.weight == 0.0
-    assert token.usage_prior == {}
+    assert token.usage_intent == {}
 
 
 def test_alias_cycle_does_not_hang() -> None:
@@ -181,9 +184,9 @@ def test_alias_cycle_does_not_hang() -> None:
     assert _by_name(classified, "--a").origin is TokenOrigin.fallback
 
 
-def test_usage_prior_table_sanity() -> None:
-    """Spot-check the role -> usage prior table through real classifications."""
-    classified = classify_tokens(
+def test_usage_intent_table_sanity() -> None:
+    """Spot-check the role -> usage-intent table through real classifications."""
+    classified_tokens = classify_tokens(
         [
             _record("--background"),  # surface_base
             _record("--text"),  # text_body
@@ -193,19 +196,23 @@ def test_usage_prior_table_sanity() -> None:
         CONFIG,
     )
     # surface_base now leans the page canvas (the old surface mass split across roles).
-    background_prior = _by_name(classified, "--background").usage_prior
-    assert set(background_prior) == {UsageRole.page, UsageRole.surface, UsageRole.banner}
-    assert _argmax_role(background_prior) is UsageRole.page
-    assert _by_name(classified, "--text").usage_prior == {UsageRole.text: 1.0}
-    assert _by_name(classified, "--border").usage_prior == {UsageRole.border: 1.0}
+    background_usage_intent = _by_name(classified_tokens, "--background").usage_intent
+    assert set(background_usage_intent) == {
+        UsageRole.page,
+        UsageRole.surface,
+        UsageRole.banner,
+    }
+    assert _get_usage_role_with_largest_probability_mass(background_usage_intent) is UsageRole.page
+    assert _by_name(classified_tokens, "--text").usage_intent == {UsageRole.text: 1.0}
+    assert _by_name(classified_tokens, "--border").usage_intent == {UsageRole.border: 1.0}
     # interactive (--link) splits across cta/link/action, cta-dominant.
-    link_prior = _by_name(classified, "--link").usage_prior
-    assert set(link_prior) == {UsageRole.cta, UsageRole.link, UsageRole.action}
-    assert _argmax_role(link_prior) is UsageRole.cta
+    link_usage_intent = _by_name(classified_tokens, "--link").usage_intent
+    assert set(link_usage_intent) == {UsageRole.cta, UsageRole.link, UsageRole.action}
+    assert _get_usage_role_with_largest_probability_mass(link_usage_intent) is UsageRole.cta
 
 
-def test_all_nonempty_priors_sum_to_one() -> None:
-    """Every non-empty usage_prior must sum to ~1.0 (abs tol 1e-6)."""
+def test_all_nonempty_distributions_sum_to_one() -> None:
+    """Every non-empty usage intent must sum to ~1.0 (abs tol 1e-6)."""
     light = parse_css_color("#f3f4f6")
     dark = parse_css_color("#111827")
     red = parse_css_color("#ef4444")
@@ -228,8 +235,8 @@ def test_all_nonempty_priors_sum_to_one() -> None:
     ]
     classified = classify_tokens(tokens, CONFIG)
     for token in classified:
-        if token.usage_prior:
-            total = math.fsum(token.usage_prior.values())
+        if token.usage_intent:
+            total = math.fsum(token.usage_intent.values())
             assert math.isclose(total, 1.0, abs_tol=1e-6), (
-                f"{token.record.name} prior sums to {total}"
+                f"{token.record.name} usage intent sums to {total}"
             )

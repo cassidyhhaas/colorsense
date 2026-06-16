@@ -12,9 +12,8 @@ supply their own copy via [`load_config`][colorsense.load_config].
 
 Public interface
 ----------------
-* [`Config`][colorsense.Config] — top-level model + the four token helpers
-  ([`Config.strip_namespace`][colorsense.Config.strip_namespace],
-  [`Config.match_name_rule`][colorsense.Config.match_name_rule],
+* [`Config`][colorsense.Config] — top-level model + the three token helpers
+  ([`Config.match_name_rule`][colorsense.Config.match_name_rule],
   [`Config.detect_scale`][colorsense.Config.detect_scale],
   [`Config.match_relational`][colorsense.Config.match_relational]).
 * [`load_default_config`][colorsense.load_default_config] — load the configuration bundled
@@ -39,14 +38,14 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from colorsense.models import TokenSemanticRole, UsageRole
 
 __all__ = [
-    "ChannelPrior",
+    "ChannelRoute",
     "ComponentClassifierConfig",
     "Config",
-    "DistributionPrior",
     "MatchType",
     "RelationalInfo",
     "ScaleInfo",
     "TokenVocabularyConfig",
+    "UsageIntent",
     "load_config",
     "load_default_config",
 ]
@@ -201,24 +200,33 @@ class ScaleDetectionConfig(BaseModel):
         return self
 
 
-class ChannelPrior(BaseModel):
-    """A ``role_to_usage_prior`` row that names a non-palette channel."""
+class ChannelRoute(BaseModel):
+    """One arm of ``UsageIntentOrChannel``: routes a token to a non-palette channel.
+
+    Channel routes (``text_on`` / ``status`` / ``ignore``) carry no usage
+    distribution: the token is reported on its side-channel, not ranked by usage.
+    """
 
     model_config = ConfigDict(frozen=True)
 
     channel: str
 
 
-class DistributionPrior(BaseModel):
-    """A ``role_to_usage_prior`` row: a normalized distribution over usage roles."""
+class UsageIntent(BaseModel):
+    """One arm of ``UsageIntentOrChannel``: a normalized distribution over usage roles.
+
+    Expresses where a semantic role's color is expected to be used, inferred
+    from the token's name before the page is measured.
+    """
 
     model_config = ConfigDict(frozen=True)
 
     distribution: dict[UsageRole, float]
 
 
-# A prior row is either a normalized distribution or a tagged channel.
-PriorRow = DistributionPrior | ChannelPrior
+# What each semantic role maps to: a usage-intent distribution, or a route to a
+# non-palette channel.
+UsageIntentOrChannel = UsageIntent | ChannelRoute
 
 
 class TokenVocabularyConfig(BaseModel):
@@ -232,28 +240,29 @@ class TokenVocabularyConfig(BaseModel):
     name_rules: tuple[NameRule, ...]
     relational_modifiers: tuple[RelationalModifier, ...]
     scale_detection: ScaleDetectionConfig
-    role_to_usage_prior: dict[TokenSemanticRole, PriorRow]
+    semantic_role_to_usage_intent_or_channel: dict[TokenSemanticRole, UsageIntentOrChannel]
     status_excluded_from_palette: bool
 
     @model_validator(mode="before")
     @classmethod
-    def _normalize_priors(cls, data: object) -> object:
-        """Coerce each prior row into a channel or a normalized distribution.
+    def _normalize_usage_intent(cls, data: object) -> object:
+        """Coerce each row into a channel route or a normalized usage-intent distribution.
 
         Distribution rows are normalized to sum to 1.0; channel rows
         (``{channel: ...}``) are passed through untouched. Validation errors
         (e.g. an empty / all-zero distribution) surface as pydantic errors.
         """
+        table = "semantic_role_to_usage_intent_or_channel"
         if not isinstance(data, dict):
             return data
-        raw_priors = data.get("role_to_usage_prior")
-        if not isinstance(raw_priors, dict):
+        raw_rows = data.get(table)
+        if not isinstance(raw_rows, dict):
             return data
 
         normalized: dict[object, object] = {}
-        for role, row in raw_priors.items():
+        for role, row in raw_rows.items():
             if not isinstance(row, dict):
-                raise ValueError(f"role_to_usage_prior[{role!r}] must be a mapping")
+                raise ValueError(f"{table}[{role!r}] must be a mapping")
             if "channel" in row:
                 normalized[role] = {"channel": row["channel"]}
                 continue
@@ -261,22 +270,18 @@ class TokenVocabularyConfig(BaseModel):
             for key, weight in row.items():
                 value = float(weight)
                 if value < 0.0:
-                    # A negative prior would survive normalization and reach reconcile's
+                    # A negative weight would survive normalization and reach reconcile's
                     # ``** alpha`` pooling, where a negative base under a fractional
                     # exponent yields a complex number — fail at load, not deep in math.
-                    raise ValueError(
-                        f"role_to_usage_prior[{role!r}][{key!r}] must be >= 0, got {value}"
-                    )
+                    raise ValueError(f"{table}[{role!r}][{key!r}] must be >= 0, got {value}")
                 total += value
             if total <= 0.0:
-                raise ValueError(
-                    f"role_to_usage_prior[{role!r}] distribution must sum to a positive value"
-                )
+                raise ValueError(f"{table}[{role!r}] distribution must sum to a positive value")
             normalized[role] = {
                 "distribution": {key: float(weight) / total for key, weight in row.items()}
             }
         new_data = dict(data)
-        new_data["role_to_usage_prior"] = normalized
+        new_data[table] = normalized
         return new_data
 
 
@@ -411,7 +416,6 @@ class ComponentClassifierConfig(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    component_types: tuple[str, ...]
     # gt=0: a zero temperature divides by zero at classify time, and a NEGATIVE one
     # silently *inverts* the component ranking — the worst kind of misconfiguration.
     softmax_temperature: float = Field(gt=0.0)
@@ -509,25 +513,6 @@ class Config(BaseModel):
             if lowered.startswith(prefix.lower()) and (best is None or len(prefix) > len(best)):
                 best = prefix
         return best
-
-    def strip_namespace(self, name: str) -> str:
-        """Strip a leading ``--``, the longest namespace prefix, then a trailing suffix.
-
-        The returned remainder is lower-cased (matching is case-insensitive on
-        the remainder).
-        """
-        remainder = name[2:] if name.startswith("--") else name
-
-        prefix = self._matched_namespace_prefix(remainder)
-        if prefix is not None:
-            remainder = remainder[len(prefix) :]
-
-        lowered = remainder.lower()
-        for suffix in self.token_vocabulary.strip_trailing:
-            if lowered.endswith(suffix.lower()):
-                lowered = lowered[: len(lowered) - len(suffix)]
-                break
-        return lowered
 
     def match_name_rule(self, name: str) -> tuple[TokenSemanticRole, float] | None:
         """Match ``name`` against ``name_rules`` with exact > regex > substring precedence.

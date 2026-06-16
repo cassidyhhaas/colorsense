@@ -6,7 +6,7 @@ This module fuses two independent signals about a site's palette, in **usage-rol
 * **usage** — the measured per-role prominence over rendered *colors* produced by
   ``build_usage``; this is "what actually rendered".
 * **tokens** — the declared design-token *intent* produced by ``classify_tokens``; each
-  token carries a resolved [`Color`][colorsense.Color] and a ``usage_prior`` distribution over
+  token carries a resolved [`Color`][colorsense.Color] and a ``usage_intent`` distribution over
   [`UsageRole`][colorsense.UsageRole]; this is "what the author declared".
 
 The two are combined by **log-linear pooling** (a weighted geometric mean) with weight
@@ -35,7 +35,7 @@ import math
 from collections.abc import Sequence
 from dataclasses import dataclass
 
-from colorsense.color.primitives import delta_e
+from colorsense.color.match import any_within, first_within, nearest_within
 from colorsense.models import (
     ClassifiedToken,
     Color,
@@ -91,8 +91,8 @@ UNDECLARED_MIN_PROB: float = 0.15
 #: meant to render), ``alias`` followers, and ``fallback`` classifications are excluded
 #: (see docs/how-it-works.md for the token-heavy-site failure that motivated the gate).
 #: The two qualifying origins reach the report by different paths: ``name_rule`` tokens
-#: carry usage priors and report through their intent group's argmax role, while
-#: ``relational`` tokens carry no prior (channel-routed) and report through the
+#: carry usage intent and report through their intent group's argmax role, while
+#: ``relational`` tokens carry no usage intent (channel-routed) and report through the
 #: dedicated `_aggregate_relational` pass, attributed to ``text``.
 HIGH_INTENT_ORIGINS: frozenset[TokenOrigin] = frozenset(
     {TokenOrigin.relational, TokenOrigin.name_rule}
@@ -114,8 +114,11 @@ class _IntentGroup:
         self.high_intent: bool = False
 
     def add(self, token: ClassifiedToken) -> None:
-        for role, prior in token.usage_prior.items():
-            self.intent_raw[role] = self.intent_raw.get(role, 0.0) + token.weight * prior
+        # The token's usage intent is the prior (declared belief about where the
+        # color is used); it is later log-linearly pooled against measured usage
+        # (the evidence) to form the reconciled posterior.
+        for role, weight in token.usage_intent.items():
+            self.intent_raw[role] = self.intent_raw.get(role, 0.0) + token.weight * weight
         self.token_weight += token.weight
         if token.origin in HIGH_INTENT_ORIGINS:
             self.high_intent = True
@@ -142,11 +145,8 @@ def _group_by_color(eligible: list[ClassifiedToken]) -> list[_IntentGroup]:
     for token in sorted(eligible, key=lambda t: t.record.name):
         color = token.record.resolved
         assert color is not None  # callers filter on resolved
-        matched: _IntentGroup | None = None
-        for group in groups:
-            if delta_e(color, group.color) <= DELTA_E_MATCH:
-                matched = group
-                break
+        match_idx = first_within(color, groups, DELTA_E_MATCH, key=lambda g: g.color)
+        matched = groups[match_idx] if match_idx is not None else None
         if matched is None:
             matched = _IntentGroup(color)
             groups.append(matched)
@@ -157,24 +157,24 @@ def _group_by_color(eligible: list[ClassifiedToken]) -> list[_IntentGroup]:
 def _aggregate_intent(tokens: list[ClassifiedToken]) -> list[_IntentGroup]:
     """Group declared tokens by color and build per-role intent scores.
 
-    Only tokens with a resolved color and a non-empty ``usage_prior`` are considered —
+    Only tokens with a resolved color and a non-empty ``usage_intent`` are considered —
     these are the tokens that can shape pooling. Relational and (excluded) status tokens
-    carry empty priors by construction and are handled separately in divergence
+    carry empty usage intent by construction and are handled separately in divergence
     (`_aggregate_relational`, and the all-resolved-colors membership test).
     """
     return _group_by_color(
-        [t for t in tokens if t.record.resolved is not None and len(t.usage_prior) > 0]
+        [t for t in tokens if t.record.resolved is not None and len(t.usage_intent) > 0]
     )
 
 
 def _aggregate_relational(tokens: list[ClassifiedToken]) -> list[_IntentGroup]:
     """Group relational (``--on-primary``-style) tokens for divergence reporting.
 
-    Relational classifications always carry an EMPTY ``usage_prior`` (their config row
-    is a channel route, not a role distribution), so they never form intent groups
+    Relational classifications always carry an EMPTY ``usage_intent`` (their config row
+    is a channel route, not a usage-intent distribution), so they never form intent groups
     and never shape pooling — but they are direct author intent (`HIGH_INTENT_ORIGINS`)
-    and must still be able to raise declared-but-unused. The empty-prior filter keeps a
-    (hand-constructed) prior-bearing relational token from being reported twice.
+    and must still be able to raise declared-but-unused. The empty-usage-intent filter keeps a
+    (hand-constructed) intent-bearing relational token from being reported twice.
     """
     return _group_by_color(
         [
@@ -182,7 +182,7 @@ def _aggregate_relational(tokens: list[ClassifiedToken]) -> list[_IntentGroup]:
             for t in tokens
             if t.origin is TokenOrigin.relational
             and t.record.resolved is not None
-            and not t.usage_prior
+            and not t.usage_intent
         ]
     )
 
@@ -267,18 +267,16 @@ def _pool_role(
         return []
 
     def intent_for(color: Color) -> float:
-        best_idx: int | None = None
-        best_d = DELTA_E_MATCH_MEASURED
-        for gi, group in enumerate(groups):
-            if role not in intents[gi]:
-                continue
-            d = delta_e(color, group.color)
-            if d <= best_d:
-                best_d = d
-                best_idx = gi
-        if best_idx is None:
+        # Pre-filter to groups carrying this role, keeping the original index so the
+        # nearest match remaps back to `intents[gi]`. Same <=/tie-to-last semantics.
+        eligible = [(gi, group) for gi, group in enumerate(groups) if role in intents[gi]]
+        match_idx = nearest_within(
+            color, eligible, DELTA_E_MATCH_MEASURED, key=lambda pair: pair[1].color
+        )
+        if match_idx is None:
             return 0.0
-        return intents[best_idx][role]
+        gi = eligible[match_idx][0]
+        return intents[gi][role]
 
     candidates = [
         _PoolCandidate(
@@ -342,7 +340,7 @@ def _build_divergence(
     )
 
     def matches_any_usage(color: Color) -> bool:
-        return any(delta_e(color, uc) <= DELTA_E_MATCH_MEASURED for uc in usage_colors)
+        return any_within(color, usage_colors, DELTA_E_MATCH_MEASURED, key=lambda c: c)
 
     items: list[DivergenceItem] = []
 
@@ -367,7 +365,7 @@ def _build_divergence(
             )
         )
 
-    # DECLARED-BUT-UNUSED, relational arm: relational tokens carry no usage prior (so
+    # DECLARED-BUT-UNUSED, relational arm: relational tokens carry no usage intent (so
     # they never join `groups`), but they are direct author intent and an unused
     # ``--on-primary`` deserves a report. They are foreground/text colors by
     # construction (the ``text_on`` channel), so the item is attributed to ``text``.
@@ -386,13 +384,13 @@ def _build_divergence(
 
     # USED-BUT-UNDECLARED: prominent usage entry matching no declared token color.
     # Membership is tested against EVERY resolved declared color — including relational,
-    # status, scale, and fallback classifications that carry no usage prior — because
+    # status, scale, and fallback classifications that carry no usage intent — because
     # "undeclared" is a statement about the stylesheet, not about intent mass: a page
     # rendering exactly its declared ``--on-primary`` text color is not undeclared.
     token_colors = [t.record.resolved for t in tokens if t.record.resolved is not None]
 
     def matches_any_token(color: Color) -> bool:
-        return any(delta_e(color, tc) <= DELTA_E_MATCH_MEASURED for tc in token_colors)
+        return any_within(color, token_colors, DELTA_E_MATCH_MEASURED, key=lambda c: c)
 
     seen: set[tuple[UsageRole, str]] = set()
     for role, entries in usage.mapping.items():

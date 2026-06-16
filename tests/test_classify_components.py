@@ -7,7 +7,7 @@ import math
 import pytest
 
 from colorsense.classify.components import (
-    _derive_page_canvas,
+    _derive_page_canvas_color,
     _finalize_distribution,
     _matches_interactivity,
     _matches_semantic_tag,
@@ -474,10 +474,10 @@ def test_derive_page_canvas_prefers_body_over_largest_surface() -> None:
     """`_derive_page_canvas` returns the <body> opaque bg even if a larger element exists."""
     body = _element(tag="body", bg=_LIGHT_CANVAS, rect=Rect(x=0, y=0, width=100, height=100))
     bigger = _element(tag="div", bg=_DARK_FILL, rect=Rect(x=0, y=0, width=2000, height=2000))
-    assert _derive_page_canvas([bigger, body]) == _LIGHT_CANVAS
+    assert _derive_page_canvas_color([bigger, body]) == _LIGHT_CANVAS
     # No opaque background anywhere -> None (relabel cannot fire).
     transparent = _element(tag="div", bg=None)
-    assert _derive_page_canvas([transparent]) is None
+    assert _derive_page_canvas_color([transparent]) is None
 
 
 def test_anchor_is_dominant_link() -> None:

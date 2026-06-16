@@ -57,6 +57,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 
+from colorsense.color.match import nearest_within
 from colorsense.color.primitives import delta_e
 from colorsense.models import (
     ClassifiedElement,
@@ -313,13 +314,9 @@ def build_inventory(harvest: Harvest, classified: list[ClassifiedElement]) -> li
             for color in fills:
                 weight = (color.alpha if channel == "bg" else 1.0) / fill_count
 
-                nearest_index: int | None = None
-                nearest_distance = _MATCH_BY_CHANNEL[channel]
-                for idx, entry in enumerate(pool):
-                    distance = delta_e(color, entry.color)
-                    if distance <= nearest_distance:
-                        nearest_distance = distance
-                        nearest_index = idx
+                nearest_index = nearest_within(
+                    color, pool, _MATCH_BY_CHANNEL[channel], key=lambda entry: entry.color
+                )
 
                 if nearest_index is None:
                     new_entry = _Entry(color, 0.0)

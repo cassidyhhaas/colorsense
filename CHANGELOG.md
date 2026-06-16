@@ -9,6 +9,20 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- **Internal refactor (no behavior change):** the hand-written nearest-color / any-within-ΔE
+  match loops in `palette/inventory.py` and `palette/reconcile.py` now share helpers in a new
+  internal `colorsense.color.match` module (`any_within` / `nearest_within` / `first_within`),
+  centralizing the validated OKLab `delta_e` matching convention and its `<=` tie-break. Pipeline
+  output (eval scorecard and golden snapshots) is unchanged.
+- **Internal rename for clarity (no behavior change):** the declared-token "usage prior"
+  concept is now uniformly called **usage intent** — a distribution over usage roles
+  expressing where a token's color is expected to be used, inferred from its name before the
+  page is measured. The YAML key `token_vocabulary.role_to_usage_prior` is now
+  `semantic_role_to_usage_intent_or_channel`; the config models `DistributionPrior`/`ChannelPrior`/`PriorRow`
+  are now `UsageIntent`/`ChannelRoute`/`UsageIntentOrChannel` (the last describing what each
+  semantic role maps to — a usage intent or a channel route); and `ClassifiedToken.role_distribution`
+  is now `ClassifiedToken.usage_intent`. These are internal (not part of the public
+  `colorsense` API); analysis output is unchanged.
 - Non-anchor CTA-button **labels** no longer leak into the `link` usage role. The harvester
   now records each element's composited *effective background* (the first fully-opaque
   background up its ancestor chain) and whether that background is painted by a clickable
@@ -20,6 +34,15 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   passive dark sections, and ordinary dark-on-light text are all protected. This completes
   the "A2" attribution work begun in 0.6.0 (which handled button-styled *anchors*). Golden
   snapshots were regenerated (`ds_site`, `legacy_site`: button labels left the `link` role).
+
+### Removed
+
+- **Internal dead-code cleanup (no behavior or public-API change):** removed four unused
+  `color.primitives` helpers (`composite_over`, `is_neutral`, `to_hex`, `nudge_lightness`)
+  and the unused `Config.strip_namespace` method, none of which were re-exported from the
+  public `colorsense` API or called anywhere in the library. Removed the
+  `component_classifier.component_types` config key (and its model field): it duplicated the
+  `ComponentType` enum in `models.py` and was loaded but never read, so it tuned nothing.
 
 ## [0.6.0] - 2026-06-14
 

@@ -101,7 +101,7 @@ def _is_pill(element: HarvestedElement) -> bool:
     )
 
 
-def _paints_fill(element: HarvestedElement) -> bool:
+def _paints_visible_fill(element: HarvestedElement) -> bool:
     """Whether the element paints a visible fill: a non-transparent bg, border, or ring.
 
     Gates the badge rule so a decorative fully-rounded divider (a ``rounded-full`` bar
@@ -120,13 +120,13 @@ def _paints_button_surface(element: HarvestedElement) -> bool:
 
     A button surface is a solid/opaque ``bg``, a ``border``, or a gradient fill
     (``bg_gradient_stops`` — populated only on clickable gradient pill CTAs, whose computed
-    ``bg`` is transparent; see `HarvestedElement`). It DIFFERS from `_paints_fill` (they do not
-    nest): this counts gradient stops but a box-shadow alone does NOT count, whereas
-    `_paints_fill` counts a box-shadow but not gradient stops. It gates the anchor routing (the
-    ``a & button_surface`` interactivity predicate) — a filled, outlined, or gradient-pill
-    anchor is a button-styled CTA whose label text is `cta_text` (a CTA label, carried by no
-    usage role), while a bare anchor — even an elevated, shadow-only one such as a text link
-    with a focus ring — stays a genuine inline ``link``.
+    ``bg`` is transparent; see `HarvestedElement`). It DIFFERS from `_paints_visible_fill` (they
+    do not nest): this counts gradient stops but a box-shadow alone does NOT count, whereas
+    `_paints_visible_fill` counts a box-shadow but not gradient stops. It gates the anchor
+    routing (the ``a & button_surface`` interactivity predicate) — a filled, outlined, or
+    gradient-pill anchor is a button-styled CTA whose label text is `cta_text` (a CTA
+    label, carried by no usage role), while a bare anchor — even an elevated, shadow-only
+    one such as a text link with a focus ring — stays a genuine inline ``link``.
     """
     return (
         (element.bg is not None and element.bg.alpha > 0.0)
@@ -135,7 +135,7 @@ def _paints_button_surface(element: HarvestedElement) -> bool:
     )
 
 
-def _derive_page_canvas(elements: list[HarvestedElement]) -> Color | None:
+def _derive_page_canvas_color(elements: list[HarvestedElement]) -> Color | None:
     """Best-effort page canvas color: the surface a genuine inline link reads against.
 
     Classify does not otherwise know the page background. Derived deterministically with a
@@ -223,8 +223,9 @@ def _is_cta_label(
     if ciede2000(effective_bg, page_canvas) <= relabel.canvas_delta_e:
         return False
     return (
-        contrast_ratio(text, effective_bg) >= relabel.wcag_min_contrast
-        and contrast_ratio(text, page_canvas) < relabel.wcag_min_contrast
+        contrast_ratio(text, effective_bg)
+        >= relabel.wcag_min_contrast
+        > contrast_ratio(text, page_canvas)
     )
 
 
@@ -299,7 +300,7 @@ def _matches_geometry(
     if when == "pill & paints_fill & has_text & h<=badge_max_h_px":
         return (
             _is_pill(element)
-            and _paints_fill(element)
+            and _paints_visible_fill(element)
             and element.has_text
             and element.rect.height <= thresholds.badge_max_h_px
         )
@@ -529,7 +530,7 @@ def classify_components(
     thresholds = classifier_config.geometry.thresholds
 
     repetition_members = _repetition_member_indices(elements, config)
-    page_canvas = _derive_page_canvas(elements)
+    page_canvas = _derive_page_canvas_color(elements)
     relabel_config = classifier_config.contrast_relabel
 
     results: list[ClassifiedElement] = []

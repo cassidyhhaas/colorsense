@@ -292,7 +292,7 @@ def test_harvest_models_construct() -> None:
     assert cluster.component_mass == {ComponentType.card_bg: 7.5}
 
 
-def test_internal_classified_token_carries_origin_and_usage_prior() -> None:
+def test_internal_classified_token_carries_origin_and_usage_intent() -> None:
     token = ClassifiedToken(
         record=TokenRecord(
             name="--color-primary",
@@ -302,11 +302,11 @@ def test_internal_classified_token_carries_origin_and_usage_prior() -> None:
         ),
         semantic_role=TokenSemanticRole.brand_primary,
         weight=5.0,
-        usage_prior={UsageRole.cta: 0.5, UsageRole.surface: 0.5},
+        usage_intent={UsageRole.cta: 0.5, UsageRole.surface: 0.5},
         origin=TokenOrigin.name_rule,
     )
     assert token.origin is TokenOrigin.name_rule
-    assert sum(token.usage_prior.values()) == 1.0
+    assert sum(token.usage_intent.values()) == 1.0
     # Origin defaults to fallback when unspecified.
     assert ClassifiedToken.model_fields["origin"].default is TokenOrigin.fallback
 
