@@ -291,6 +291,25 @@ and the two limits guard against opposite failure modes:
   known limitation of clustering in OKLab. (A near-black *text* color and a near-black
   *surface* no longer merge, though: they live in different family pools.)
 
+#### The near-white guard
+
+OKLab ΔE is materially *non-uniform* near the lightness extremes: up at white, the 0.05
+radius balloons to ~6.5–8.5 in the perceptually-uniform CIEDE2000 units. So the tight 0.05
+join silently swallows clearly-distinct near-white text colors. The canonical case is
+GitHub's logged-out homepage, whose dominant body text is pure `#ffffff` while Primer's
+`--fgColor-default` paints a near-white `#f0f6fc`: OKLab puts them ΔE 0.031 apart (they
+merge), but CIEDE2000 puts them at 4.0 (plainly different) — and because the `#f0f6fc`
+entry forms first, the white text never surfaces in the `text`/`link` roles at all.
+
+So in the **text and border pools only**, two *near-white* entries (lightness ≥ 0.90) merge —
+both at the join above and at the cluster step — only if they are also within **3.0 ΔE2000**
+(`NEAR_WHITE_MERGE_MAX_DE2000`), measured with the accurate-near-white CIEDE2000 metric. That
+3.0 is a *denoising* radius, deliberately looser than the 1.0 ΔE2000 identity floor: anti-alias
+variants (~1–3 ΔE2000 from their canonical color) still collapse, while genuinely-distinct
+tokens like `#ffffff`/`#f0f6fc` stay apart. The **background** pool keeps the pure OKLab radius —
+there its coarseness usefully denoises quantized screenshot bins, and that is the regime OKLab
+is being relied on for. (The near-black analogue is left to the family-pool split above.)
+
 ### The cross-OS quantizer incident
 
 The loose bg radius has a knock-on effect on reconciliation (§5), pinned down by a real
