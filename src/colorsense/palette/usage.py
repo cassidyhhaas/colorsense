@@ -90,6 +90,22 @@ CT = ComponentType
 # palette ranking stage).
 MIN_SHARE: float = 0.02
 
+# Absolute vote-mass floor that EXEMPTS an element-color entry from the `MIN_SHARE`
+# share prune. ``MIN_SHARE`` is a *relative* threshold, so its meaning drifts with the
+# number of entries: when a role accumulates many colors (e.g. the near-white text
+# guard in `inventory.py` splits one near-white cluster into several), every entry's
+# share shrinks and a genuine low-mass color can fall below `MIN_SHARE` purely from
+# dilution, not from being any less real. An entry carrying at least this much raw
+# in-role vote mass has independent, DOM-derived evidence that it genuinely paints the
+# role, so it survives the share prune regardless. Calibrated on the quality eval panel:
+# the lowest-mass genuine element-role color (resend's `#46fea5` neon-green accent text,
+# mass 0.89) sits just above the noise floor below it (mass 0.76), so ~one element's
+# worth of confident vote separates real low-mass colors from dilution-pruned artifacts.
+# Applies ONLY to element-color roles, where prominence is ``log1p(vote mass)`` — the
+# area-ranked structural-surface roles (see `_AREA_RANKED_ROLES`) rank by screenshot area
+# and are deliberately left on pure share (mass is not their ranking signal).
+MIN_MASS: float = 0.8
+
 # Color-keyed prominence blend weight on the (normalized) area term; the remaining
 # ``1 - PROMINENCE_AREA_WEIGHT`` weights the (normalized, log1p-damped) total routed vote
 # mass. Both terms are normalized to [0, 1] across the cluster set before blending, so the
@@ -199,6 +215,8 @@ def _role_masses(cluster: ColorCluster) -> dict[UsageRole, dict[ComponentType, f
 
 def _build_entries(
     scored: list[tuple[ColorCluster, float, dict[ComponentType, float]]],
+    *,
+    mass_floor: bool,
 ) -> tuple[UsageEntry, ...]:
     """Normalize prominence scores into probabilities, prune, renormalize, and rank.
 
@@ -207,12 +225,21 @@ def _build_entries(
     `prune_distribution` (which also covers the all-zero-prominence background case —
     every score ties, so the smallest hex wins outright); output is sorted by
     ``(-probability, hex)``.
+
+    ``mass_floor`` enables the `MIN_MASS` exemption: an entry whose raw in-role vote mass
+    clears `MIN_MASS` survives the share prune regardless of dilution. It is set only for
+    element-color roles (where prominence is ``log1p(vote mass)``); the area-ranked
+    structural-surface roles pass it ``False`` and stay on pure share.
     """
+    protected = (
+        [sum(masses.values()) >= MIN_MASS for _, _, masses in scored] if mass_floor else None
+    )
     kept = prune_distribution(
         scored,
         [score for _, score, _ in scored],
         min_share=MIN_SHARE,
         tie_key=lambda item: item[0].color.hex,
+        protected=protected,
     )
 
     entries: list[UsageEntry] = []
@@ -240,8 +267,9 @@ def build_usage(clusters: list[ColorCluster]) -> UsagePalette:
     to the role via `ROLE_COMPONENTS`) are scored by prominence — screenshot area for the
     structural-surface roles (``page``/``surface``/``banner``), ``log1p`` of in-role vote mass
     for every other (element-color) role (see `_AREA_RANKED_ROLES`) — normalized to
-    probabilities, pruned below `MIN_SHARE`
-    (argmax kept if pruning empties the role), and ranked by ``(-probability, hex)``. A role
+    probabilities, pruned below `MIN_SHARE` (an element-color entry whose raw vote mass
+    clears `MIN_MASS` is exempt — see that constant), and ranked by ``(-probability, hex)``.
+    The argmax is kept if pruning empties the role. A role
     with no mass anywhere maps to ``()`` (the [`UsagePalette`][colorsense.UsagePalette]
     validator backfills it). An empty cluster list yields an empty (all-``()``) palette.
     """
@@ -259,7 +287,11 @@ def build_usage(clusters: list[ColorCluster]) -> UsagePalette:
                 prominence = math.log1p(sum(masses.values()))
             per_role[role].append((cluster, prominence, masses))
 
-    mapping = {role: _build_entries(scored) for role, scored in per_role.items() if scored}
+    mapping = {
+        role: _build_entries(scored, mass_floor=role not in _AREA_RANKED_ROLES)
+        for role, scored in per_role.items()
+        if scored
+    }
     return UsagePalette(mapping=mapping)
 
 

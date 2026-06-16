@@ -28,6 +28,7 @@ def prune_distribution[T](
     *,
     min_share: float,
     tie_key: Callable[[T], str],
+    protected: Sequence[bool] | None = None,
 ) -> list[tuple[T, float]]:
     """Normalize ``weights`` over ``items``, prune below ``min_share``, renormalize.
 
@@ -41,7 +42,12 @@ def prune_distribution[T](
     * the weights sum to zero (e.g. an all-zero-area surface set) → every item ties, so
       the smallest ``tie_key`` wins outright.
 
-    An empty ``items`` yields ``[]``.
+    ``protected`` (optional, parallel to ``items``) marks entries that survive the
+    share prune regardless of their share — the caller has independent absolute evidence
+    that they belong (e.g. a minimum raw vote mass), so they must not be diluted out when
+    a role accumulates many entries. They renormalize alongside the share survivors. A
+    protected entry still cannot resurrect a zero-total input (the argmax fallback owns
+    that case). An empty ``items`` yields ``[]``.
     """
     if not items:
         return []
@@ -50,8 +56,13 @@ def prune_distribution[T](
     if total <= 0.0:
         return [(min(items, key=tie_key), 1.0)]
 
+    keep_floor = protected if protected is not None else [False] * len(items)
     probs = [w / total for w in weights]
-    kept = [(item, p) for item, p in zip(items, probs, strict=True) if p >= min_share]
+    kept = [
+        (item, p)
+        for item, p, keep in zip(items, probs, keep_floor, strict=True)
+        if p >= min_share or keep
+    ]
     if not kept:
         best, _ = min(zip(items, probs, strict=True), key=lambda ip: (-ip[1], tie_key(ip[0])))
         return [(best, 1.0)]
