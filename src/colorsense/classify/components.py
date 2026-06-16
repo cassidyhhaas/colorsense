@@ -34,7 +34,7 @@ from __future__ import annotations
 
 import math
 
-from colorsense.color.primitives import ciede2000, contrast_ratio
+from colorsense.color.primitives import ciede2000, contrast_ratio, is_opaque, is_painting
 from colorsense.config import (
     Config,
     ContrastRelabelConfig,
@@ -49,6 +49,7 @@ from colorsense.models import (
     HarvestedElement,
     Viewport,
     channel_for,
+    is_pill_shape,
 )
 
 __all__ = ["classify_components"]
@@ -95,10 +96,7 @@ def _is_pill(element: HarvestedElement) -> bool:
     never a card") applies at any size — while the badge *rule* layers the size/text gates
     on top.
     """
-    height = element.rect.height
-    return (
-        height > 0.0 and element.min_corner_radius >= height / 2.0 and element.rect.width > height
-    )
+    return is_pill_shape(element.rect.width, element.rect.height, element.min_corner_radius)
 
 
 def _paints_visible_fill(element: HarvestedElement) -> bool:
@@ -108,11 +106,7 @@ def _paints_visible_fill(element: HarvestedElement) -> bool:
     with a transparent/gradient background and no border) is not mislabeled a badge — a
     colored chip always paints one of these.
     """
-    return (
-        (element.bg is not None and element.bg.alpha > 0.0)
-        or element.border is not None
-        or element.has_box_shadow
-    )
+    return is_painting(element.bg) or element.border is not None or element.has_box_shadow
 
 
 def _paints_button_surface(element: HarvestedElement) -> bool:
@@ -129,9 +123,7 @@ def _paints_button_surface(element: HarvestedElement) -> bool:
     one such as a text link with a focus ring — stays a genuine inline ``link``.
     """
     return (
-        (element.bg is not None and element.bg.alpha > 0.0)
-        or element.border is not None
-        or len(element.bg_gradient_stops) > 0
+        is_painting(element.bg) or element.border is not None or len(element.bg_gradient_stops) > 0
     )
 
 
@@ -149,7 +141,7 @@ def _derive_page_canvas_color(elements: list[HarvestedElement]) -> Color | None:
 
     def opaque_bg(element: HarvestedElement) -> Color | None:
         bg = element.bg
-        return bg if bg is not None and bg.alpha >= 1.0 else None
+        return bg if is_opaque(bg) else None
 
     # Canonical canvas: the root document elements, outermost first.
     for tag in ("html", "body"):
@@ -356,11 +348,7 @@ def _repetition_member_indices(
         # repetition votes crushed their text-presence votes.
         if "border" in requires_any and element.border is not None:
             return True
-        return (
-            "distinct_bg_from_parent" in requires_any
-            and element.bg is not None
-            and element.bg.alpha > 0.0
-        )
+        return "distinct_bg_from_parent" in requires_any and is_painting(element.bg)
 
     # Bucket element indices by (tag, class-token).
     buckets: dict[tuple[str, str], list[int]] = {}

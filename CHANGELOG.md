@@ -9,6 +9,14 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- **Internal refactor (no behavior change):** three more hand-duplicated idioms now share named
+  helpers. The confusable "paints anything" (`alpha > 0.0`) vs "fully opaque" (`alpha >= 1.0`)
+  background checks are now `colorsense.color.primitives.is_painting` / `is_opaque`; the
+  order-preserving dedupe-by-key loop (colors, gradient stops, token names) is now
+  `colorsense._util.dedupe_by` (with an optional unique-item `limit`); and the stadium/pill
+  geometry test duplicated across the harvest↔classify boundary is now the single shared
+  `colorsense.models.is_pill_shape`. All internal (not part of the public `colorsense` API);
+  pipeline output (eval scorecard and golden snapshots) is unchanged.
 - **Internal refactor (no behavior change):** the hand-written nearest-color / any-within-ΔE
   match loops in `palette/inventory.py` and `palette/reconcile.py` now share helpers in a new
   internal `colorsense.color.match` module (`any_within` / `nearest_within` / `first_within`),

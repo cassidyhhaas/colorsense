@@ -32,9 +32,10 @@ from typing import TypedDict, cast
 
 from playwright.async_api import Page
 
-from colorsense.color.primitives import parse_css_color
+from colorsense._util import dedupe_by
+from colorsense.color.primitives import is_painting, parse_css_color
 from colorsense.harvest.render import EVAL_TIMEOUT_S
-from colorsense.models import Color, HarvestedElement, Rect
+from colorsense.models import Color, HarvestedElement, Rect, is_pill_shape
 
 # Bound on the per-render element payload. Each record below materializes as a pydantic
 # model in the *host* Python process — container limits bound the renderer, not the
@@ -62,10 +63,11 @@ def _is_interactive_pill(
     insufficient — decorative gradient cards are often wrapped in links — and pill shape
     alone is insufficient — non-clickable rounded dividers are pills. Requiring both keeps
     rounded-full CTAs while rejecting rectangular cards (not pills) and decorative pill
-    dividers (not clickable). The pill test mirrors `classify.components._is_pill`
-    (all four corners fully rounded, wider than tall).
+    dividers (not clickable). The pill test is the shared `models.is_pill_shape` (all four
+    corners fully rounded, wider than tall), which `classify.components._is_pill` also uses,
+    so the two share one definition rather than being hand-synced.
     """
-    return clickable and height > 0.0 and min_corner_radius >= height / 2.0 and width > height
+    return clickable and is_pill_shape(width, height, min_corner_radius)
 
 
 def _gradient_fill_stops(bg: Color | None, raw_colors: Sequence[str]) -> tuple[Color, ...]:
@@ -81,21 +83,14 @@ def _gradient_fill_stops(bg: Color | None, raw_colors: Sequence[str]) -> tuple[C
     scales its mass by its alpha. Stops are deduped by opaque hex (a repeated brand color
     counts once) and capped at `_MAX_GRADIENT_STOPS`.
     """
-    if bg is not None and bg.alpha > 0.0:
+    if is_painting(bg):
         return ()
     stops = [c for c in (parse_css_color(raw) for raw in raw_colors) if c is not None]
     if not stops or any(stop.alpha == 0.0 for stop in stops):
         return ()
-    deduped: list[Color] = []
-    seen: set[str] = set()
-    # Dedup by opaque hex, keeping the first (gradient source-order) occurrence.
-    for stop in stops:
-        if stop.hex in seen:
-            continue
-        seen.add(stop.hex)
-        deduped.append(stop)
-        if len(deduped) >= _MAX_GRADIENT_STOPS:
-            break
+    # Dedup by opaque hex, keeping the first (gradient source-order) occurrence, capped at
+    # `_MAX_GRADIENT_STOPS` unique stops.
+    deduped = dedupe_by(stops, key=lambda s: s.hex, limit=_MAX_GRADIENT_STOPS)
     return tuple(deduped)
 
 

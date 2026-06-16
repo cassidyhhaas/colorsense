@@ -23,6 +23,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import NoReturn
 
+from colorsense._util import dedupe_by
 from colorsense.classify.components import classify_components
 from colorsense.classify.tokens import classify_tokens
 from colorsense.color.primitives import delta_e
@@ -333,26 +334,26 @@ def _design_tokens(classified: list[ClassifiedToken]) -> tuple[DesignToken, ...]
     rendered ``:root``, so duplicate-name records share one resolved color and dropping
     later ones loses nothing. Sorted by name for stable output.
     """
-    out: list[DesignToken] = []
-    seen: set[str] = set()
-    for token in classified:
-        resolved = token.record.resolved
-        if resolved is None:
-            continue
-        if token.semantic_role is TokenSemanticRole.ignore:
-            continue
-        if token.weight <= 0.0:
-            continue
-        if token.record.name in seen:
-            continue
-        seen.add(token.record.name)
-        out.append(
-            DesignToken(
-                name=token.record.name,
-                color=resolved,
-                semantic_role=token.semantic_role,
-            )
+    meaningful = [
+        token
+        for token in classified
+        if token.record.resolved is not None
+        and token.semantic_role is not TokenSemanticRole.ignore
+        and token.weight > 0.0
+    ]
+    # Dedupe by name keeping the first meaningful occurrence (the per-token filters above
+    # are independent of the dedup, so filter-then-dedupe matches the former interleaved
+    # ``seen`` set exactly).
+    deduped = dedupe_by(meaningful, key=lambda t: t.record.name)
+    out = [
+        DesignToken(
+            name=token.record.name,
+            color=token.record.resolved,
+            semantic_role=token.semantic_role,
         )
+        for token in deduped
+        if token.record.resolved is not None
+    ]
     out.sort(key=lambda t: t.name)
     return tuple(out)
 
@@ -415,13 +416,7 @@ def _third_party_colors(clusters: list[ColorCluster]) -> list[Color]:
 
 def _dedupe_colors(colors: Iterable[Color]) -> list[Color]:
     """Order-preserving dedupe of colors by hex."""
-    seen: set[str] = set()
-    out: list[Color] = []
-    for color in colors:
-        if color.hex not in seen:
-            seen.add(color.hex)
-            out.append(color)
-    return out
+    return dedupe_by(colors, key=lambda c: c.hex)
 
 
 def _build_metadata(

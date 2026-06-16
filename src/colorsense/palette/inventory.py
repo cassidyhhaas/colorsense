@@ -58,7 +58,7 @@ from __future__ import annotations
 from collections import defaultdict
 
 from colorsense.color.match import nearest_within
-from colorsense.color.primitives import delta_e
+from colorsense.color.primitives import delta_e, is_painting
 from colorsense.models import (
     ClassifiedElement,
     Color,
@@ -82,8 +82,9 @@ def _bg_fill_colors(element: HarvestedElement) -> list[Color]:
     ``bg_gradient_stops`` (populated for clickable pill CTAs only; see
     `HarvestedElement`). Returns ``[]`` when the element paints no background at all.
     """
-    if element.bg is not None and element.bg.alpha > 0.0:
-        return [element.bg]
+    bg = element.bg
+    if bg is not None and is_painting(bg):
+        return [bg]
     return list(element.bg_gradient_stops)
 
 
@@ -296,7 +297,7 @@ def build_inventory(harvest: Harvest, classified: list[ClassifiedElement]) -> li
             # A fully-transparent fill color (alpha == 0, e.g. the default
             # ``background-color: transparent``) paints nothing: attributing its
             # mass would invent a phantom #000000 cluster.
-            fills = [color for color in colors if color is not None and color.alpha > 0.0]
+            fills = [color for color in colors if color is not None and is_painting(color)]
             if not fills:
                 continue
 

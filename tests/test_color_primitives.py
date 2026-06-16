@@ -9,6 +9,8 @@ from colorsense.color.primitives import (
     ciede2000,
     contrast_ratio,
     delta_e,
+    is_opaque,
+    is_painting,
     parse_css_color,
     relative_luminance,
 )
@@ -182,3 +184,36 @@ def test_parse_in_gamut_rgb_unchanged() -> None:
 def test_relative_luminance_endpoints() -> None:
     assert relative_luminance(WHITE) == pytest.approx(1.0, abs=1e-6)
     assert relative_luminance(BLACK) == pytest.approx(0.0, abs=1e-6)
+
+
+def _alpha(value: float) -> Color:
+    # Reuse an arbitrary opaque color and override only its alpha; the predicates look at
+    # alpha alone (presence + threshold), so the hex/OKLCH coords are irrelevant.
+    return GRAY.model_copy(update={"alpha": value})
+
+
+def test_is_painting_and_is_opaque_none() -> None:
+    # No color at all paints nothing and is not opaque.
+    assert is_painting(None) is False
+    assert is_opaque(None) is False
+
+
+def test_is_painting_and_is_opaque_fully_transparent() -> None:
+    # alpha == 0.0: paints nothing (``> 0.0`` fails), not opaque.
+    transparent = _alpha(0.0)
+    assert is_painting(transparent) is False
+    assert is_opaque(transparent) is False
+
+
+def test_is_painting_and_is_opaque_partly_transparent() -> None:
+    # alpha == 0.5: paints (any opacity, ``> 0.0``) but is not fully opaque (``< 1.0``).
+    semi = _alpha(0.5)
+    assert is_painting(semi) is True
+    assert is_opaque(semi) is False
+
+
+def test_is_painting_and_is_opaque_fully_opaque() -> None:
+    # alpha == 1.0: paints and is opaque.
+    solid = _alpha(1.0)
+    assert is_painting(solid) is True
+    assert is_opaque(solid) is True
