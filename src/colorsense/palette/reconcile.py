@@ -35,7 +35,7 @@ import math
 from collections.abc import Sequence
 from dataclasses import dataclass
 
-from colorsense.color.primitives import delta_e
+from colorsense.color.match import any_within, first_within, nearest_within
 from colorsense.models import (
     ClassifiedToken,
     Color,
@@ -145,11 +145,8 @@ def _group_by_color(eligible: list[ClassifiedToken]) -> list[_IntentGroup]:
     for token in sorted(eligible, key=lambda t: t.record.name):
         color = token.record.resolved
         assert color is not None  # callers filter on resolved
-        matched: _IntentGroup | None = None
-        for group in groups:
-            if delta_e(color, group.color) <= DELTA_E_MATCH:
-                matched = group
-                break
+        match_idx = first_within(color, groups, DELTA_E_MATCH, key=lambda g: g.color)
+        matched = groups[match_idx] if match_idx is not None else None
         if matched is None:
             matched = _IntentGroup(color)
             groups.append(matched)
@@ -270,18 +267,16 @@ def _pool_role(
         return []
 
     def intent_for(color: Color) -> float:
-        best_idx: int | None = None
-        best_d = DELTA_E_MATCH_MEASURED
-        for gi, group in enumerate(groups):
-            if role not in intents[gi]:
-                continue
-            d = delta_e(color, group.color)
-            if d <= best_d:
-                best_d = d
-                best_idx = gi
-        if best_idx is None:
+        # Pre-filter to groups carrying this role, keeping the original index so the
+        # nearest match remaps back to `intents[gi]`. Same <=/tie-to-last semantics.
+        eligible = [(gi, group) for gi, group in enumerate(groups) if role in intents[gi]]
+        match_idx = nearest_within(
+            color, eligible, DELTA_E_MATCH_MEASURED, key=lambda pair: pair[1].color
+        )
+        if match_idx is None:
             return 0.0
-        return intents[best_idx][role]
+        gi = eligible[match_idx][0]
+        return intents[gi][role]
 
     candidates = [
         _PoolCandidate(
@@ -345,7 +340,7 @@ def _build_divergence(
     )
 
     def matches_any_usage(color: Color) -> bool:
-        return any(delta_e(color, uc) <= DELTA_E_MATCH_MEASURED for uc in usage_colors)
+        return any_within(color, usage_colors, DELTA_E_MATCH_MEASURED, key=lambda c: c)
 
     items: list[DivergenceItem] = []
 
@@ -395,7 +390,7 @@ def _build_divergence(
     token_colors = [t.record.resolved for t in tokens if t.record.resolved is not None]
 
     def matches_any_token(color: Color) -> bool:
-        return any(delta_e(color, tc) <= DELTA_E_MATCH_MEASURED for tc in token_colors)
+        return any_within(color, token_colors, DELTA_E_MATCH_MEASURED, key=lambda c: c)
 
     seen: set[tuple[UsageRole, str]] = set()
     for role, entries in usage.mapping.items():

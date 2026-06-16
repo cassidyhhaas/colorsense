@@ -9,6 +9,11 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- **Internal refactor (no behavior change):** the hand-written nearest-color / any-within-ΔE
+  match loops in `palette/inventory.py` and `palette/reconcile.py` now share helpers in a new
+  internal `colorsense.color.match` module (`any_within` / `nearest_within` / `first_within`),
+  centralizing the validated OKLab `delta_e` matching convention and its `<=` tie-break. Pipeline
+  output (eval scorecard and golden snapshots) is unchanged.
 - **Internal rename for clarity (no behavior change):** the declared-token "usage prior"
   concept is now uniformly called **usage intent** — a distribution over usage roles
   expressing where a token's color is expected to be used, inferred from its name before the
