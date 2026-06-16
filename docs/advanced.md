@@ -68,7 +68,7 @@ config = load_default_config()
 scoring constants are documented in-code, not part of the YAML: the usage view's pruning
 threshold, the role→component collapse, log-damped vote-mass prominence, and the
 color-index prominence blend in
-[`palette/usage.py`](https://github.com/cassidyhhaas/colorsense/blob/main/src/colorsense/palette/usage.py) (`MIN_SHARE`, `ROLE_COMPONENTS`, `PROMINENCE_AREA_WEIGHT`),
+[`palette/usage.py`](https://github.com/cassidyhhaas/colorsense/blob/main/src/colorsense/palette/usage.py) (`MIN_SHARE`, `MIN_MASS`, `ROLE_COMPONENTS`, `PROMINENCE_AREA_WEIGHT`),
 the per-channel perceptual join radii in
 [`palette/inventory.py`](https://github.com/cassidyhhaas/colorsense/blob/main/src/colorsense/palette/inventory.py) (`DELTA_E_MATCH_BG`,
 `DELTA_E_MATCH_TEXT_BORDER`, `DELTA_E_CLUSTER`),

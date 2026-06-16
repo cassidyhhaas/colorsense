@@ -9,6 +9,17 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **Genuine low-mass colors no longer get diluted out of a crowded role.** The usage view
+  prunes entries below a *relative* share threshold (`MIN_SHARE`, 2%), so when a role
+  accumulates many colors — for example after the near-white text fix below splits one
+  near-white cluster into several — every entry's share shrinks and a real, low-mass color
+  could fall below the threshold purely from dilution rather than from being any less real
+  (e.g. Resend's `#46fea5` neon-green accent text). Element-color entries (text/link/CTA/
+  action/border) whose raw in-role vote mass clears a new absolute floor (`MIN_MASS`, ≈ one
+  element's worth of confident vote) are now exempt from the share prune — an absolute
+  evidence floor is immune to entry-count dilution. The area-ranked structural-surface
+  roles (page/surface/banner) rank by screenshot area and are unaffected. Measured on the
+  offline quality panel: one genuine accent recovered, no role winners changed.
 - **Near-white text/links no longer vanish into a neighboring near-white.** Inventory clustering
   measures color distance in OKLab, which is badly non-uniform near white — its 0.05 radius spans
   ~6.5–8.5 ΔE2000 up there — so a page's dominant white text could be absorbed into a near-white

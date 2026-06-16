@@ -16,6 +16,7 @@ from colorsense.models import (
 from colorsense.palette.usage import (
     _AREA_RANKED_ROLES,
     COMPONENT_ROLE,
+    MIN_MASS,
     MIN_SHARE,
     ROLE_COMPONENTS,
     build_color_index,
@@ -273,14 +274,47 @@ def test_prune_below_min_share_with_renormalization() -> None:
 
 
 def test_prune_emptying_role_keeps_argmax() -> None:
+    # Many equal entries, each well below MIN_SHARE (1/60) AND below MIN_MASS, so neither
+    # the share gate nor the mass-floor exemption keeps any: the argmax fallback fires.
     n = 60
-    clusters = [_cluster(f"#0000{i:02x}", 0.0, {ComponentType.page_text: 1.0}) for i in range(n)]
+    mass = 0.1
+    assert mass < MIN_MASS
+    clusters = [_cluster(f"#0000{i:02x}", 0.0, {ComponentType.page_text: mass}) for i in range(n)]
     palette = build_usage(clusters)
 
     text = palette.mapping[UsageRole.text]
     assert len(text) == 1
     assert text[0].probability == 1.0
     assert text[0].color.hex == _color("#000000").hex
+
+
+def test_mass_floor_exempts_genuine_low_share_element_color() -> None:
+    # A role diluted by many entries: a genuine color's share falls below MIN_SHARE purely
+    # from dilution, but its raw vote mass clears MIN_MASS, so the floor keeps it. Mirrors
+    # the resend #46fea5 text recovery (a real accent diluted by the near-white text split).
+    dominant = _cluster("#111111", 0.0, {ComponentType.page_text: 99.0})
+    fillers = [_cluster(f"#22{i:02x}00", 0.0, {ComponentType.page_text: 8.0}) for i in range(12)]
+    accent = _cluster("#46fea5", 0.0, {ComponentType.page_text: MIN_MASS + 0.05})
+    palette = build_usage([dominant, *fillers, accent])
+
+    text = palette.mapping[UsageRole.text]
+    hexes = [e.color.hex for e in text]
+    accent_share = math.log1p(MIN_MASS + 0.05) / sum(
+        math.log1p(sum(c.component_mass.values())) for c in [dominant, *fillers, accent]
+    )
+    assert accent_share < MIN_SHARE  # would be pruned on share alone
+    assert _color("#46fea5").hex in hexes  # ...but the mass floor keeps it
+
+
+def test_mass_floor_does_not_apply_to_area_ranked_surface_roles() -> None:
+    # Surface (area-ranked) entries are NOT mass-floor-exempt: a zero-area card_bg with
+    # high vote mass still prunes when a dominant-area surface owns the share.
+    dominant = _cluster("#ffffff", 0.9, {ComponentType.card_bg: 1.0})
+    massive_zero_area = _cluster("#0a0a0a", 0.0, {ComponentType.card_bg: 99.0})
+    palette = build_usage([dominant, massive_zero_area])
+
+    surface = palette.mapping[UsageRole.surface]
+    assert [e.color.hex for e in surface] == [_color("#ffffff").hex]
 
 
 def test_deterministic_ordering_under_permutation() -> None:

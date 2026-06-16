@@ -385,6 +385,14 @@ Within each role the prominence scores are normalized to probabilities, entries 
 non-empty role, the single argmax entry is kept at probability 1.0 instead — a role that
 measured *something* never reports nothing.
 
+`MIN_SHARE` is a *relative* threshold, so when a role accumulates many colors every
+entry's share shrinks and a genuine low-mass color can drop below 0.02 purely from
+dilution. To stop that, an element-color entry whose raw in-role vote mass clears
+`MIN_MASS` (≈ one element's worth of confident vote) is exempt from the share prune — it
+has independent, DOM-derived evidence that it genuinely paints the role. The exemption is
+element-color-only; the area-ranked structural-surface roles rank by screenshot area and
+stay on pure share.
+
 ### The color-keyed index (`build_color_index`)
 
 The same clusters, re-projected as the canonical, color-first answer to "how is each color

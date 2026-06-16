@@ -61,6 +61,33 @@ def test_zero_total_weight_keeps_smallest_tie_key_at_one() -> None:
     assert result == [("#aaaaaa", 1.0)]
 
 
+def test_protected_entry_survives_share_prune_and_renormalizes() -> None:
+    # A below-min_share entry flagged protected survives and renormalizes alongside the
+    # share survivor; the unprotected below-min_share entry is still pruned.
+    result = prune_distribution(
+        ["#111111", "#222222", "#333333"],
+        [0.66, 0.33, 0.01],
+        min_share=0.02,
+        tie_key=_hex_key,
+        protected=[False, False, True],
+    )
+    assert [item for item, _ in result] == ["#111111", "#222222", "#333333"]
+    assert math.isclose(sum(p for _, p in result), 1.0, abs_tol=1e-12)
+
+
+def test_protected_does_not_resurrect_zero_total_input() -> None:
+    # The argmax/zero-total fallback still owns the all-zero case; protected flags cannot
+    # divide by a zero total.
+    result = prune_distribution(
+        ["#bbbbbb", "#aaaaaa"],
+        [0.0, 0.0],
+        min_share=0.02,
+        tie_key=_hex_key,
+        protected=[True, True],
+    )
+    assert result == [("#aaaaaa", 1.0)]
+
+
 def test_generic_items_with_caller_supplied_key() -> None:
     # The helper is generic over the item type; only tie_key needs to produce a string.
     items = [("cluster-b", "#ff0000"), ("cluster-a", "#00ff00")]
