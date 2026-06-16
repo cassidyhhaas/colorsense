@@ -7,6 +7,19 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- **Near-white text/links no longer vanish into a neighboring near-white.** Inventory clustering
+  measures color distance in OKLab, which is badly non-uniform near white — its 0.05 radius spans
+  ~6.5–8.5 ΔE2000 up there — so a page's dominant white text could be absorbed into a near-white
+  neighbor and never surface in the `text`/`link` roles (e.g. GitHub's `#ffffff` body text
+  collapsing into Primer's `#f0f6fc`, which is a clearly-distinct 4.0 ΔE2000 away). The text and
+  border pools now apply a CIEDE2000 guard in the near-white regime (lightness ≥ 0.90): two
+  near-white colors merge only if also within 3.0 ΔE2000 — a denoising radius that still collapses
+  anti-alias variants but keeps genuinely-distinct near-whites apart. The background pool is
+  unchanged (OKLab's coarseness there usefully denoises quantized screenshot bins). Measured on the
+  offline quality panel: white text/link recall recovers with no change to noise or role winners.
+
 ### Changed
 
 - **Internal refactor (no behavior change):** three more hand-duplicated idioms now share named

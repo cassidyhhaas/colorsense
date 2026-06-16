@@ -58,7 +58,7 @@ from __future__ import annotations
 from collections import defaultdict
 
 from colorsense.color.match import nearest_within
-from colorsense.color.primitives import delta_e, is_painting
+from colorsense.color.primitives import ciede2000, delta_e, is_painting
 from colorsense.models import (
     ClassifiedElement,
     Color,
@@ -107,6 +107,34 @@ DELTA_E_MATCH_TEXT_BORDER: float = 0.05
 # colors collapse together.
 DELTA_E_CLUSTER: float = 0.05
 
+# --- Near-white guard (text/border pools only) -----------------------------------------
+# OKLab deltaEOK is materially non-uniform near the lightness extremes: the 0.05 join/cluster
+# radius above spans ~6.5-8.5 ΔE2000 near white, so it collapses clearly-distinct near-white
+# *text* colors into one entry. The canonical case is GitHub's `#ffffff` (dominant body text)
+# vs Primer's `#f0f6fc`: OKLab ΔE 0.031 (merges) but CIEDE2000 4.02 (plainly distinct) — the
+# white text never surfaces because it is absorbed into the `#f0f6fc` entry. OKLab's coarseness
+# is an asset for the *background* pool (it denoises screenshot quantization / anti-alias
+# smear), so the guard is confined to the text/border pools where colors are exact computed
+# values, not quantized pixels.
+#
+# In that regime the guard adds a second condition to BOTH the attribution join and the cluster
+# merge: two near-white colors merge only if they are also within `NEAR_WHITE_MERGE_MAX_DE2000`
+# in CIEDE2000 — the accurate identity metric near white (`colorsense.color.primitives.ciede2000`).
+# The radius is a *denoising* radius, deliberately LOOSER than the 1.0 ΔE2000 identity floor: at
+# the identity floor the guard over-fragments (anti-alias variants ~1-3 ΔE2000 from their
+# canonical color split off as noise); ~3 ΔE2000 still collapses those variants while splitting
+# genuinely-distinct tokens like `#ffffff`/`#f0f6fc`. Measured on the offline quality panel a
+# 3.0 radius recovers GitHub white in text+link (and resend's near-white text tokens) with no
+# net change to noise or role winners.
+NEAR_WHITE_LIGHTNESS: float = 0.90
+NEAR_WHITE_MERGE_MAX_DE2000: float = 3.0
+
+# The guard applies only where text/border colors live (exact computed values); the background
+# pool keeps the pure OKLab radius (its coarseness usefully denoises quantized screenshot bins).
+_GUARDED_FAMILIES: frozenset[PropertyFamily] = frozenset(
+    {PropertyFamily.text, PropertyFamily.border}
+)
+
 # Per-channel join radius: bg loose, text/border tight (see the constants above).
 _MATCH_BY_CHANNEL: dict[str, float] = {
     "bg": DELTA_E_MATCH_BG,
@@ -127,6 +155,41 @@ _FAMILY_BY_CHANNEL: dict[str, PropertyFamily] = {
 # identically by the component classifier's per-channel normalization). Aliased here for
 # the local call sites; the convention itself lives in `models.py`.
 _channel_for = channel_for
+
+
+def _forbids_near_white_merge(a: Color, b: Color) -> bool:
+    """Whether the near-white guard forbids merging ``a`` and ``b`` (text/border only).
+
+    True iff both colors are near-white (lightness >= `NEAR_WHITE_LIGHTNESS`) yet farther
+    apart than `NEAR_WHITE_MERGE_MAX_DE2000` in CIEDE2000 — i.e. OKLab would wrongly collapse
+    two perceptually-distinct near-white text colors. The CIEDE2000 call is reached only after
+    the cheap lightness gates, so it runs on the small near-white subset, never the whole pool.
+    Callers apply this only within the `_GUARDED_FAMILIES` pools (see the constant docs).
+    """
+    return (
+        a.lightness >= NEAR_WHITE_LIGHTNESS
+        and b.lightness >= NEAR_WHITE_LIGHTNESS
+        and ciede2000(a, b) > NEAR_WHITE_MERGE_MAX_DE2000
+    )
+
+
+def _nearest_text_border_entry(color: Color, pool: list[_Entry], radius: float) -> int | None:
+    """`nearest_within` for the text/border pools, honoring the near-white guard.
+
+    Identical to `colorsense.color.match.nearest_within` (argmin over OKLab `delta_e`, running
+    best seeded at ``radius``, ``<=`` so the last of equal-distance candidates wins) except an
+    entry the near-white guard forbids is skipped — so the join falls through to the nearest
+    *permitted* entry, or to ``None`` (a fresh entry) when every in-radius entry is forbidden.
+    The background pool keeps the unguarded shared helper.
+    """
+    nearest_index: int | None = None
+    nearest_distance = radius
+    for idx, entry in enumerate(pool):
+        distance = delta_e(color, entry.color)
+        if distance <= nearest_distance and not _forbids_near_white_merge(color, entry.color):
+            nearest_distance = distance
+            nearest_index = idx
+    return nearest_index
 
 
 class _Entry:
@@ -161,6 +224,25 @@ def _union(parent: list[int], a: int, b: int) -> None:
         parent[ra] = rb
 
 
+def _union_forbidden(parent: list[int], entries: list[_Entry], i: int, j: int) -> bool:
+    """Whether merging ``i``'s and ``j``'s current clusters would co-locate a forbidden pair.
+
+    Checks every cross-pair between the two sets being merged against
+    `_forbids_near_white_merge`. Because every union is gated this way, no cluster can ever
+    contain a guard-forbidden pair — closing the transitivity gap a per-edge check leaves
+    open (a bridge color near two forbidden colors would otherwise chain them together). The
+    pools are tiny (a handful of text/border entries), so the cross-scan is cheap.
+    """
+    root_i, root_j = _find(parent, i), _find(parent, j)
+    if root_i == root_j:
+        return False
+    left = [k for k in range(len(entries)) if _find(parent, k) == root_i]
+    right = [k for k in range(len(entries)) if _find(parent, k) == root_j]
+    return any(
+        _forbids_near_white_merge(entries[p].color, entries[q].color) for p in left for q in right
+    )
+
+
 def _in_family_mass(entry: _Entry) -> float:
     """Total vote mass on a text/border-pool entry (all of one family by construction)."""
     return sum(entry.component_mix.values())
@@ -178,11 +260,22 @@ def _cluster_pool(entries: list[_Entry], family: PropertyFamily) -> list[ColorCl
     if entry_count == 0:
         return []
 
+    guarded = family in _GUARDED_FAMILIES
     parent = list(range(entry_count))
     for i in range(entry_count):
         for j in range(i + 1, entry_count):
-            if delta_e(entries[i].color, entries[j].color) <= DELTA_E_CLUSTER:
-                _union(parent, i, j)
+            if delta_e(entries[i].color, entries[j].color) > DELTA_E_CLUSTER:
+                continue
+            # Union-find is transitive: blocking only the direct (i, j) edge would let a
+            # near-white "bridge" color (close to both) merge two guard-forbidden colors
+            # into one cluster anyway. So reject the union if it would co-locate ANY
+            # forbidden pair across the two sets being merged — by induction, no resulting
+            # cluster can ever contain a guard-forbidden pair. (No-op for unguarded
+            # families: `_forbids_near_white_merge` is never true there, so clustering is
+            # byte-identical to the plain union-find.)
+            if guarded and _union_forbidden(parent, entries, i, j):
+                continue
+            _union(parent, i, j)
 
     groups: dict[int, list[int]] = defaultdict(list)
     for i in range(entry_count):
@@ -311,13 +404,22 @@ def build_inventory(harvest: Harvest, classified: list[ClassifiedElement]) -> li
             # channel the per-fill share is additionally scaled by the fill's alpha, so a
             # faint ``bg-primary/10`` tint votes its intended (saturated) hex in
             # proportion to how much it actually paints; text/border are not alpha-scaled.
+            # The text/border pools apply the near-white guard so OKLab cannot collapse two
+            # perceptually-distinct near-white text colors onto one entry (see
+            # `_forbids_near_white_merge`); the background pool keeps the unguarded shared helper.
+            guarded_family = _FAMILY_BY_CHANNEL[channel] in _GUARDED_FAMILIES
             fill_count = len(fills)
             for color in fills:
                 weight = (color.alpha if channel == "bg" else 1.0) / fill_count
 
-                nearest_index = nearest_within(
-                    color, pool, _MATCH_BY_CHANNEL[channel], key=lambda entry: entry.color
-                )
+                if guarded_family:
+                    nearest_index = _nearest_text_border_entry(
+                        color, pool, _MATCH_BY_CHANNEL[channel]
+                    )
+                else:
+                    nearest_index = nearest_within(
+                        color, pool, _MATCH_BY_CHANNEL[channel], key=lambda entry: entry.color
+                    )
 
                 if nearest_index is None:
                     new_entry = _Entry(color, 0.0)

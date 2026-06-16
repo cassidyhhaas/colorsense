@@ -6,7 +6,7 @@ import itertools
 
 import pytest
 
-from colorsense.color.primitives import delta_e, parse_css_color
+from colorsense.color.primitives import ciede2000, delta_e, parse_css_color
 from colorsense.models import (
     ClassifiedElement,
     Color,
@@ -23,8 +23,11 @@ from colorsense.palette.inventory import (
     DELTA_E_CLUSTER,
     DELTA_E_MATCH_BG,
     DELTA_E_MATCH_TEXT_BORDER,
+    NEAR_WHITE_LIGHTNESS,
+    NEAR_WHITE_MERGE_MAX_DE2000,
     _cluster_pool,
     _Entry,
+    _forbids_near_white_merge,
     build_inventory,
 )
 
@@ -639,3 +642,113 @@ def test_segregated_determinism_same_input_identical_output() -> None:
     first = build_inventory(harvest, classified)
     second = build_inventory(harvest, classified)
     assert first == second
+
+
+# --------------------------------------------------------------------------- #
+# Near-white guard (text/border pools): OKLab collapses perceptually-distinct
+# near-white text colors; CIEDE2000 keeps them apart. See `_forbids_near_white_merge`.
+# --------------------------------------------------------------------------- #
+
+# GitHub's canonical case: dominant white body text vs Primer's near-white `--fgColor-default`.
+_WHITE = "#ffffff"
+_PRIMER_NEAR_WHITE = "#f0f6fc"
+
+
+def test_near_white_guard_predicate_distinguishes_the_github_pair() -> None:
+    white = _color(_WHITE)
+    primer = _color(_PRIMER_NEAR_WHITE)
+
+    # OKLab would merge them (within the cluster radius); CIEDE2000 says clearly distinct.
+    assert delta_e(white, primer) <= DELTA_E_CLUSTER
+    assert ciede2000(white, primer) > NEAR_WHITE_MERGE_MAX_DE2000
+    assert white.lightness >= NEAR_WHITE_LIGHTNESS
+    assert primer.lightness >= NEAR_WHITE_LIGHTNESS
+
+    assert _forbids_near_white_merge(white, primer)
+    # Symmetric, and a color never forbids merging with itself.
+    assert _forbids_near_white_merge(primer, white)
+    assert not _forbids_near_white_merge(white, white)
+
+
+def test_near_white_guard_ignores_colors_below_the_regime() -> None:
+    # A near-white and a mid-gray: not both near-white, so the guard never engages
+    # (the gray is excluded by lightness before any CIEDE2000 call).
+    white = _color(_WHITE)
+    gray = _color("#9198a1")
+    assert gray.lightness < NEAR_WHITE_LIGHTNESS
+    assert not _forbids_near_white_merge(white, gray)
+
+
+def test_near_white_guard_allows_anti_alias_variants_to_merge() -> None:
+    # The radius is a *denoising* radius, looser than the 1.0 identity floor: two near-white
+    # colors within NEAR_WHITE_MERGE_MAX_DE2000 still merge (anti-alias variants must collapse).
+    white = _color(_WHITE)
+    faint = _color("#fcfdff")  # ~1.1 ΔE2000 from white — an anti-alias-scale variant
+    assert ciede2000(white, faint) <= NEAR_WHITE_MERGE_MAX_DE2000
+    assert not _forbids_near_white_merge(white, faint)
+
+
+def test_text_pool_splits_distinct_near_whites() -> None:
+    # Two text elements paint white and Primer near-white. Without the guard they collapse
+    # onto one text entry (OKLab); with it they stay as two distinct text colors.
+    harvest = _harvest([ScreenshotBin(color=_color("#0d1117"), area_fraction=1.0)])
+    classified = [
+        _classified(None, {ComponentType.page_text: 1.0}, text=_color(_WHITE)),
+        _classified(None, {ComponentType.page_text: 1.0}, text=_color(_PRIMER_NEAR_WHITE)),
+    ]
+
+    clusters = build_inventory(harvest, classified)
+    text_hexes = {
+        c.color.hex
+        for c in clusters
+        if any(comp == ComponentType.page_text for comp in c.component_mass)
+    }
+    assert text_hexes == {_WHITE, _PRIMER_NEAR_WHITE}
+
+
+def test_near_white_guard_survives_union_find_transitivity() -> None:
+    # Union-find is transitive, so a near-white "bridge" color close to two guard-forbidden
+    # colors must NOT chain them into one cluster. A and C are forbidden (CIEDE2000 > 3.0);
+    # B sits between them and is mergeable with each. They must still end up in two clusters.
+    a = _color("#ebebeb")
+    b = _color("#ebebef")  # the bridge
+    c = _color("#ebebf3")
+    assert _forbids_near_white_merge(a, c)
+    assert not _forbids_near_white_merge(a, b)
+    assert not _forbids_near_white_merge(b, c)
+    assert delta_e(a, b) <= DELTA_E_CLUSTER and delta_e(b, c) <= DELTA_E_CLUSTER
+
+    entries = [_Entry(a, 0.0), _Entry(b, 0.0), _Entry(c, 0.0)]
+    clusters = _cluster_pool(entries, PropertyFamily.text)
+    reps = {cluster.color.hex for cluster in clusters}
+
+    assert len(clusters) == 2  # A and C never co-cluster, even through the bridge
+    assert "#ebebeb" in reps and "#ebebf3" in reps
+
+
+def test_near_white_anti_alias_variants_still_collapse() -> None:
+    # The guard must not over-fragment: three mutually-near near-white variants (all pairwise
+    # within the denoising radius) still collapse to a single text cluster.
+    variants = [_color("#ffffff"), _color("#fefefe"), _color("#fdfdfd")]
+    for first, second in itertools.combinations(variants, 2):
+        assert not _forbids_near_white_merge(first, second)
+
+    entries = [_Entry(v, 0.0) for v in variants]
+    clusters = _cluster_pool(entries, PropertyFamily.text)
+    assert len(clusters) == 1
+    assert clusters[0].member_count == 3
+
+
+def test_background_pool_still_merges_near_whites() -> None:
+    # The guard is text/border-only: the background pool keeps the pure OKLab radius, so the
+    # same near-white pair that splits in the text pool still merges as screenshot bins.
+    harvest = _harvest(
+        [
+            ScreenshotBin(color=_color(_WHITE), area_fraction=0.6),
+            ScreenshotBin(color=_color(_PRIMER_NEAR_WHITE), area_fraction=0.4),
+        ]
+    )
+    clusters = build_inventory(harvest, [])
+    assert len(clusters) == 1
+    assert clusters[0].member_count == 2
+    assert clusters[0].color.hex == _WHITE  # max-area member wins
