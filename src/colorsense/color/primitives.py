@@ -13,8 +13,6 @@ Conventions
   remains available for compositing.
 * Achromatic colors yield ``hue = nan`` from coloraide; we normalize that to ``0.0`` so
   the contract never carries NaN.
-* Compositing (`composite_over`) is performed in **gamma** sRGB (the CSS
-  "source-over" default), matching browser rendering.
 """
 
 from __future__ import annotations
@@ -24,10 +22,6 @@ import math
 from coloraide import Color as CAColor
 
 from colorsense.models import Color
-
-# OKLCH lightness is defined on the closed interval [0, 1].
-_L_MIN: float = 0.0
-_L_MAX: float = 1.0
 
 
 def _normalize_hue(hue: float) -> float:
@@ -111,18 +105,6 @@ def parse_css_color(value: str) -> Color | None:
         return None
 
 
-def composite_over(fg: Color, bg: Color) -> Color:
-    """Alpha-composite ``fg`` over ``bg`` and return an opaque (``alpha = 1.0``) color.
-
-    Uses standard CSS source-over compositing performed in **gamma** sRGB. The result's
-    OKLCH coordinates and hex are recomputed from the composited sRGB color.
-    """
-    fg_ca = _to_coloraide(fg)
-    bg_ca = _to_coloraide(bg)
-    composited = CAColor.layer([fg_ca, bg_ca], space="srgb").set("alpha", 1.0)
-    return _from_coloraide(composited)
-
-
 def delta_e(a: Color, b: Color) -> float:
     """Perceptual distance between two colors via OKLab ``deltaEOK``.
 
@@ -173,30 +155,3 @@ def contrast_ratio(fg: Color, bg: Color) -> float:
     l2 = relative_luminance(bg)
     lighter, darker = (l1, l2) if l1 >= l2 else (l2, l1)
     return (lighter + 0.05) / (darker + 0.05)
-
-
-def is_neutral(c: Color, chroma_max: float) -> bool:
-    """Return ``True`` when ``c``'s OKLCH chroma is ``<= chroma_max``."""
-    return c.chroma <= chroma_max
-
-
-def to_hex(c: Color) -> str:
-    """Return the normalized lowercase opaque sRGB hex string for ``c``."""
-    return _to_coloraide(c).convert("srgb").fit().to_string(hex=True, alpha=False).lower()
-
-
-def nudge_lightness(c: Color, toward: str, amount: float) -> Color:
-    """Return a new [`Color`][colorsense.Color] with OKLCH lightness shifted by ``amount``.
-
-    ``toward`` is ``"light"`` (increase L) or ``"dark"`` (decrease L). The resulting
-    lightness is clamped to the valid OKLCH range ``[0, 1]`` and hex / OKLCH are
-    recomputed. ``alpha`` is preserved.
-    """
-    if toward not in ("light", "dark"):
-        raise ValueError(f"toward must be 'light' or 'dark', got {toward!r}")
-
-    delta = amount if toward == "light" else -amount
-    new_l = min(_L_MAX, max(_L_MIN, c.lightness + delta))
-
-    oklch = CAColor("oklch", [new_l, c.chroma, c.hue]).set("alpha", c.alpha)
-    return _from_coloraide(oklch)

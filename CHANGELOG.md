@@ -30,6 +30,15 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the "A2" attribution work begun in 0.6.0 (which handled button-styled *anchors*). Golden
   snapshots were regenerated (`ds_site`, `legacy_site`: button labels left the `link` role).
 
+### Removed
+
+- **Internal dead-code cleanup (no behavior or public-API change):** removed four unused
+  `color.primitives` helpers (`composite_over`, `is_neutral`, `to_hex`, `nudge_lightness`)
+  and the unused `Config.strip_namespace` method, none of which were re-exported from the
+  public `colorsense` API or called anywhere in the library. Removed the
+  `component_classifier.component_types` config key (and its model field): it duplicated the
+  `ComponentType` enum in `models.py` and was loaded but never read, so it tuned nothing.
+
 ## [0.6.0] - 2026-06-14
 
 A **breaking** release that redesigns the measured "usage" view. The old 4-value

@@ -213,15 +213,10 @@ token_vocabulary:
 # =============================================================================
 component_classifier:
 
-  # Final component label of an element. Color-channel routing is a fixed
-  # code-level convention (see palette/inventory.py): components named
-  # <component>_text and `link` are fed by the element's text color, `border`
-  # by its border color, and everything else by its background color.
-  component_types:
-    [page_bg, page_text, header_bg, header_text, nav_bg, nav_text,
-     footer_bg, footer_text, hero_bg, hero_text, card_bg, card_text,
-     cta_bg, cta_text, link, button_secondary, modal_bg, input_bg,
-     border, badge, third_party]
+  # The set of component labels is the ComponentType enum in models.py. Color-channel
+  # routing is a fixed code-level convention (see palette/inventory.py): components named
+  # <component>_text and `link` are fed by the element's text color, `border` by its border
+  # color, and everything else by its background color.
 
   softmax_temperature: 0.5
   min_component_prob: 0.05

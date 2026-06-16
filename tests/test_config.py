@@ -29,7 +29,6 @@ def config() -> Config:
 def test_load_returns_typed_config(config: Config) -> None:
     assert isinstance(config, Config)
     assert config.token_vocabulary.namespace_prefixes
-    assert config.component_classifier.component_types
 
 
 def test_distribution_rows_normalized_and_channels_recognized(config: Config) -> None:
@@ -124,11 +123,6 @@ def test_detect_scale_unknown_family_never_anchor(config: Config) -> None:
     assert info.family == "foo"
     assert info.is_chromatic is False
     assert info.is_anchor is False
-
-
-def test_strip_namespace(config: Config) -> None:
-    assert config.strip_namespace("--bs-primary") == "primary"
-    assert config.strip_namespace("--theme-color") == "theme"
 
 
 def test_layout_noise_class_tokens_present(config: Config) -> None:

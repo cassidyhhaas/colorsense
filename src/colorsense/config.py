@@ -12,9 +12,8 @@ supply their own copy via [`load_config`][colorsense.load_config].
 
 Public interface
 ----------------
-* [`Config`][colorsense.Config] — top-level model + the four token helpers
-  ([`Config.strip_namespace`][colorsense.Config.strip_namespace],
-  [`Config.match_name_rule`][colorsense.Config.match_name_rule],
+* [`Config`][colorsense.Config] — top-level model + the three token helpers
+  ([`Config.match_name_rule`][colorsense.Config.match_name_rule],
   [`Config.detect_scale`][colorsense.Config.detect_scale],
   [`Config.match_relational`][colorsense.Config.match_relational]).
 * [`load_default_config`][colorsense.load_default_config] — load the configuration bundled
@@ -417,7 +416,6 @@ class ComponentClassifierConfig(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    component_types: tuple[str, ...]
     # gt=0: a zero temperature divides by zero at classify time, and a NEGATIVE one
     # silently *inverts* the component ranking — the worst kind of misconfiguration.
     softmax_temperature: float = Field(gt=0.0)
@@ -515,25 +513,6 @@ class Config(BaseModel):
             if lowered.startswith(prefix.lower()) and (best is None or len(prefix) > len(best)):
                 best = prefix
         return best
-
-    def strip_namespace(self, name: str) -> str:
-        """Strip a leading ``--``, the longest namespace prefix, then a trailing suffix.
-
-        The returned remainder is lower-cased (matching is case-insensitive on
-        the remainder).
-        """
-        remainder = name[2:] if name.startswith("--") else name
-
-        prefix = self._matched_namespace_prefix(remainder)
-        if prefix is not None:
-            remainder = remainder[len(prefix) :]
-
-        lowered = remainder.lower()
-        for suffix in self.token_vocabulary.strip_trailing:
-            if lowered.endswith(suffix.lower()):
-                lowered = lowered[: len(lowered) - len(suffix)]
-                break
-        return lowered
 
     def match_name_rule(self, name: str) -> tuple[TokenSemanticRole, float] | None:
         """Match ``name`` against ``name_rules`` with exact > regex > substring precedence.
