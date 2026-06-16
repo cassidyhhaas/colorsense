@@ -30,6 +30,7 @@ from colorsense.models import (
     UsageRole,
     Viewport,
     family_of,
+    is_pill_shape,
 )
 
 
@@ -142,6 +143,19 @@ def test_family_of_maps_every_role() -> None:
         assert family_of(role) is PropertyFamily.background
     # Total: defined for every role.
     assert {family_of(r) for r in UsageRole} <= set(PropertyFamily)
+
+
+def test_is_pill_shape() -> None:
+    # Wide, fully-rounded stadium: min_corner_radius >= height/2 and width > height -> pill.
+    assert is_pill_shape(width=120.0, height=40.0, min_corner_radius=20.0) is True
+    # A circle (width == height) is excluded even when fully rounded.
+    assert is_pill_shape(width=40.0, height=40.0, min_corner_radius=20.0) is False
+    # Non-positive height -> not a shape at all.
+    assert is_pill_shape(width=120.0, height=0.0, min_corner_radius=20.0) is False
+    # Only partly rounded (radius below height/2) -> not a pill (a card/tab).
+    assert is_pill_shape(width=120.0, height=40.0, min_corner_radius=19.9) is False
+    # Tall rect (width < height), fully rounded -> not a pill (not elongated horizontally).
+    assert is_pill_shape(width=40.0, height=120.0, min_corner_radius=60.0) is False
 
 
 def test_value_objects_are_frozen() -> None:

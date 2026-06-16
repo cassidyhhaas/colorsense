@@ -105,6 +105,28 @@ def parse_css_color(value: str) -> Color | None:
         return None
 
 
+def is_painting(color: Color | None) -> bool:
+    """Whether ``color`` paints something: present and not fully transparent (alpha > 0.0).
+
+    The "paints anything" predicate — a color with **any** opacity contributes a visible
+    fill, so the test is ``alpha > 0.0``. Deliberately distinct from `is_opaque`, which
+    asks the stricter ``alpha >= 1.0`` question; the two are easy to confuse, which is why
+    both live here as named predicates rather than inline ``alpha`` comparisons. A
+    ``None`` color (no color at all) never paints.
+    """
+    return color is not None and color.alpha > 0.0
+
+
+def is_opaque(color: Color | None) -> bool:
+    """Whether ``color`` is present and fully opaque (alpha >= 1.0).
+
+    The strict counterpart to `is_painting`: a partly-transparent color *paints* but is not
+    *opaque*. Use this when only a solid surface qualifies (e.g. deriving the page canvas a
+    link reads against). A ``None`` color is never opaque.
+    """
+    return color is not None and color.alpha >= 1.0
+
+
 def delta_e(a: Color, b: Color) -> float:
     """Perceptual distance between two colors via OKLab ``deltaEOK``.
 

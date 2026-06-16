@@ -240,6 +240,23 @@ def channel_for(component: ComponentType) -> str:
     return "bg"
 
 
+def is_pill_shape(width: float, height: float, min_corner_radius: float) -> bool:
+    """Whether a rect is a fully-rounded, elongated pill/stadium shape.
+
+    True iff all four corners are fully rounded (``min_corner_radius >= height/2``) AND the
+    rect is wider than tall (``width > height``, which excludes circles where
+    ``width == height``). Size-agnostic — it tests shape only, never absolute dimensions.
+
+    This is the single source of truth for the stadium-shape test, shared by the harvester
+    (``harvest/dom.py``, gating which gradient fills track the brand palette) and the
+    component classifier (``classify/components.py``, the badge/card-exclusion rule). It
+    lives here in the shared-contracts module — like `channel_for` — so neither layer has to
+    import the other (``harvest`` and ``classify`` must not depend on each other) and the
+    two cannot drift out of sync.
+    """
+    return height > 0.0 and min_corner_radius >= height / 2.0 and width > height
+
+
 class Theme(StrEnum):
     """Color scheme a site is rendered under."""
 
