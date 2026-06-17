@@ -132,7 +132,7 @@ excluded (they ride on `result.third_party_colors`). Each `ColorUsage` carries:
 - **`area`** — the raw screenshot area fraction the color covers.
 - **`usages`** — a tuple of `Usage` slots, most-used first, each with the `role`
   ([`UsageRole`](#usage-the-role-keyed-projection)), its `property_family`
-  (`background` / `text` / `border` — always `family_of(role)`), this color's `weight`
+  (`background` / `text` / `border` — always `role.property_family`), this color's `weight`
   among its own usages (slots sum to ~1), and normalized `components` evidence.
 
 ```python

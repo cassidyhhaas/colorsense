@@ -94,6 +94,15 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- **BREAKING (no behavior change):** the two free functions that mapped a usage role / component
+  type to "which CSS property paints the color" are replaced by properties on the enums:
+  `family_of(role)` becomes `UsageRole.property_family` and the internal `channel_for(component)`
+  becomes `ComponentType.property_family`. The internal stringly-typed `"bg"`/`"text"`/`"border"`
+  "channel" taxonomy used as dict keys in `classify/components.py` and `palette/inventory.py` is
+  unified onto the existing public `PropertyFamily` enum (`background`/`text`/`border`), so there is
+  now a single type for this axis. The public API shrinks by one name (`colorsense.family_of` is
+  removed; the `.property_family` properties need no separate export). This is a pure
+  rename/retype — the pipeline output (eval scorecard and golden snapshots) is unchanged.
 - **Internal refactor (no behavior change):** three more hand-duplicated idioms now share named
   helpers. The confusable "paints anything" (`alpha > 0.0`) vs "fully opaque" (`alpha >= 1.0`)
   background checks are now `colorsense.color.primitives.is_painting` / `is_opaque`; the
