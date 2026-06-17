@@ -29,9 +29,9 @@ from colorsense.models import (
     UsagePalette,
     UsageRole,
     Viewport,
-    family_of,
     is_pill_shape,
 )
+from colorsense.palette.usage import COMPONENT_ROLE
 
 
 def _color(hex_: str = "#3366cc", lum: float = 0.5) -> Color:
@@ -128,11 +128,11 @@ def _design_token() -> DesignToken:
     )
 
 
-def test_family_of_maps_every_role() -> None:
-    # family_of is total over UsageRole and matches the documented rollup.
-    assert family_of(UsageRole.text) is PropertyFamily.text
-    assert family_of(UsageRole.link) is PropertyFamily.text
-    assert family_of(UsageRole.border) is PropertyFamily.border
+def test_usage_role_property_family_maps_every_role() -> None:
+    # UsageRole.property_family is total over UsageRole and matches the documented rollup.
+    assert UsageRole.text.property_family is PropertyFamily.text
+    assert UsageRole.link.property_family is PropertyFamily.text
+    assert UsageRole.border.property_family is PropertyFamily.border
     for role in (
         UsageRole.page,
         UsageRole.surface,
@@ -140,9 +140,32 @@ def test_family_of_maps_every_role() -> None:
         UsageRole.cta,
         UsageRole.action,
     ):
-        assert family_of(role) is PropertyFamily.background
+        assert role.property_family is PropertyFamily.background
     # Total: defined for every role.
-    assert {family_of(r) for r in UsageRole} <= set(PropertyFamily)
+    assert {r.property_family for r in UsageRole} <= set(PropertyFamily)
+
+
+def test_component_type_property_family_matches_routing() -> None:
+    # ComponentType.property_family follows the fixed routing convention:
+    # *_text plus link -> text, border -> border, everything else -> background.
+    assert ComponentType.cta_text.property_family is PropertyFamily.text
+    assert ComponentType.link.property_family is PropertyFamily.text
+    assert ComponentType.border.property_family is PropertyFamily.border
+    assert ComponentType.cta_bg.property_family is PropertyFamily.background
+    assert ComponentType.badge.property_family is PropertyFamily.background
+    assert ComponentType.button_secondary.property_family is PropertyFamily.background
+    # Total: defined for every component type.
+    assert {c.property_family for c in ComponentType} <= set(PropertyFamily)
+
+
+def test_component_and_role_property_family_agree() -> None:
+    # The latent coherence that justifies the unified type: every ComponentType that routes to
+    # a UsageRole routes to one in the SAME PropertyFamily, so the component-side and role-side
+    # rollups never disagree about which CSS property paints a color. (``cta_text`` and
+    # ``third_party`` are deliberately unrouted — they key no usage role — so they are absent
+    # from COMPONENT_ROLE and have no role-side family to agree with.)
+    for component, role in COMPONENT_ROLE.items():
+        assert component.property_family is role.property_family
 
 
 def test_is_pill_shape() -> None:
@@ -365,7 +388,6 @@ def test_public_api_exports() -> None:
     for name in (
         "UsageRole",
         "PropertyFamily",
-        "family_of",
         "Usage",
         "ColorUsage",
         "UsageEntry",

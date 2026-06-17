@@ -11,7 +11,6 @@ from colorsense.models import (
     ComponentType,
     PropertyFamily,
     UsageRole,
-    family_of,
 )
 from colorsense.palette.usage import (
     _AREA_RANKED_ROLES,
@@ -369,9 +368,9 @@ def test_color_index_per_color_usages_normalize() -> None:
     assert math.isclose(cu.usages[0].weight, 0.75, abs_tol=1e-9)
     assert cu.usages[0].property_family is PropertyFamily.background
     assert cu.usages[1].property_family is PropertyFamily.text
-    # property_family is always family_of(role).
+    # property_family is always role.property_family.
     for u in cu.usages:
-        assert u.property_family is family_of(u.role)
+        assert u.property_family is u.role.property_family
     # Components within each slot normalize to 1.
     assert cu.usages[0].components == {ComponentType.cta_bg: 1.0}
 

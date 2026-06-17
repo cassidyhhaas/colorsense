@@ -20,9 +20,9 @@ from colorsense.models import (
     Color,
     ComponentType,
     HarvestedElement,
+    PropertyFamily,
     Rect,
     Viewport,
-    channel_for,
 )
 
 CONFIG = load_default_config()
@@ -1012,64 +1012,64 @@ def _single_pool_softmax(
     return {c: p / sub_total for c, p in survivors.items()}
 
 
-def test_single_channel_element_is_byte_identical_to_global_softmax() -> None:
-    """When every positive vote falls in ONE channel, per-channel == the old global softmax.
+def test_single_family_element_is_byte_identical_to_global_softmax() -> None:
+    """When every positive vote falls in ONE family, per-family == the old global softmax.
 
-    The invariant the whole design rests on: single-channel elements (the large majority —
+    The invariant the whole design rests on: single-family elements (the large majority —
     plain surfaces, plain text) must be UNCHANGED. Here a plain ``<header>`` (only
-    bg-channel votes) and a plain text ``<p>`` (only the text-channel page_text vote) are
-    each compared against an independently-computed single-pool softmax of their raw votes.
+    background-family votes) and a plain text ``<p>`` (only the text-family page_text vote)
+    are each compared against an independently-computed single-pool softmax of their raw votes.
     """
-    # A plain header: geometry + semantic votes are all bg-channel components.
+    # A plain header: geometry + semantic votes are all background-family components.
     header = _element(tag="header", rect=Rect(x=0.0, y=0.0, width=1280.0, height=80.0))
     [header_res] = classify_components([header], CONFIG, VIEWPORT)
-    assert all(channel_for(c) == "bg" for c in header_res.component_dist)
+    assert all(c.property_family is PropertyFamily.background for c in header_res.component_dist)
     assert header_res.component_dist == {ComponentType.header_bg: 1.0}
 
-    # A plain text paragraph: a lone text-channel page_text vote.
+    # A plain text paragraph: a lone text-family page_text vote.
     para = _element(tag="p", has_text=True)
     [para_res] = classify_components([para], CONFIG, VIEWPORT)
-    assert all(channel_for(c) == "text" for c in para_res.component_dist)
+    assert all(c.property_family is PropertyFamily.text for c in para_res.component_dist)
     assert para_res.component_dist == {ComponentType.page_text: 1.0}
 
-    # A multi-vote single-channel element (all bg): a bordered-less ``.card`` with text-
-    # presence excluded, so card_bg + page_text? page_text is text-channel, so use a card
-    # with several bg-channel votes only — a repetition-free card vs hand-rolled vote totals.
+    # A multi-vote single-family element (all background): a borderless ``.card`` with text-
+    # presence excluded, so card_bg + page_text? page_text is the text family, so use a card
+    # with several background-family votes only — a repetition-free card vs hand-rolled totals.
     vote_totals = {
         ComponentType.card_bg: 3.0,
         ComponentType.hero_bg: 1.5,
         ComponentType.page_bg: 0.5,
     }
-    assert all(channel_for(c) == "bg" for c in vote_totals)
+    assert all(c.property_family is PropertyFamily.background for c in vote_totals)
     assert _finalize_distribution(vote_totals, CONFIG) == _single_pool_softmax(vote_totals)
 
 
-def test_multichannel_element_paints_both_channels_unstarved() -> None:
-    """A bordered ``.card`` with direct text feeds BOTH bg and text channels non-trivially.
+def test_multifamily_element_paints_both_families_unstarved() -> None:
+    """A bordered ``.card`` with direct text feeds BOTH background and text families non-trivially.
 
-    Under the former global softmax the bg-channel card_bg vote and the text-channel
-    page_text vote competed; per-channel they each normalize within their own partition,
-    so the text channel is no longer starved. Both channels receive non-trivial mass.
+    Under the former global softmax the background-family card_bg vote and the text-family
+    page_text vote competed; per-family they each normalize within their own partition,
+    so the text family is no longer starved. Both families receive non-trivial mass.
     """
     card = _element(tag="div", class_tokens=["card"], border=_color("#d1d9e0"), has_text=True)
     [result] = classify_components([card], CONFIG, VIEWPORT)
     dist = result.component_dist
-    bg_mass = sum(v for c, v in dist.items() if channel_for(c) == "bg")
-    text_mass = sum(v for c, v in dist.items() if channel_for(c) == "text")
-    border_mass = sum(v for c, v in dist.items() if channel_for(c) == "border")
+    bg_mass = sum(v for c, v in dist.items() if c.property_family is PropertyFamily.background)
+    text_mass = sum(v for c, v in dist.items() if c.property_family is PropertyFamily.text)
+    border_mass = sum(v for c, v in dist.items() if c.property_family is PropertyFamily.border)
     assert bg_mass > 0.1
     assert text_mass > 0.1
     assert border_mass > 0.1
     assert math.isclose(bg_mass + text_mass + border_mass, 1.0, rel_tol=1e-9)
 
 
-def test_multichannel_distribution_sums_to_one() -> None:
-    """A multi-channel element's recombined distribution still sums to ~1.0."""
-    # A bordered submit input spans all three channels: cta_bg/link (bg/text) + border.
+def test_multifamily_distribution_sums_to_one() -> None:
+    """A multi-family element's recombined distribution still sums to ~1.0."""
+    # A bordered submit input spans all three families: cta_bg/link (background/text) + border.
     submit = _element(tag="input", input_type="submit", clickable=True, border=_color("#d1d9e0"))
     [result] = classify_components([submit], CONFIG, VIEWPORT)
-    channels = {channel_for(c) for c in result.component_dist}
-    assert len(channels) >= 2  # genuinely multi-channel
+    families = {c.property_family for c in result.component_dist}
+    assert len(families) >= 2  # genuinely multi-family
     assert math.isclose(sum(result.component_dist.values()), 1.0, rel_tol=1e-9)
 
 

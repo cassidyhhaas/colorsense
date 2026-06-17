@@ -15,12 +15,12 @@ Scoring pipeline (per element):
 2. Apply multiplicative suppressors (``aria_hidden`` / hidden-or-zero-area zero
    everything; ``third_party_present`` damps the configured brand components on
    third-party widgets).
-3. Partition the surviving positive votes by color channel
-   (``models.channel_for``) and, INDEPENDENTLY within each painted channel,
-   softmax with ``softmax_temperature``, prune components below
+3. Partition the surviving positive votes by property family
+   (``ComponentType.property_family``) and, INDEPENDENTLY within each painted
+   family, softmax with ``softmax_temperature``, prune components below
    ``min_component_prob``, and renormalize the survivors. Recombine the
-   per-channel sub-distributions with channel weights summing to 1.0 so the
-   element distribution still sums to ~1.0. Single-channel elements are
+   per-family sub-distributions with family weights summing to 1.0 so the
+   element distribution still sums to ~1.0. Single-family elements are
    byte-identical to a global softmax (see `_finalize_distribution`).
 
 Repetition is approximated at list level: this layer has no real DOM tree, so
@@ -48,8 +48,8 @@ from colorsense.models import (
     Color,
     ComponentType,
     HarvestedElement,
+    PropertyFamily,
     Viewport,
-    channel_for,
     is_circle_shape,
     is_pill_shape,
 )
@@ -58,7 +58,7 @@ __all__ = ["classify_components"]
 
 _DEFAULT_VIEWPORT = Viewport(width=1280, height=800, device_scale_factor=1.0)
 
-# channel_routing sentinels that are NOT ComponentType values.
+# Vote-routing sentinels that are NOT ComponentType values.
 _NON_COMPONENT_VOTE_KEYS = frozenset({"ignore"})
 
 # <input> type attributes that render as a real button (button chrome, button-styled
@@ -76,7 +76,7 @@ def _add_votes(
 ) -> None:
     """Add a config vote dict (keyed by component-type strings) into ``vote_totals``.
 
-    Keys that are channel sentinels (e.g. ``"ignore"``) or otherwise not valid
+    Keys that are routing sentinels (e.g. ``"ignore"``) or otherwise not valid
     [`ComponentType`][colorsense.ComponentType] members are skipped rather than crashing.
     """
     for key, weight in votes.items():
@@ -557,47 +557,47 @@ def _softmax_prune_renormalize(
 
 
 def _recombination_weights(
-    by_channel: dict[str, dict[ComponentType, float]],
-) -> dict[str, float]:
-    """Channel weights (summing to 1.0 across painted channels) for recombination.
+    by_family: dict[PropertyFamily, dict[ComponentType, float]],
+) -> dict[PropertyFamily, float]:
+    """Property-family weights (summing to 1.0 across painted families) for recombination.
 
-    Vote-mass-share: ``w[channel] = (raw positive votes in channel) / (all raw
-    positive votes)``. The channel that accumulated more/stronger raw votes
-    dominates the recombination, so a faint secondary channel cannot dilute a
-    strongly-evidenced primary one. With a single painted channel this returns
-    ``{channel: 1.0}``.
+    Vote-mass-share: ``w[family] = (raw positive votes in family) / (all raw
+    positive votes)``. The family that accumulated more/stronger raw votes
+    dominates the recombination, so a faint secondary family cannot dilute a
+    strongly-evidenced primary one. With a single painted family this returns
+    ``{family: 1.0}``.
     """
-    channel_mass = {channel: sum(votes.values()) for channel, votes in by_channel.items()}
-    total_mass = sum(channel_mass.values())
-    return {channel: mass / total_mass for channel, mass in channel_mass.items()}
+    family_mass = {family: sum(votes.values()) for family, votes in by_family.items()}
+    total_mass = sum(family_mass.values())
+    return {family: mass / total_mass for family, mass in family_mass.items()}
 
 
 def _finalize_distribution(
     vote_totals: dict[ComponentType, float],
     config: Config,
 ) -> dict[ComponentType, float]:
-    """Per-channel softmax/prune/renormalize, recombined with channel weights.
+    """Per-family softmax/prune/renormalize, recombined with property-family weights.
 
-    The positive votes are partitioned by color channel (``models.channel_for``, the
-    single source of truth shared with ``palette/inventory.py``; ``classify/`` does not
-    import from ``palette/``). Each painted channel — one with >=1 positive vote — gets
-    its OWN softmax/prune/renormalize sub-distribution summing to 1.0, and the
-    sub-distributions are recombined with channel weights summing to 1.0, so the element
-    distribution still sums to ~1.0.
+    The positive votes are partitioned by property family
+    (``ComponentType.property_family``, the single source of truth shared with
+    ``palette/inventory.py``; ``classify/`` does not import from ``palette/``). Each painted
+    family — one with >=1 positive vote — gets its OWN softmax/prune/renormalize
+    sub-distribution summing to 1.0, and the sub-distributions are recombined with family
+    weights summing to 1.0, so the element distribution still sums to ~1.0.
 
-    The point of per-channel normalization: an element's text-channel and bg-channel votes
-    no longer compete in one global softmax. A filled clickable ``<a>`` (a gradient CTA
-    pill) carries a large ``link`` (text-channel) vote and a small ``cta_bg`` (bg-channel)
-    vote; globally the softmax starved the bg vote, so the pill's fill got ~no attribution.
-    Per-channel, the lone ``cta_bg`` normalizes to 1.0 within the bg partition and the fill
-    attributes at full bg-channel strength.
+    The point of per-family normalization: an element's text-family and background-family
+    votes no longer compete in one global softmax. A filled clickable ``<a>`` (a gradient CTA
+    pill) carries a large ``link`` (text-family) vote and a small ``cta_bg`` (background-family)
+    vote; globally the softmax starved the background vote, so the pill's fill got ~no
+    attribution. Per-family, the lone ``cta_bg`` normalizes to 1.0 within the background
+    partition and the fill attributes at full background-family strength.
 
-    INVARIANT — single-channel elements are byte-identical to the former global softmax:
-    when every positive vote falls in ONE channel, ``by_channel`` has one entry, its
-    recombination weight is 1.0, and the within-channel
+    INVARIANT — single-family elements are byte-identical to the former global softmax:
+    when every positive vote falls in ONE family, ``by_family`` has one entry, its
+    recombination weight is 1.0, and the within-family
     softmax/prune/renorm is exactly the old global computation. So plain text / plain
-    surface / single-channel elements (the large majority) are unchanged; only
-    multi-channel elements differ.
+    surface / single-family elements (the large majority) are unchanged; only
+    multi-family elements differ.
     """
     classifier_config = config.component_classifier
     # Suppressors have already been applied upstream; they are multiplicative and never
@@ -606,23 +606,23 @@ def _finalize_distribution(
     if not positive:
         return {}
 
-    # Partition positive votes by channel (a channel is "painted" iff it has >=1 vote).
-    by_channel: dict[str, dict[ComponentType, float]] = {}
+    # Partition positive votes by family (a family is "painted" iff it has >=1 vote).
+    by_family: dict[PropertyFamily, dict[ComponentType, float]] = {}
     for component, vote in positive.items():
-        by_channel.setdefault(channel_for(component), {})[component] = vote
+        by_family.setdefault(component.property_family, {})[component] = vote
 
-    weights = _recombination_weights(by_channel)
+    weights = _recombination_weights(by_family)
 
     distribution: dict[ComponentType, float] = {}
-    for channel, votes in by_channel.items():
-        channel_distribution = _softmax_prune_renormalize(
+    for family, votes in by_family.items():
+        family_distribution = _softmax_prune_renormalize(
             votes,
             classifier_config.softmax_temperature,
             classifier_config.min_component_prob,
         )
-        channel_weight = weights[channel]
-        for component, probability in channel_distribution.items():
-            distribution[component] = channel_weight * probability
+        family_weight = weights[family]
+        for component, probability in family_distribution.items():
+            distribution[component] = family_weight * probability
     return distribution
 
 
@@ -709,15 +709,15 @@ def classify_components(
 
         # 7. CTA-label contrast relabel. A non-anchor clickable whose label text sits on its
         # OWN distinct interactive fill (legible there, illegible on the page canvas) is a
-        # CTA-button LABEL, not an inline link. RELABEL all its accumulated text-channel
+        # CTA-button LABEL, not an inline link. RELABEL all its accumulated text-family
         # `link` mass to `cta_text` (the unrouted button-label sink). A structural mass-MOVE,
         # not a per-rule tweak, because `link` reaches such an element from several feature
         # families at once (the generic `clickable` rule AND the `area<=small_area & clickable`
         # geometry rule are both link sources on a small CTA label); moving the accumulated
-        # total is the only way to fully re-route it. The move preserves total text-channel
-        # mass (`channel_for(cta_text) == channel_for(link) == "text"`), so the per-channel
-        # recombination weights are unchanged and the bg channel never gains mass — the hard
-        # S27 lesson that DELETING link regresses cta/surface noise.
+        # total is the only way to fully re-route it. The move preserves total text-family
+        # mass (`cta_text.property_family == link.property_family == PropertyFamily.text`), so
+        # the per-family recombination weights are unchanged and the background family never
+        # gains mass — the hard S27 lesson that DELETING link regresses cta/surface noise.
         if _is_cta_label(element, page_canvas, relabel_config):
             link_mass = vote_totals.pop(ComponentType.link, 0.0)
             if link_mass > 0.0:

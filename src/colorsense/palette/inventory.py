@@ -9,31 +9,30 @@ objects:
   of page area it covers. This is the authoritative area weight.
 * **Semantic truth** — the classified elements. Each
   `ClassifiedElement` carries a ``component_dist`` over
-  [`ComponentType`][colorsense.ComponentType]. The distribution is split per color
-  channel and attributed to the nearest measured color of the *matching* channel:
-  ``*_text`` components and ``link`` route to ``element.text``
-  (a link paints its typography), `border`
-  to ``element.border``, and everything else to ``element.bg``. This channel
-  routing is a fixed code-level convention (the shared `models.channel_for`). A channel
-  whose measured color is **fully transparent** (``alpha == 0``) paints nothing
+  [`ComponentType`][colorsense.ComponentType]. The distribution is split per
+  [`PropertyFamily`][colorsense.PropertyFamily] and attributed to the nearest measured
+  color of the *matching* family: ``*_text`` components and ``link`` route to
+  ``element.text`` (a link paints its typography), `border`
+  to ``element.border``, and everything else to ``element.bg``. This family
+  routing is a fixed code-level convention (the shared `ComponentType.property_family`). A
+  family whose measured color is **fully transparent** (``alpha == 0``) paints nothing
   and donates no mass — without this gate, every transparent-background element
   (links, paragraphs, wrappers) piles its votes onto a phantom ``#000000``
-  zero-area cluster. The bg channel can attribute to more than one color: a gradient CTA
-  paints every opaque stop, and the element's bg mass is split
+  zero-area cluster. The background family can attribute to more than one color: a gradient
+  CTA paints every opaque stop, and the element's background mass is split
   evenly across them and scaled by each stop's alpha, so a purple→blue button makes both
-  purple and blue candidates without out-voting a solid one. A bg vote that mixes CTA/action
-  and page/surface mass is split so each share routes to its own nearest entry: the
+  purple and blue candidates without out-voting a solid one. A background vote that mixes
+  CTA/action and page/surface mass is split so each share routes to its own nearest entry: the
   CTA/action share is kept off any perceptually-distinct near-black surface bin, while the
   page/surface share keeps the plain join.
 
 Family-segregated clustering
 ----------------------------
 Attribution and clustering happen **within three separate pools**, one per
-[`PropertyFamily`][colorsense.PropertyFamily]: ``background`` (the bg channel),
-``text`` (the text channel), and ``border`` (the border channel). The ``background``
-pool is seeded with one entry per `ScreenshotBin` (area truth); the ``text`` and
-``border`` pools start empty, since text/border colors paint no screenshot area. A
-channel's mass only ever nearest-joins or clusters against entries in its own family's
+[`PropertyFamily`][colorsense.PropertyFamily]: ``background``, ``text``, and ``border``.
+The ``background`` pool is seeded with one entry per `ScreenshotBin` (area truth); the
+``text`` and ``border`` pools start empty, since text/border colors paint no screenshot
+area. A family's mass only ever nearest-joins or clusters against entries in its own
 pool — so a low-area near-black text color can no longer be absorbed by a high-area
 background bin of a perceptually-near hex and report the bin's hex. Each pool's
 representative is chosen by what is authoritative for that family: ``background`` by
@@ -70,7 +69,6 @@ from colorsense.models import (
     Harvest,
     HarvestedElement,
     PropertyFamily,
-    channel_for,
 )
 
 __all__ = ["build_inventory"]
@@ -219,19 +217,11 @@ def _nearest_mergeable_near_black_entry(
     return nearest_index
 
 
-# Per-channel join radius: bg loose, text/border tight (see the constants above).
-_MATCH_BY_CHANNEL: dict[str, float] = {
-    "bg": MAX_BG_MATCH_DELTA_E,
-    "text": MAX_TEXT_BORDER_MATCH_DELTA_E,
-    "border": MAX_TEXT_BORDER_MATCH_DELTA_E,
-}
-
-# The PropertyFamily a color channel attributes into. Each channel's mass is clustered
-# only against entries in its own family's pool (see the module docstring).
-_FAMILY_BY_CHANNEL: dict[str, PropertyFamily] = {
-    "bg": PropertyFamily.background,
-    "text": PropertyFamily.text,
-    "border": PropertyFamily.border,
+# Per-family join radius: background loose, text/border tight (see the constants above).
+_MATCH_BY_FAMILY: dict[PropertyFamily, float] = {
+    PropertyFamily.background: MAX_BG_MATCH_DELTA_E,
+    PropertyFamily.text: MAX_TEXT_BORDER_MATCH_DELTA_E,
+    PropertyFamily.border: MAX_TEXT_BORDER_MATCH_DELTA_E,
 }
 
 
@@ -453,17 +443,17 @@ def build_inventory(harvest: Harvest, classified: list[ClassifiedElement]) -> li
     1. Seed the ``background`` pool with one entry per `ScreenshotBin`
        (authoritative area weight, empty mix); the ``text`` and ``border`` pools start
        empty (text/border colors paint no screenshot area).
-    2. For each classified element, split its ``component_dist`` into per-channel
-       sub-distributions via `channel_for` and process the channels in a
-       fixed (bg, text, border) order. For each channel whose measured color is
+    2. For each classified element, split its ``component_dist`` into per-family
+       sub-distributions via `ComponentType.property_family` and process the families in a
+       fixed (background, text, border) order. For each family whose measured color is
        non-``None`` and whose sub-distribution is non-empty, find the nearest
-       entry **within that channel's family pool only** by `delta_e`. If that
-       nearest entry is within the channel's join radius (`MAX_BG_MATCH_DELTA_E` for
-       bg, the tighter `MAX_TEXT_BORDER_MATCH_DELTA_E` for text/border), add
-       the channel's mass (each element weighted equally, raw) into the entry's
-       mix. Otherwise append a new entry to that pool from the channel's color
+       entry **within that family's pool only** by `delta_e`. If that
+       nearest entry is within the family's join radius (`MAX_BG_MATCH_DELTA_E` for
+       background, the tighter `MAX_TEXT_BORDER_MATCH_DELTA_E` for text/border), add
+       the family's mass (each element weighted equally, raw) into the entry's
+       mix. Otherwise append a new entry to that pool from the family's color
        with ``area_weight = 0.0`` so its semantics are not lost. New entries are
-       appended in element order then channel order, which is deterministic.
+       appended in element order then family order, which is deterministic.
     3. Cluster each pool independently via union-find under `MAX_CLUSTER_MERGE_DELTA_E`. For
        each group emit one `ColorCluster`: representative color =
        member with the largest area weight for ``background`` (largest in-family
@@ -486,32 +476,33 @@ def build_inventory(harvest: Harvest, classified: list[ClassifiedElement]) -> li
         PropertyFamily.border: [],
     }
 
-    # STEP 1b: attribute element semantics to the nearest entry in the channel's family
-    # pool (or a new one), routing each component's mass to the channel that paints it.
+    # STEP 1b: attribute element semantics to the nearest entry in the family's pool
+    # (or a new one), routing each component's mass to the family that paints it.
     for classification in classified:
         if not classification.component_dist:
             continue
 
-        # Split the distribution into per-channel sub-distributions. Channel routing is the
-        # shared `models.channel_for` (same convention the component classifier normalizes by).
-        channel_distributions: dict[str, dict[ComponentType, float]] = {
-            "bg": {},
-            "text": {},
-            "border": {},
+        # Split the distribution into per-family sub-distributions. Family routing is the
+        # shared `ComponentType.property_family` (same convention the component classifier
+        # normalizes by).
+        family_distributions: dict[PropertyFamily, dict[ComponentType, float]] = {
+            PropertyFamily.background: {},
+            PropertyFamily.text: {},
+            PropertyFamily.border: {},
         }
         for component, mass in classification.component_dist.items():
-            channel_distributions[channel_for(component)][component] = mass
+            family_distributions[component.property_family][component] = mass
 
-        # Fixed channel order for determinism. The bg channel can carry more than one
+        # Fixed family order for determinism. The background family can carry more than one
         # fill color — a gradient CTA paints every opaque stop (see `_bg_fill_colors`) —
-        # so each channel resolves to a list; text/border are always single.
-        for channel, colors in (
-            ("bg", _bg_fill_colors(classification.element)),
-            ("text", [classification.element.text]),
-            ("border", [classification.element.border]),
+        # so each family resolves to a list; text/border are always single.
+        for family, colors in (
+            (PropertyFamily.background, _bg_fill_colors(classification.element)),
+            (PropertyFamily.text, [classification.element.text]),
+            (PropertyFamily.border, [classification.element.border]),
         ):
-            channel_distribution = channel_distributions[channel]
-            if not channel_distribution:
+            family_distribution = family_distributions[family]
+            if not family_distribution:
                 continue
             # A fully-transparent fill color (alpha == 0, e.g. the default
             # ``background-color: transparent``) paints nothing: attributing its
@@ -520,39 +511,44 @@ def build_inventory(harvest: Harvest, classified: list[ClassifiedElement]) -> li
             if not fills:
                 continue
 
-            # The channel's mass is attributed (and later clustered) only within its
-            # own family's pool — never across families.
-            pool = pools[_FAMILY_BY_CHANNEL[channel]]
+            # The family's mass is attributed (and later clustered) only within its
+            # own pool — never across families.
+            pool = pools[family]
 
-            # Split the element's channel mass evenly across its fill colors so a
+            # Split the element's family mass evenly across its fill colors so a
             # multi-stop gradient is not double-counted (a purple->blue button donates
-            # the same total cta_bg mass as a solid one, half to each stop). On the bg and
-            # border channels the per-fill share is additionally scaled by the fill's alpha,
-            # so a faint ``bg-primary/10`` tint or a near-transparent hairline border votes
-            # its intended hex in proportion to how much it actually paints; text is not
-            # alpha-scaled (a low-opacity glyph still reads as that text color). Scaling the
-            # border channel is what stops a swarm of near-transparent hairline borders (e.g.
+            # the same total cta_bg mass as a solid one, half to each stop). On the
+            # background and border families the per-fill share is additionally scaled by the
+            # fill's alpha, so a faint ``bg-primary/10`` tint or a near-transparent hairline
+            # border votes its intended hex in proportion to how much it actually paints; text
+            # is not alpha-scaled (a low-opacity glyph still reads as that text color). Scaling
+            # the border family is what stops a swarm of near-transparent hairline borders (e.g.
             # 48 ``alpha 0.08`` icon-container outlines) from out-voting the one opaque
             # divider that actually structures the page.
             # The text/border pools apply the near-white check so OKLab cannot collapse two
-            # perceptually-distinct near-white text colors onto one entry. The bg pool splits
-            # its vote (below) so the near-black CTA check diverts ONLY CTA/action mass;
+            # perceptually-distinct near-white text colors onto one entry. The background pool
+            # splits its vote (below) so the near-black CTA check diverts ONLY CTA/action mass;
             # everything else keeps the shared helper.
-            is_exact_color_family = _FAMILY_BY_CHANNEL[channel] in _EXACT_COLOR_FAMILIES
-            # A bg vote that carries ANY CTA/action component is split in two: the CTA/action share
-            # routes through the near-black check (so a small dark button background is not absorbed
-            # into a CIEDE2000-distinct near-black screenshot bin — disco `#030711` vs the `#050505`
-            # footer bin), while the page/surface/banner share keeps the plain OKLab join. That
-            # split is what keeps the check from touching page/surface attribution when a near-black
-            # element carries both kinds of mass (a dark clickable panel). See
-            # `CTA_ACTION_BG_COMPONENTS` for why the CTA gate is presence-based, not dominance.
-            vote_has_cta_action_mass = channel == "bg" and any(
-                component in CTA_ACTION_BG_COMPONENTS for component in channel_distribution
+            is_exact_color_family = family in _EXACT_COLOR_FAMILIES
+            # A background vote that carries ANY CTA/action component is split in two: the
+            # CTA/action share routes through the near-black check (so a small dark button
+            # background is not absorbed into a CIEDE2000-distinct near-black screenshot bin —
+            # disco `#030711` vs the `#050505` footer bin), while the page/surface/banner share
+            # keeps the plain OKLab join. That split is what keeps the check from touching
+            # page/surface attribution when a near-black element carries both kinds of mass (a
+            # dark clickable panel). See `CTA_ACTION_BG_COMPONENTS` for why the CTA gate is
+            # presence-based, not dominance.
+            vote_has_cta_action_mass = family is PropertyFamily.background and any(
+                component in CTA_ACTION_BG_COMPONENTS for component in family_distribution
             )
-            radius = _MATCH_BY_CHANNEL[channel]
+            radius = _MATCH_BY_FAMILY[family]
             fill_count = len(fills)
             for color in fills:
-                weight = (color.alpha if channel in ("bg", "border") else 1.0) / fill_count
+                weight = (
+                    color.alpha
+                    if family in (PropertyFamily.background, PropertyFamily.border)
+                    else 1.0
+                ) / fill_count
 
                 # Resolve routing as (component-mass subset, target entry index) pairs. Every
                 # lookup runs against the SAME pre-update pool, so the plain page/surface
@@ -561,19 +557,19 @@ def build_inventory(harvest: Harvest, classified: list[ClassifiedElement]) -> li
                 if is_exact_color_family:
                     routes = [
                         (
-                            channel_distribution,
+                            family_distribution,
                             _nearest_mergeable_near_white_entry(color, pool, radius),
                         )
                     ]
                 elif vote_has_cta_action_mass:
                     cta_action_mass = {
                         c: m
-                        for c, m in channel_distribution.items()
+                        for c, m in family_distribution.items()
                         if c in CTA_ACTION_BG_COMPONENTS
                     }
                     non_cta_mass = {
                         c: m
-                        for c, m in channel_distribution.items()
+                        for c, m in family_distribution.items()
                         if c not in CTA_ACTION_BG_COMPONENTS
                     }
                     routes = [
@@ -592,7 +588,7 @@ def build_inventory(harvest: Harvest, classified: list[ClassifiedElement]) -> li
                 else:
                     routes = [
                         (
-                            channel_distribution,
+                            family_distribution,
                             nearest_within(color, pool, radius, key=lambda e: e.color),
                         )
                     ]

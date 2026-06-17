@@ -25,8 +25,9 @@ Design notes
   list (no [`Config`][colorsense.Config]); every threshold is a documented, module-level
   **tunable** constant.
 * `ROLE_COMPONENTS` — the usage-role → component-type collapse — is a fixed code-level
-  convention, exactly like the inventory's component → color-channel routing
-  (``models.channel_for``): it describes what the taxonomy *means*, not a tunable weight,
+  convention, exactly like the inventory's component → property-family routing
+  (``ComponentType.property_family``): it describes what the taxonomy *means*, not a tunable
+  weight,
   so it lives in code rather than the YAML config. ``cta_text`` and ``third_party`` are
   deliberately absent from every role: ``cta_text`` is the button-LABEL sink — a
   button-styled element's text color is part of the CTA, not an independent palette role,
@@ -73,7 +74,6 @@ from colorsense.models import (
     UsageEntry,
     UsagePalette,
     UsageRole,
-    family_of,
 )
 from colorsense.palette._pruning import prune_distribution
 
@@ -180,8 +180,8 @@ COMPONENT_ROLE: dict[ComponentType, UsageRole] = _build_component_role()
 # screenshot bin (→ area) flips across OSes on identical input. Vote mass is DOM-derived
 # (computed colors, not rendered pixels), so it is stable across OSes and ranks the brand CTA
 # — and the primary button over the secondary — correctly. (Note the cta/action *property
-# family* stays ``background`` for the ``family_of`` rollups and the color-keyed index; only
-# their *ranking signal* differs.)
+# family* stays ``background`` for the ``UsageRole.property_family`` rollups and the
+# color-keyed index; only their *ranking signal* differs.)
 _AREA_RANKED_ROLES: frozenset[UsageRole] = frozenset(
     {UsageRole.page, UsageRole.surface, UsageRole.banner}
 )
@@ -359,7 +359,7 @@ def _build_color_usages(
         usages.append(
             Usage(
                 role=role,
-                property_family=family_of(role),
+                property_family=role.property_family,
                 weight=role_mass / total_routed,
                 components=components,
             )
