@@ -146,6 +146,17 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `component_classifier.component_types` config key (and its model field): it duplicated the
   `ComponentType` enum in `models.py` and was loaded but never read, so it tuned nothing.
 
+### Security
+
+- **Bumped the `examples` group's Starlette floor to `>=1.3.1`** to close
+  [GHSA-82w8-qh3p-5jfq](https://github.com/advisories/GHSA-82w8-qh3p-5jfq) (high severity): a
+  request-body DoS where `request.form()` size limits were silently ignored for
+  `application/x-www-form-urlencoded`. This also clears the low-severity
+  [GHSA-jp82-jpqv-5vv3](https://github.com/advisories/GHSA-jp82-jpqv-5vv3) (patched in 1.3.0).
+  The FastAPI floor moves to `>=0.133` — the lowest release whose Starlette pin admits 1.3.1 —
+  so the declared floors stay jointly satisfiable. Starlette is a transitive dependency used
+  only by `examples/webservice/`; the library's own runtime dependencies are unaffected.
+
 ## [0.6.0] - 2026-06-14
 
 A **breaking** release that redesigns the measured "usage" view. The old 4-value

@@ -66,7 +66,9 @@ dev = [
 ]
 # Used only by examples/ (and the tests that exercise them); never part of the library's
 # runtime dependencies. Install with: uv sync --group examples --group dev
-examples = ["fastapi>=0.110", "uvicorn>=0.29"]
+# starlette>=1.3.1 closes GHSA-82w8-qh3p-5jfq (high-severity request.form() DoS); fastapi>=0.133
+# is the lowest release whose Starlette pin admits 1.3.1, so the floors stay jointly satisfiable.
+examples = ["fastapi>=0.133", "uvicorn>=0.29", "starlette>=1.3.1"]
 # Documentation site (MkDocs Material + mkdocstrings). Install with: uv sync --group docs
 docs = ["mkdocs-material>=9", "mkdocstrings[python]>=0.25"]
 
