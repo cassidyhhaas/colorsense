@@ -111,15 +111,15 @@ async def test_cache_returns_without_re_render(config: Config) -> None:
     policy = PolitenessPolicy(harvester=harvester, robots_loader=_no_robots)
     url = "https://example.test/page"
 
-    first = await policy.fetch(url, Theme.light, config, VIEWPORT)
-    second = await policy.fetch(url, Theme.light, config, VIEWPORT)
+    first = await policy.fetch(url, Theme.LIGHT, config, VIEWPORT)
+    second = await policy.fetch(url, Theme.LIGHT, config, VIEWPORT)
 
     assert second is first  # identical object straight from cache
-    assert harvester.calls == [(url, Theme.light)]  # rendered exactly once
+    assert harvester.calls == [(url, Theme.LIGHT)]  # rendered exactly once
 
     # A different theme is a distinct cache key and re-renders.
-    await policy.fetch(url, Theme.dark, config, VIEWPORT)
-    assert harvester.calls == [(url, Theme.light), (url, Theme.dark)]
+    await policy.fetch(url, Theme.DARK, config, VIEWPORT)
+    assert harvester.calls == [(url, Theme.LIGHT), (url, Theme.DARK)]
 
 
 async def test_render_cache_is_lru_bounded(config: Config) -> None:
@@ -130,7 +130,7 @@ async def test_render_cache_is_lru_bounded(config: Config) -> None:
 
     urls = [f"https://example.test/page/{i}" for i in range(5)]
     for url in urls:
-        await policy.fetch(url, Theme.light, config, VIEWPORT)
+        await policy.fetch(url, Theme.LIGHT, config, VIEWPORT)
 
     # Bounded: never more than the cap regardless of how many distinct keys were inserted.
     assert len(policy._cache) == 3
@@ -138,13 +138,13 @@ async def test_render_cache_is_lru_bounded(config: Config) -> None:
 
     # The 3 most-recent keys (page/2..4) are cache hits — no new render.
     for url in urls[2:]:
-        await policy.fetch(url, Theme.light, config, VIEWPORT)
+        await policy.fetch(url, Theme.LIGHT, config, VIEWPORT)
     assert len(harvester.calls) == 5  # still 5: all served from cache
 
     # The LRU key (page/0) was evicted, so re-fetching it re-invokes the harvester.
-    await policy.fetch(urls[0], Theme.light, config, VIEWPORT)
+    await policy.fetch(urls[0], Theme.LIGHT, config, VIEWPORT)
     assert len(harvester.calls) == 6
-    assert (urls[0], Theme.light) in harvester.calls
+    assert (urls[0], Theme.LIGHT) in harvester.calls
 
 
 async def test_render_cache_hit_refreshes_recency(config: Config) -> None:
@@ -153,19 +153,19 @@ async def test_render_cache_hit_refreshes_recency(config: Config) -> None:
     policy = PolitenessPolicy(harvester=harvester, robots_loader=_no_robots, max_cache_entries=2)
     a, b, c = (f"https://example.test/p/{x}" for x in "abc")
 
-    await policy.fetch(a, Theme.light, config, VIEWPORT)
-    await policy.fetch(b, Theme.light, config, VIEWPORT)
+    await policy.fetch(a, Theme.LIGHT, config, VIEWPORT)
+    await policy.fetch(b, Theme.LIGHT, config, VIEWPORT)
     # Touch ``a`` so ``b`` is now the LRU entry.
-    await policy.fetch(a, Theme.light, config, VIEWPORT)
+    await policy.fetch(a, Theme.LIGHT, config, VIEWPORT)
     # Inserting ``c`` should evict ``b`` (the LRU), not ``a``.
-    await policy.fetch(c, Theme.light, config, VIEWPORT)
+    await policy.fetch(c, Theme.LIGHT, config, VIEWPORT)
 
     assert len(harvester.calls) == 3  # a, b, c each rendered once so far
     # ``a`` survived: it is a hit (no new render).
-    await policy.fetch(a, Theme.light, config, VIEWPORT)
+    await policy.fetch(a, Theme.LIGHT, config, VIEWPORT)
     assert len(harvester.calls) == 3
     # ``b`` was evicted: re-fetch re-renders.
-    await policy.fetch(b, Theme.light, config, VIEWPORT)
+    await policy.fetch(b, Theme.LIGHT, config, VIEWPORT)
     assert len(harvester.calls) == 4
 
 
@@ -174,7 +174,7 @@ async def test_render_cache_unbounded_with_zero(config: Config) -> None:
     harvester = _CountingHarvester()
     policy = PolitenessPolicy(harvester=harvester, robots_loader=_no_robots, max_cache_entries=0)
     for i in range(10):
-        await policy.fetch(f"https://example.test/u/{i}", Theme.light, config, VIEWPORT)
+        await policy.fetch(f"https://example.test/u/{i}", Theme.LIGHT, config, VIEWPORT)
     assert len(policy._cache) == 10
 
 
@@ -184,11 +184,11 @@ async def test_render_cache_unbounded_with_none(config: Config) -> None:
     harvester = _CountingHarvester()
     policy = PolitenessPolicy(harvester=harvester, robots_loader=_no_robots, max_cache_entries=None)
     for i in range(10):
-        await policy.fetch(f"https://example.test/u/{i}", Theme.light, config, VIEWPORT)
+        await policy.fetch(f"https://example.test/u/{i}", Theme.LIGHT, config, VIEWPORT)
     assert len(policy._cache) == 10
     # Re-fetching all of them is pure cache hits — no extra renders.
     for i in range(10):
-        await policy.fetch(f"https://example.test/u/{i}", Theme.light, config, VIEWPORT)
+        await policy.fetch(f"https://example.test/u/{i}", Theme.LIGHT, config, VIEWPORT)
     assert len(harvester.calls) == 10
 
 
@@ -199,7 +199,7 @@ async def test_robots_disallow_blocks_fetch(config: Config) -> None:
 
     assert await policy.can_fetch(url) is False
     with pytest.raises(RobotsDisallowedError):
-        await policy.fetch(url, Theme.light, config, VIEWPORT)
+        await policy.fetch(url, Theme.LIGHT, config, VIEWPORT)
     assert harvester.calls == []  # never rendered
 
 
@@ -211,8 +211,8 @@ async def test_respect_robots_false_bypasses_gate(config: Config) -> None:
     url = "https://example.test/secret"
 
     assert await policy.can_fetch(url) is True
-    await policy.fetch(url, Theme.light, config, VIEWPORT)
-    assert harvester.calls == [(url, Theme.light)]
+    await policy.fetch(url, Theme.LIGHT, config, VIEWPORT)
+    assert harvester.calls == [(url, Theme.LIGHT)]
 
 
 async def test_file_url_bypasses_robots(config: Config) -> None:
@@ -232,7 +232,7 @@ async def test_default_policy_rejects_file_urls(config: Config) -> None:
     harvester = _CountingHarvester()
     policy = PolitenessPolicy(harvester=harvester, robots_loader=_no_robots)
     with pytest.raises(UnsupportedSchemeError, match="allow_file_urls=True"):
-        await policy.fetch("file:///tmp/x.html", Theme.light, config, VIEWPORT)
+        await policy.fetch("file:///tmp/x.html", Theme.LIGHT, config, VIEWPORT)
     assert harvester.calls == []
 
 
@@ -244,7 +244,7 @@ async def test_non_http_non_file_schemes_always_rejected(config: Config, url: st
     harvester = _CountingHarvester()
     policy = PolitenessPolicy(harvester=harvester, robots_loader=_no_robots, allow_file_urls=True)
     with pytest.raises(UnsupportedSchemeError):
-        await policy.fetch(url, Theme.light, config, VIEWPORT)
+        await policy.fetch(url, Theme.LIGHT, config, VIEWPORT)
     assert harvester.calls == []
 
 
@@ -255,16 +255,16 @@ async def test_allow_file_urls_permits_file_fetch(config: Config) -> None:
         harvester=harvester, robots_loader=_disallow_all, allow_file_urls=True
     )
     url = "file:///tmp/x.html"
-    await policy.fetch(url, Theme.light, config, VIEWPORT)
-    assert harvester.calls == [(url, Theme.light)]
+    await policy.fetch(url, Theme.LIGHT, config, VIEWPORT)
+    assert harvester.calls == [(url, Theme.LIGHT)]
 
 
 async def test_http_unaffected_by_file_url_default(config: Config) -> None:
     # http(s) fetches behave identically whether or not file URLs are allowed.
     harvester = _CountingHarvester()
     policy = PolitenessPolicy(harvester=harvester, robots_loader=_no_robots)
-    await policy.fetch("https://example.test/a", Theme.light, config, VIEWPORT)
-    await policy.fetch("http://example.test/b", Theme.light, config, VIEWPORT)
+    await policy.fetch("https://example.test/a", Theme.LIGHT, config, VIEWPORT)
+    await policy.fetch("http://example.test/b", Theme.LIGHT, config, VIEWPORT)
     assert [u for u, _ in harvester.calls] == ["https://example.test/a", "http://example.test/b"]
 
 
@@ -274,10 +274,10 @@ async def test_scheme_gate_runs_before_cache(config: Config) -> None:
     harvester = _CountingHarvester()
     policy = PolitenessPolicy(harvester=harvester, robots_loader=_no_robots, allow_file_urls=True)
     url = "file:///tmp/x.html"
-    await policy.fetch(url, Theme.light, config, VIEWPORT)  # populates the cache
+    await policy.fetch(url, Theme.LIGHT, config, VIEWPORT)  # populates the cache
     policy.allow_file_urls = False
     with pytest.raises(UnsupportedSchemeError):
-        await policy.fetch(url, Theme.light, config, VIEWPORT)
+        await policy.fetch(url, Theme.LIGHT, config, VIEWPORT)
     assert len(harvester.calls) == 1  # the cached entry was not served either
 
 
@@ -298,9 +298,9 @@ async def test_rate_limiter_spaces_same_host(config: Config) -> None:
         sleeper=sleeper,
     )
 
-    await policy.fetch("https://host.test/a", Theme.light, config, VIEWPORT)
+    await policy.fetch("https://host.test/a", Theme.LIGHT, config, VIEWPORT)
     clock.t += 0.5  # only 0.5s elapses before the next same-host fetch
-    await policy.fetch("https://host.test/b", Theme.light, config, VIEWPORT)
+    await policy.fetch("https://host.test/b", Theme.LIGHT, config, VIEWPORT)
 
     assert slept == [pytest.approx(1.5)]  # waited the remaining 1.5s of the interval
 
@@ -352,7 +352,7 @@ class _FailFastCancelAwareHarvester:
         request_filter: RequestFilter | None = None,
         browser: SharedBrowser | None = None,
     ) -> Harvest:
-        if theme is Theme.dark:
+        if theme is Theme.DARK:
             self.dark_started.set()
             try:
                 await self._never.wait()
@@ -486,37 +486,37 @@ async def test_analyze_orchestrates_faked_harvest(config: Config) -> None:
     assert result.viewport == VIEWPORT
 
     # Themes present: default flow is light-only, and it survives as the analyzed theme.
-    assert set(result.themes) == {Theme.light}
-    palette = result.themes[Theme.light]
-    assert palette.theme is Theme.light
-    assert result.metadata.themes_requested == (Theme.light,)
-    assert result.metadata.themes_analyzed == (Theme.light,)
+    assert set(result.themes) == {Theme.LIGHT}
+    palette = result.themes[Theme.LIGHT]
+    assert palette.theme is Theme.LIGHT
+    assert result.metadata.themes_requested == (Theme.LIGHT,)
+    assert result.metadata.themes_analyzed == (Theme.LIGHT,)
 
     # The role-keyed usage view is populated: every role key is present and the dominant
     # ~60% light page background anchors the page role.
     usage = palette.usage.mapping
     assert set(usage) == set(UsageRole)
-    assert usage[UsageRole.page], "page should be populated from the body 60% bin"
-    page_hexes = {entry.color.hex for entry in usage[UsageRole.page]}
+    assert usage[UsageRole.PAGE], "page should be populated from the body 60% bin"
+    page_hexes = {entry.color.hex for entry in usage[UsageRole.PAGE]}
     assert "#ffffff" in page_hexes
     # The clickable CTA button surfaces its accent in the dedicated cta role.
-    cta_hexes = {entry.color.hex for entry in usage[UsageRole.cta]}
+    cta_hexes = {entry.color.hex for entry in usage[UsageRole.CTA]}
     assert "#2244aa" in cta_hexes
 
     # The color-keyed index carries the same colors, ranked by prominence, with usages.
     index_hexes = {cu.color.hex for cu in palette.colors}
     assert {"#ffffff", "#2244aa"} <= index_hexes
     cta_color = next(cu for cu in palette.colors if cu.color.hex == "#2244aa")
-    assert any(u.role is UsageRole.cta for u in cta_color.usages)
+    assert any(u.role is UsageRole.CTA for u in cta_color.usages)
 
     # Tokens requested (include_tokens=True): carried through, classified, public shape.
     assert palette.tokens is not None
     token_names = {t.name for t in palette.tokens}
     assert token_names == {"--color-primary", "--gray-100", "--gray-900", "--destructive"}
     by_name = {t.name: t for t in palette.tokens}
-    assert by_name["--color-primary"].semantic_role is TokenSemanticRole.brand_primary
-    assert by_name["--gray-100"].semantic_role is TokenSemanticRole.neutral
-    assert by_name["--destructive"].semantic_role is TokenSemanticRole.status
+    assert by_name["--color-primary"].semantic_role is TokenSemanticRole.BRAND_PRIMARY
+    assert by_name["--gray-100"].semantic_role is TokenSemanticRole.NEUTRAL
+    assert by_name["--destructive"].semantic_role is TokenSemanticRole.STATUS
 
     # Status colors are segregated OUT of the palette views: the destructive red appears
     # only as a status-role DesignToken, never as a usage entry or color-index entry.
@@ -552,22 +552,22 @@ def test_collapse_identical_dominant_bins_drops_dark() -> None:
     # A site that ignores prefers-color-scheme renders byte-identical bins: dark collapses.
     bins = [("#ffffff", 0.6), ("#111827", 0.25), ("#2244aa", 0.15)]
     harvests = {
-        Theme.light: _bins_harvest(Theme.light, bins),
-        Theme.dark: _bins_harvest(Theme.dark, bins),
+        Theme.LIGHT: _bins_harvest(Theme.LIGHT, bins),
+        Theme.DARK: _bins_harvest(Theme.DARK, bins),
     }
-    assert _near_identical(harvests[Theme.light], harvests[Theme.dark]) is True
-    assert _collapse_themes([Theme.light, Theme.dark], harvests) == [Theme.light]
+    assert _near_identical(harvests[Theme.LIGHT], harvests[Theme.DARK]) is True
+    assert _collapse_themes([Theme.LIGHT, Theme.DARK], harvests) == [Theme.LIGHT]
 
 
 def test_no_collapse_for_genuinely_different_themes() -> None:
     # A real dark mode flips the large-area background bin (white -> near-black), pushing
     # the dominant-bin distance far past the threshold: both themes must survive.
     harvests = {
-        Theme.light: _bins_harvest(Theme.light, [("#ffffff", 0.7), ("#2244aa", 0.3)]),
-        Theme.dark: _bins_harvest(Theme.dark, [("#111827", 0.7), ("#2244aa", 0.3)]),
+        Theme.LIGHT: _bins_harvest(Theme.LIGHT, [("#ffffff", 0.7), ("#2244aa", 0.3)]),
+        Theme.DARK: _bins_harvest(Theme.DARK, [("#111827", 0.7), ("#2244aa", 0.3)]),
     }
-    assert _near_identical(harvests[Theme.light], harvests[Theme.dark]) is False
-    assert _collapse_themes([Theme.light, Theme.dark], harvests) == [Theme.light, Theme.dark]
+    assert _near_identical(harvests[Theme.LIGHT], harvests[Theme.DARK]) is False
+    assert _collapse_themes([Theme.LIGHT, Theme.DARK], harvests) == [Theme.LIGHT, Theme.DARK]
 
 
 def test_superset_dark_theme_does_not_collapse() -> None:
@@ -577,36 +577,36 @@ def test_superset_dark_theme_does_not_collapse() -> None:
     # direction (dark's #111827 has no match in light) keeps these themes apart. Reverting
     # _near_identical to a one-directional a->b check would make this collapse and fail
     # the assertions below.
-    light = _bins_harvest(Theme.light, [("#ffffff", 0.7), ("#2244aa", 0.3)])
-    dark = _bins_harvest(Theme.dark, [("#111827", 0.5), ("#ffffff", 0.3), ("#2244aa", 0.2)])
+    light = _bins_harvest(Theme.LIGHT, [("#ffffff", 0.7), ("#2244aa", 0.3)])
+    dark = _bins_harvest(Theme.DARK, [("#111827", 0.5), ("#ffffff", 0.3), ("#2244aa", 0.2)])
     # Precondition making the one-directional check pass: every light bin matches in dark.
     for sb in light.screenshot_bins:
         assert min(delta_e(sb.color, ob.color) for ob in dark.screenshot_bins) <= _COLLAPSE_DELTA_E
     # ... but the new dominant dark bin has no match in light.
     assert _near_identical(light, dark) is False
-    harvests = {Theme.light: light, Theme.dark: dark}
-    assert _collapse_themes([Theme.light, Theme.dark], harvests) == [Theme.light, Theme.dark]
+    harvests = {Theme.LIGHT: light, Theme.DARK: dark}
+    assert _collapse_themes([Theme.LIGHT, Theme.DARK], harvests) == [Theme.LIGHT, Theme.DARK]
 
 
 def test_empty_bins_never_collapse() -> None:
     # A render with no screenshot bins carries no evidence of sameness; _near_identical
     # must be conservative and keep both themes rather than collapsing on vacuous truth.
-    populated = _bins_harvest(Theme.light, [("#ffffff", 1.0)])
-    empty = _bins_harvest(Theme.dark, [])
+    populated = _bins_harvest(Theme.LIGHT, [("#ffffff", 1.0)])
+    empty = _bins_harvest(Theme.DARK, [])
     assert _near_identical(populated, empty) is False
     assert _near_identical(empty, populated) is False
-    assert _near_identical(empty, _bins_harvest(Theme.light, [])) is False
+    assert _near_identical(empty, _bins_harvest(Theme.LIGHT, [])) is False
 
 
 def test_collapse_ignores_bins_beyond_top_four() -> None:
     # Only the _COLLAPSE_TOP_BINS largest bins participate: wildly different colors in
     # bins ranked 5+ (by area) must not prevent the collapse.
     shared = [("#ffffff", 0.4), ("#111827", 0.25), ("#2244aa", 0.15), ("#f3f4f6", 0.1)]
-    light = _bins_harvest(Theme.light, [*shared, ("#ff0000", 0.05)])
-    dark = _bins_harvest(Theme.dark, [*shared, ("#0000ff", 0.05)])
+    light = _bins_harvest(Theme.LIGHT, [*shared, ("#ff0000", 0.05)])
+    dark = _bins_harvest(Theme.DARK, [*shared, ("#0000ff", 0.05)])
     assert _near_identical(light, dark) is True
-    harvests = {Theme.light: light, Theme.dark: dark}
-    assert _collapse_themes([Theme.light, Theme.dark], harvests) == [Theme.light]
+    harvests = {Theme.LIGHT: light, Theme.DARK: dark}
+    assert _collapse_themes([Theme.LIGHT, Theme.DARK], harvests) == [Theme.LIGHT]
 
 
 def test_collapse_delta_e_boundary_within_threshold_matches() -> None:
@@ -615,11 +615,11 @@ def test_collapse_delta_e_boundary_within_threshold_matches() -> None:
     a, b = _color("#ffffff"), _color("#eeeeee")
     d = delta_e(a, b)
     assert 0.0 < d <= _COLLAPSE_DELTA_E, d  # the pair genuinely probes the boundary
-    light = _bins_harvest(Theme.light, [("#ffffff", 1.0)])
-    dark = _bins_harvest(Theme.dark, [("#eeeeee", 1.0)])
+    light = _bins_harvest(Theme.LIGHT, [("#ffffff", 1.0)])
+    dark = _bins_harvest(Theme.DARK, [("#eeeeee", 1.0)])
     assert _near_identical(light, dark) is True
-    harvests = {Theme.light: light, Theme.dark: dark}
-    assert _collapse_themes([Theme.light, Theme.dark], harvests) == [Theme.light]
+    harvests = {Theme.LIGHT: light, Theme.DARK: dark}
+    assert _collapse_themes([Theme.LIGHT, Theme.DARK], harvests) == [Theme.LIGHT]
 
 
 # ---------------------------------------------------------------------------
@@ -657,13 +657,13 @@ async def test_duplicate_themes_are_deduped(config: Config) -> None:
     url = "https://example.test/page"
 
     result = await analyze(
-        url, themes=(Theme.light, Theme.dark, Theme.light, Theme.light), politeness=policy
+        url, themes=(Theme.LIGHT, Theme.DARK, Theme.LIGHT, Theme.LIGHT), politeness=policy
     )
 
-    assert harvester.calls == [(url, Theme.light), (url, Theme.dark)]
-    assert result.metadata.themes_requested == (Theme.light, Theme.dark)
+    assert harvester.calls == [(url, Theme.LIGHT), (url, Theme.DARK)]
+    assert result.metadata.themes_requested == (Theme.LIGHT, Theme.DARK)
     # Identical bins for both renders -> the dark theme collapses into light.
-    assert result.metadata.themes_analyzed == (Theme.light,)
+    assert result.metadata.themes_analyzed == (Theme.LIGHT,)
 
 
 def _dark_populated_harvest(url: str, theme: Theme, viewport: Viewport) -> Harvest:
@@ -699,26 +699,26 @@ async def test_first_requested_theme_is_primary(config: Config) -> None:
         request_filter: RequestFilter | None = None,
         browser: SharedBrowser | None = None,
     ) -> Harvest:
-        if theme is Theme.dark:
+        if theme is Theme.DARK:
             return _dark_populated_harvest(u, theme, vp)
         return _populated_harvest(u, theme, vp)
 
     policy = PolitenessPolicy(harvester=harvester, robots_loader=_no_robots)
     result = await analyze(
         "https://example.test/page",
-        themes=(Theme.dark, Theme.light),
+        themes=(Theme.DARK, Theme.LIGHT),
         politeness=policy,
         include_tokens=True,
     )
 
-    assert result.metadata.themes_requested == (Theme.dark, Theme.light)
+    assert result.metadata.themes_requested == (Theme.DARK, Theme.LIGHT)
     # The renders genuinely differ (dark-dominant vs light-dominant bins): no collapse.
-    assert result.metadata.themes_analyzed == (Theme.dark, Theme.light)
-    assert set(result.themes) == {Theme.dark, Theme.light}
+    assert result.metadata.themes_analyzed == (Theme.DARK, Theme.LIGHT)
+    assert set(result.themes) == {Theme.DARK, Theme.LIGHT}
     # Tokens are PER THEME now: --dark-surface is declared only in the dark harvest, and
     # --gray-100 only in the light harvest.
-    dark_palette = result.themes[Theme.dark]
-    light_palette = result.themes[Theme.light]
+    dark_palette = result.themes[Theme.DARK]
+    light_palette = result.themes[Theme.LIGHT]
     assert dark_palette.tokens is not None and light_palette.tokens is not None
     assert {t.name for t in dark_palette.tokens} == {"--dark-surface", "--color-primary"}
     assert "--gray-100" in {t.name for t in light_palette.tokens}
@@ -748,10 +748,10 @@ async def test_config_path_flows_through_analyze(tmp_path: Path, config: Config)
     result = await analyze(
         "https://example.test/page", config_path=copied, politeness=policy, include_tokens=True
     )
-    palette = result.themes[Theme.light]
+    palette = result.themes[Theme.LIGHT]
     assert palette.tokens is not None
     by_name = {t.name: t for t in palette.tokens}
-    assert by_name["--color-primary"].semantic_role is TokenSemanticRole.brand_primary
+    assert by_name["--color-primary"].semantic_role is TokenSemanticRole.BRAND_PRIMARY
 
     # The path genuinely flows through: a nonexistent config_path must fail the run
     # (were config_path ignored, this would silently succeed on the bundled default).
@@ -792,7 +792,7 @@ async def test_tokens_default_to_none(config: Config) -> None:
         harvester=_harvester_for(_populated_harvest), robots_loader=_no_robots
     )
     result = await analyze("https://example.test/page", politeness=policy)
-    assert result.themes[Theme.light].tokens is None
+    assert result.themes[Theme.LIGHT].tokens is None
 
 
 async def test_include_tokens_filters_dedupes_and_sorts(config: Config) -> None:
@@ -823,12 +823,12 @@ async def test_include_tokens_filters_dedupes_and_sorts(config: Config) -> None:
     policy = PolitenessPolicy(harvester=_harvester_for(harvest), robots_loader=_no_robots)
     result = await analyze("https://example.test/page", politeness=policy, include_tokens=True)
 
-    tokens = result.themes[Theme.light].tokens
+    tokens = result.themes[Theme.LIGHT].tokens
     assert tokens is not None
     # Filtered (unresolved + ignore dropped), deduped, and sorted by name.
     assert [t.name for t in tokens] == ["--color-primary", "--text"]
     assert tokens[0].color.hex == "#2244aa"
-    assert tokens[0].semantic_role is TokenSemanticRole.brand_primary
+    assert tokens[0].semantic_role is TokenSemanticRole.BRAND_PRIMARY
 
 
 async def test_include_tokens_empty_when_site_declares_none(config: Config) -> None:
@@ -845,7 +845,7 @@ async def test_include_tokens_empty_when_site_declares_none(config: Config) -> N
 
     policy = PolitenessPolicy(harvester=_harvester_for(harvest), robots_loader=_no_robots)
     result = await analyze("https://example.test/page", politeness=policy, include_tokens=True)
-    assert result.themes[Theme.light].tokens == ()
+    assert result.themes[Theme.LIGHT].tokens == ()
 
 
 async def test_include_tokens_does_not_change_other_fields(config: Config) -> None:
@@ -857,7 +857,7 @@ async def test_include_tokens_does_not_change_other_fields(config: Config) -> No
     without = await analyze("https://example.test/page", politeness=policy)
     with_tokens = await analyze("https://example.test/page", politeness=policy, include_tokens=True)
 
-    a, b = without.themes[Theme.light], with_tokens.themes[Theme.light]
+    a, b = without.themes[Theme.LIGHT], with_tokens.themes[Theme.LIGHT]
     assert a.colors == b.colors
     assert a.usage == b.usage
     assert a.divergence == b.divergence
@@ -898,7 +898,7 @@ async def test_end_to_end_light_and_dark(fixtures_dir: Path) -> None:
     )
 
     assert isinstance(result, AnalysisResult)
-    assert set(result.themes) == {Theme.light, Theme.dark}
+    assert set(result.themes) == {Theme.LIGHT, Theme.DARK}
     assert len(result.metadata.themes_analyzed) == 2
 
     for theme, palette in result.themes.items():
@@ -924,8 +924,8 @@ async def test_single_theme_site_collapses(fixtures_dir: Path) -> None:
     result = await _analyze_fixture("hover.html", fixtures_dir, themes=LIGHT_AND_DARK)
 
     assert len(result.themes) == 1
-    assert result.metadata.themes_requested == (Theme.light, Theme.dark)
-    assert result.metadata.themes_analyzed == (Theme.light,)
+    assert result.metadata.themes_requested == (Theme.LIGHT, Theme.DARK)
+    assert result.metadata.themes_analyzed == (Theme.LIGHT,)
 
 
 @pytest.mark.browser
@@ -934,16 +934,16 @@ async def test_default_is_light_only(fixtures_dir: Path) -> None:
     # not analyzed unless explicitly requested.
     result = await _analyze_fixture("tokens.html", fixtures_dir)
 
-    assert set(result.themes) == {Theme.light}
-    assert result.metadata.themes_requested == (Theme.light,)
-    assert result.metadata.themes_analyzed == (Theme.light,)
+    assert set(result.themes) == {Theme.LIGHT}
+    assert result.metadata.themes_requested == (Theme.LIGHT,)
+    assert result.metadata.themes_analyzed == (Theme.LIGHT,)
 
 
 @pytest.mark.browser
 async def test_explicit_single_theme_request(fixtures_dir: Path) -> None:
-    result = await _analyze_fixture("tokens.html", fixtures_dir, themes=(Theme.light,))
-    assert set(result.themes) == {Theme.light}
-    assert result.metadata.themes_requested == (Theme.light,)
+    result = await _analyze_fixture("tokens.html", fixtures_dir, themes=(Theme.LIGHT,))
+    assert set(result.themes) == {Theme.LIGHT}
+    assert result.metadata.themes_requested == (Theme.LIGHT,)
 
 
 async def test_empty_themes_rejected(fixtures_dir: Path) -> None:

@@ -92,7 +92,7 @@ async def test_semaphore_caps_simultaneous_renders(config: Config) -> None:
 
     tasks = [
         asyncio.ensure_future(
-            policy.fetch(f"https://h{i}.test/page", Theme.light, config, VIEWPORT)
+            policy.fetch(f"https://h{i}.test/page", Theme.LIGHT, config, VIEWPORT)
         )
         for i in range(4)
     ]
@@ -113,7 +113,7 @@ async def test_none_means_unbounded(config: Config) -> None:
 
     tasks = [
         asyncio.ensure_future(
-            policy.fetch(f"https://h{i}.test/page", Theme.light, config, VIEWPORT)
+            policy.fetch(f"https://h{i}.test/page", Theme.LIGHT, config, VIEWPORT)
         )
         for i in range(3)
     ]
@@ -132,17 +132,17 @@ async def test_cache_hits_bypass_the_slot(config: Config) -> None:
     policy = _policy(harvester, max_concurrent_renders=1)
 
     harvester.gate.set()
-    cached = await policy.fetch("https://cached.test/", Theme.light, config, VIEWPORT)
+    cached = await policy.fetch("https://cached.test/", Theme.LIGHT, config, VIEWPORT)
     harvester.gate.clear()
     harvester.entered.clear()  # re-arm: the next entered.wait() must mean the BLOCKER entered
 
     blocker = asyncio.ensure_future(
-        policy.fetch("https://blocker.test/", Theme.light, config, VIEWPORT)
+        policy.fetch("https://blocker.test/", Theme.LIGHT, config, VIEWPORT)
     )
     await harvester.entered.wait()  # the blocker now holds the only slot
 
     hit = await asyncio.wait_for(
-        policy.fetch("https://cached.test/", Theme.light, config, VIEWPORT), timeout=1.0
+        policy.fetch("https://cached.test/", Theme.LIGHT, config, VIEWPORT), timeout=1.0
     )
     assert hit is cached
 
@@ -157,9 +157,9 @@ async def test_followers_bypass_the_slot(config: Config) -> None:
     policy = _policy(harvester, max_concurrent_renders=1)
     url = "https://example.test/page"
 
-    leader = asyncio.ensure_future(policy.fetch(url, Theme.light, config, VIEWPORT))
+    leader = asyncio.ensure_future(policy.fetch(url, Theme.LIGHT, config, VIEWPORT))
     await harvester.entered.wait()  # the leader holds the only slot
-    follower = asyncio.ensure_future(policy.fetch(url, Theme.light, config, VIEWPORT))
+    follower = asyncio.ensure_future(policy.fetch(url, Theme.LIGHT, config, VIEWPORT))
     await _spin()
 
     harvester.gate.set()
@@ -188,12 +188,12 @@ async def test_throttle_wait_does_not_hold_a_slot(config: Config) -> None:
         sleeper=blocking_sleeper,
     )
 
-    await policy.fetch("https://a.test/1", Theme.light, config, VIEWPORT)
-    a_again = asyncio.ensure_future(policy.fetch("https://a.test/2", Theme.light, config, VIEWPORT))
+    await policy.fetch("https://a.test/1", Theme.LIGHT, config, VIEWPORT)
+    a_again = asyncio.ensure_future(policy.fetch("https://a.test/2", Theme.LIGHT, config, VIEWPORT))
     await started.wait()  # host A is parked in the sleeper — BEFORE acquiring the slot
 
     b = await asyncio.wait_for(
-        policy.fetch("https://b.test/1", Theme.light, config, VIEWPORT), timeout=1.0
+        policy.fetch("https://b.test/1", Theme.LIGHT, config, VIEWPORT), timeout=1.0
     )
     assert b.url == "https://b.test/1"
 
@@ -208,8 +208,8 @@ async def test_two_policies_have_independent_limiters(config: Config) -> None:
     p1 = _policy(h1, max_concurrent_renders=1)
     p2 = _policy(h2, max_concurrent_renders=1)
 
-    t1 = asyncio.ensure_future(p1.fetch("https://one.test/", Theme.light, config, VIEWPORT))
-    t2 = asyncio.ensure_future(p2.fetch("https://two.test/", Theme.light, config, VIEWPORT))
+    t1 = asyncio.ensure_future(p1.fetch("https://one.test/", Theme.LIGHT, config, VIEWPORT))
+    t2 = asyncio.ensure_future(p2.fetch("https://two.test/", Theme.LIGHT, config, VIEWPORT))
     await h1.entered.wait()
     await h2.entered.wait()  # both in flight at once — neither limiter blocked the other
 
@@ -227,7 +227,7 @@ def test_policy_survives_sequential_event_loops() -> None:
     policy = _policy(harvester, max_concurrent_renders=1)
 
     async def run(i: int) -> Harvest:
-        return await policy.fetch(f"https://loop{i}.test/", Theme.light, config, VIEWPORT)
+        return await policy.fetch(f"https://loop{i}.test/", Theme.LIGHT, config, VIEWPORT)
 
     first = asyncio.run(run(1))
     second = asyncio.run(run(2))
@@ -246,9 +246,9 @@ async def test_leader_cancellation_does_not_propagate_to_follower(config: Config
     policy = _policy(harvester)
     url = "https://example.test/page"
 
-    leader = asyncio.ensure_future(policy.fetch(url, Theme.light, config, VIEWPORT))
+    leader = asyncio.ensure_future(policy.fetch(url, Theme.LIGHT, config, VIEWPORT))
     await harvester.entered.wait()  # the leader is rendering
-    follower = asyncio.ensure_future(policy.fetch(url, Theme.light, config, VIEWPORT))
+    follower = asyncio.ensure_future(policy.fetch(url, Theme.LIGHT, config, VIEWPORT))
     await _spin()  # the follower is parked on the leader's future
 
     harvester.entered.clear()  # re-arm: the next entered.wait() means the FOLLOWER rendered
@@ -274,9 +274,9 @@ async def test_follower_own_cancellation_still_raises(config: Config) -> None:
     policy = _policy(harvester)
     url = "https://example.test/page"
 
-    leader = asyncio.ensure_future(policy.fetch(url, Theme.light, config, VIEWPORT))
+    leader = asyncio.ensure_future(policy.fetch(url, Theme.LIGHT, config, VIEWPORT))
     await harvester.entered.wait()
-    follower = asyncio.ensure_future(policy.fetch(url, Theme.light, config, VIEWPORT))
+    follower = asyncio.ensure_future(policy.fetch(url, Theme.LIGHT, config, VIEWPORT))
     await _spin()
 
     follower.cancel()
@@ -290,7 +290,7 @@ async def test_follower_own_cancellation_still_raises(config: Config) -> None:
     assert harvester.calls == 1  # the follower's cancellation never reached the leader's render
 
     # The leader's result was cached despite the follower's cancellation.
-    again = await policy.fetch(url, Theme.light, config, VIEWPORT)
+    again = await policy.fetch(url, Theme.LIGHT, config, VIEWPORT)
     assert again is result
     assert harvester.calls == 1
 
@@ -304,10 +304,10 @@ async def test_leader_cancelled_with_multiple_followers_reelects_exactly_once(
     policy = _policy(harvester)
     url = "https://example.test/page"
 
-    leader = asyncio.ensure_future(policy.fetch(url, Theme.light, config, VIEWPORT))
+    leader = asyncio.ensure_future(policy.fetch(url, Theme.LIGHT, config, VIEWPORT))
     await harvester.entered.wait()
     followers = [
-        asyncio.ensure_future(policy.fetch(url, Theme.light, config, VIEWPORT)) for _ in range(3)
+        asyncio.ensure_future(policy.fetch(url, Theme.LIGHT, config, VIEWPORT)) for _ in range(3)
     ]
     await _spin()
 

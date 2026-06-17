@@ -117,9 +117,9 @@ class PropertyFamily(StrEnum):
     ``color``, and ``border`` covers ``border-color``.
     """
 
-    background = "background"
-    text = "text"
-    border = "border"
+    BACKGROUND = "background"
+    TEXT = "text"
+    BORDER = "border"
 
 
 class UsageRole(StrEnum):
@@ -142,14 +142,14 @@ class UsageRole(StrEnum):
     * ``border`` — borders and dividers.
     """
 
-    page = "page"
-    surface = "surface"
-    banner = "banner"
-    cta = "cta"
-    action = "action"
-    text = "text"
-    link = "link"
-    border = "border"
+    PAGE = "page"
+    SURFACE = "surface"
+    BANNER = "banner"
+    CTA = "cta"
+    ACTION = "action"
+    TEXT = "text"
+    LINK = "link"
+    BORDER = "border"
 
     @property
     def property_family(self) -> PropertyFamily:
@@ -163,28 +163,28 @@ class UsageRole(StrEnum):
         is a text role even though it names an interactive element, because a link's painted
         color is its typography color, not its (usually transparent) background.
         """
-        if self in (UsageRole.text, UsageRole.link):
-            return PropertyFamily.text
-        if self is UsageRole.border:
-            return PropertyFamily.border
-        return PropertyFamily.background
+        if self in (UsageRole.TEXT, UsageRole.LINK):
+            return PropertyFamily.TEXT
+        if self is UsageRole.BORDER:
+            return PropertyFamily.BORDER
+        return PropertyFamily.BACKGROUND
 
 
 class TokenSemanticRole(StrEnum):
     """Semantic role inferred for a declared design token (CSS custom property)."""
 
-    brand_primary = "brand_primary"
-    brand_secondary = "brand_secondary"
-    brand_accent = "brand_accent"
-    interactive = "interactive"
-    surface_base = "surface_base"
-    surface_raised = "surface_raised"
-    text_body = "text_body"
-    neutral = "neutral"
-    border = "border"
-    text_on = "text_on"
-    status = "status"
-    ignore = "ignore"
+    BRAND_PRIMARY = "brand_primary"
+    BRAND_SECONDARY = "brand_secondary"
+    BRAND_ACCENT = "brand_accent"
+    INTERACTIVE = "interactive"
+    SURFACE_BASE = "surface_base"
+    SURFACE_RAISED = "surface_raised"
+    TEXT_BODY = "text_body"
+    NEUTRAL = "neutral"
+    BORDER = "border"
+    TEXT_ON = "text_on"
+    STATUS = "status"
+    IGNORE = "ignore"
 
 
 class ComponentType(StrEnum):
@@ -196,27 +196,27 @@ class ComponentType(StrEnum):
     naming which component types contributed a color to a usage role.
     """
 
-    page_bg = "page_bg"
-    page_text = "page_text"
-    header_bg = "header_bg"
-    header_text = "header_text"
-    nav_bg = "nav_bg"
-    nav_text = "nav_text"
-    footer_bg = "footer_bg"
-    footer_text = "footer_text"
-    hero_bg = "hero_bg"
-    hero_text = "hero_text"
-    card_bg = "card_bg"
-    card_text = "card_text"
-    cta_bg = "cta_bg"
-    cta_text = "cta_text"
-    link = "link"
-    button_secondary = "button_secondary"
-    modal_bg = "modal_bg"
-    input_bg = "input_bg"
-    border = "border"
-    badge = "badge"
-    third_party = "third_party"
+    PAGE_BG = "page_bg"
+    PAGE_TEXT = "page_text"
+    HEADER_BG = "header_bg"
+    HEADER_TEXT = "header_text"
+    NAV_BG = "nav_bg"
+    NAV_TEXT = "nav_text"
+    FOOTER_BG = "footer_bg"
+    FOOTER_TEXT = "footer_text"
+    HERO_BG = "hero_bg"
+    HERO_TEXT = "hero_text"
+    CARD_BG = "card_bg"
+    CARD_TEXT = "card_text"
+    CTA_BG = "cta_bg"
+    CTA_TEXT = "cta_text"
+    LINK = "link"
+    BUTTON_SECONDARY = "button_secondary"
+    MODAL_BG = "modal_bg"
+    INPUT_BG = "input_bg"
+    BORDER = "border"
+    BADGE = "badge"
+    THIRD_PARTY = "third_party"
 
     @property
     def property_family(self) -> PropertyFamily:
@@ -236,11 +236,11 @@ class ComponentType(StrEnum):
         identical, so both read this one property — it lives here in the shared-contracts module
         so neither importer creates a cross-layer dependency.
         """
-        if self.value.endswith("_text") or self is ComponentType.link:
-            return PropertyFamily.text
-        if self is ComponentType.border:
-            return PropertyFamily.border
-        return PropertyFamily.background
+        if self.value.endswith("_text") or self is ComponentType.LINK:
+            return PropertyFamily.TEXT
+        if self is ComponentType.BORDER:
+            return PropertyFamily.BORDER
+        return PropertyFamily.BACKGROUND
 
 
 def is_pill_shape(width: float, height: float, min_corner_radius: float) -> bool:
@@ -281,8 +281,8 @@ def is_circle_shape(width: float, height: float, min_corner_radius: float) -> bo
 class Theme(StrEnum):
     """Color scheme a site is rendered under."""
 
-    light = "light"
-    dark = "dark"
+    LIGHT = "light"
+    DARK = "dark"
 
 
 # ---------------------------------------------------------------------------
@@ -446,11 +446,11 @@ class TokenOrigin(StrEnum):
     only — scale members, alias followers, and fallbacks are not author intent signals.
     """
 
-    relational = "relational"
-    name_rule = "name_rule"
-    scale = "scale"
-    alias = "alias"
-    fallback = "fallback"
+    RELATIONAL = "relational"
+    NAME_RULE = "name_rule"
+    SCALE = "scale"
+    ALIAS = "alias"
+    FALLBACK = "fallback"
 
 
 class ClassifiedToken(BaseModel):
@@ -467,7 +467,7 @@ class ClassifiedToken(BaseModel):
     semantic_role: TokenSemanticRole
     weight: float
     usage_intent: dict[UsageRole, float] = Field(default_factory=dict)
-    origin: TokenOrigin = TokenOrigin.fallback
+    origin: TokenOrigin = TokenOrigin.FALLBACK
 
 
 class ClassifiedElement(BaseModel):

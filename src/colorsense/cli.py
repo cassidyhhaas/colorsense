@@ -35,7 +35,7 @@ from colorsense import (
     block_private_networks,
 )
 
-DEFAULT_THEMES: tuple[Theme, ...] = (Theme.light,)
+DEFAULT_THEMES: tuple[Theme, ...] = (Theme.LIGHT,)
 
 CLI_USER_AGENT = (
     f"colorsense-cli/{_package_version('colorsense')} (+https://github.com/cassidyhhaas/colorsense)"

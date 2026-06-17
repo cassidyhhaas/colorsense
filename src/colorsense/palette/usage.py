@@ -126,21 +126,21 @@ PROMINENCE_AREA_WEIGHT: float = 0.7
 # docstring). ``cta_text`` and ``third_party`` map to NO role and are excluded from both
 # usage views; third-party widget colors surface via ``AnalysisResult.third_party_colors``.
 COMPONENT_TYPES_BY_USAGE_ROLE: dict[UsageRole, tuple[ComponentType, ...]] = {
-    UsageRole.page: (CT.page_bg,),
-    UsageRole.surface: (CT.card_bg, CT.modal_bg, CT.hero_bg, CT.input_bg),
-    UsageRole.banner: (CT.header_bg, CT.nav_bg, CT.footer_bg),
-    UsageRole.cta: (CT.cta_bg,),
-    UsageRole.action: (CT.button_secondary, CT.badge),
-    UsageRole.text: (
-        CT.page_text,
-        CT.header_text,
-        CT.nav_text,
-        CT.footer_text,
-        CT.hero_text,
-        CT.card_text,
+    UsageRole.PAGE: (CT.PAGE_BG,),
+    UsageRole.SURFACE: (CT.CARD_BG, CT.MODAL_BG, CT.HERO_BG, CT.INPUT_BG),
+    UsageRole.BANNER: (CT.HEADER_BG, CT.NAV_BG, CT.FOOTER_BG),
+    UsageRole.CTA: (CT.CTA_BG,),
+    UsageRole.ACTION: (CT.BUTTON_SECONDARY, CT.BADGE),
+    UsageRole.TEXT: (
+        CT.PAGE_TEXT,
+        CT.HEADER_TEXT,
+        CT.NAV_TEXT,
+        CT.FOOTER_TEXT,
+        CT.HERO_TEXT,
+        CT.CARD_TEXT,
     ),
-    UsageRole.link: (CT.link,),
-    UsageRole.border: (CT.border,),
+    UsageRole.LINK: (CT.LINK,),
+    UsageRole.BORDER: (CT.BORDER,),
 }
 
 
@@ -183,7 +183,7 @@ USAGE_ROLE_BY_COMPONENT_TYPE: dict[ComponentType, UsageRole] = _build_usage_role
 # family* stays ``background`` for the ``UsageRole.property_family`` rollups and the
 # color-keyed index; only their *ranking signal* differs.)
 _AREA_RANKED_ROLES: frozenset[UsageRole] = frozenset(
-    {UsageRole.page, UsageRole.surface, UsageRole.banner}
+    {UsageRole.PAGE, UsageRole.SURFACE, UsageRole.BANNER}
 )
 
 

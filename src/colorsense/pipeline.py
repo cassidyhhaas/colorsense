@@ -54,8 +54,8 @@ DEFAULT_VIEWPORT = Viewport(width=1280, height=800, device_scale_factor=1.0)
 # Light only by default: most sites ship no dark mode, and a second theme roughly doubles
 # render cost (a whole extra headless render). A consumer analyzing their own (or a client's)
 # site knows whether dark mode exists, so dark is opt-in via ``themes=LIGHT_AND_DARK``.
-DEFAULT_THEMES: tuple[Theme, ...] = (Theme.light,)
-LIGHT_AND_DARK: tuple[Theme, ...] = (Theme.light, Theme.dark)
+DEFAULT_THEMES: tuple[Theme, ...] = (Theme.LIGHT,)
+LIGHT_AND_DARK: tuple[Theme, ...] = (Theme.LIGHT, Theme.DARK)
 
 # Two renders are "the same site" when every dominant screenshot bin in one has a close
 # perceptual match in the other. A genuine dark mode flips the large-area background bin,
@@ -128,7 +128,7 @@ async def analyze(
         Themes to render, in priority order (the first is "primary": it is the theme kept when
         near-identical renders collapse). Duplicates are ignored. Defaults to **light only** — most
         sites have no dark mode and a second theme roughly doubles the work. Pass
-        ``themes=(Theme.light, Theme.dark)`` (or the exported
+        ``themes=(Theme.LIGHT, Theme.DARK)`` (or the exported
         [`LIGHT_AND_DARK`][colorsense.LIGHT_AND_DARK]) to also analyze dark mode; near-identical
         renders still collapse to a single reported theme.
     politeness:
@@ -338,7 +338,7 @@ def _design_tokens(classified: list[ClassifiedToken]) -> tuple[DesignToken, ...]
         token
         for token in classified
         if token.record.resolved is not None
-        and token.semantic_role is not TokenSemanticRole.ignore
+        and token.semantic_role is not TokenSemanticRole.IGNORE
         and token.weight > 0.0
     ]
     # Dedupe by name keeping the first meaningful occurrence (the per-token filters above
@@ -409,7 +409,7 @@ def _third_party_colors(clusters: list[ColorCluster]) -> list[Color]:
             continue
         # Stable secondary key (the component-type value) so ties don't depend on dict order.
         dominant = max(mix, key=lambda key: (mix[key], key.value))
-        if dominant is ComponentType.third_party:
+        if dominant is ComponentType.THIRD_PARTY:
             out.append(cluster.color)
     return _dedupe_colors(out)
 

@@ -44,13 +44,13 @@ def fake_result(url: str) -> AnalysisResult:
     blue = Color(hex="#336699", lightness=0.5, chroma=0.1, hue=250.0)
     usage = UsagePalette(
         mapping={
-            UsageRole.page: (
+            UsageRole.PAGE: (
                 UsageEntry(
                     color=blue,
                     probability=0.9,
                     area=0.6,
                     # Component evidence must be trimmed from the API response.
-                    components={ComponentType.page_bg: 1.0},
+                    components={ComponentType.PAGE_BG: 1.0},
                 ),
             ),
         }
@@ -62,10 +62,10 @@ def fake_result(url: str) -> AnalysisResult:
             area=0.6,
             usages=(
                 Usage(
-                    role=UsageRole.page,
-                    property_family=PropertyFamily.background,
+                    role=UsageRole.PAGE,
+                    property_family=PropertyFamily.BACKGROUND,
                     weight=1.0,
-                    components={ComponentType.page_bg: 1.0},
+                    components={ComponentType.PAGE_BG: 1.0},
                 ),
             ),
         ),
@@ -74,8 +74,8 @@ def fake_result(url: str) -> AnalysisResult:
         url=url,
         viewport=VIEWPORT,
         themes={
-            Theme.light: ThemePalette(
-                theme=Theme.light,
+            Theme.LIGHT: ThemePalette(
+                theme=Theme.LIGHT,
                 colors=colors,
                 usage=usage,
             )

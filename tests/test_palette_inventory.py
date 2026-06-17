@@ -49,7 +49,7 @@ def _viewport() -> Viewport:
 def _harvest(bins: list[ScreenshotBin]) -> Harvest:
     return Harvest(
         url="https://example.test",
-        theme=Theme.light,
+        theme=Theme.LIGHT,
         viewport=_viewport(),
         screenshot_bins=bins,
     )
@@ -130,7 +130,7 @@ def test_component_mix_aggregates() -> None:
     surface = _color("#3366cc")
     harvest = _harvest([ScreenshotBin(color=surface, area_fraction=0.5)])
 
-    classified = [_classified(_color("#3366cc"), {ComponentType.cta_bg: 1.0})]
+    classified = [_classified(_color("#3366cc"), {ComponentType.CTA_BG: 1.0})]
 
     clusters = build_inventory(harvest, classified)
 
@@ -138,7 +138,7 @@ def test_component_mix_aggregates() -> None:
     mix = clusters[0].component_mix
     assert mix
     dominant = max(mix, key=lambda k: mix[k])
-    assert dominant == ComponentType.cta_bg
+    assert dominant == ComponentType.CTA_BG
     assert sum(mix.values()) == pytest.approx(1.0, abs=1e-9)
 
 
@@ -147,8 +147,8 @@ def test_component_mix_aggregates_multiple_types() -> None:
     harvest = _harvest([ScreenshotBin(color=surface, area_fraction=0.5)])
 
     classified = [
-        _classified(_color("#3366cc"), {ComponentType.cta_bg: 0.75}),
-        _classified(_color("#3367cc"), {ComponentType.header_bg: 0.25}),
+        _classified(_color("#3366cc"), {ComponentType.CTA_BG: 0.75}),
+        _classified(_color("#3367cc"), {ComponentType.HEADER_BG: 0.25}),
     ]
 
     clusters = build_inventory(harvest, classified)
@@ -157,7 +157,7 @@ def test_component_mix_aggregates_multiple_types() -> None:
     mix = clusters[0].component_mix
     assert sum(mix.values()) == pytest.approx(1.0, abs=1e-9)
     dominant = max(mix, key=lambda k: mix[k])
-    assert dominant == ComponentType.cta_bg
+    assert dominant == ComponentType.CTA_BG
 
 
 def test_component_mass_keeps_raw_unnormalized_sums() -> None:
@@ -166,17 +166,17 @@ def test_component_mass_keeps_raw_unnormalized_sums() -> None:
     surface = _color("#3366cc")
     harvest = _harvest([ScreenshotBin(color=surface, area_fraction=0.5)])
     classified = [
-        _classified(_color("#3366cc"), {ComponentType.cta_bg: 0.75}),
-        _classified(_color("#3367cc"), {ComponentType.header_bg: 0.25}),
-        _classified(_color("#3366cc"), {ComponentType.cta_bg: 0.75}),
+        _classified(_color("#3366cc"), {ComponentType.CTA_BG: 0.75}),
+        _classified(_color("#3367cc"), {ComponentType.HEADER_BG: 0.25}),
+        _classified(_color("#3366cc"), {ComponentType.CTA_BG: 0.75}),
     ]
 
     clusters = build_inventory(harvest, classified)
 
     assert len(clusters) == 1
     mass = clusters[0].component_mass
-    assert mass[ComponentType.cta_bg] == pytest.approx(1.5, abs=1e-9)
-    assert mass[ComponentType.header_bg] == pytest.approx(0.25, abs=1e-9)
+    assert mass[ComponentType.CTA_BG] == pytest.approx(1.5, abs=1e-9)
+    assert mass[ComponentType.HEADER_BG] == pytest.approx(0.25, abs=1e-9)
     # The mix is exactly the normalized mass.
     total = sum(mass.values())
     for comp, raw in mass.items():
@@ -197,15 +197,15 @@ def test_gradient_cta_votes_both_stops_split_evenly() -> None:
         ]
     )
     classified = [
-        _classified(transparent, {ComponentType.cta_bg: 3.0}, bg_gradient_stops=(purple, blue))
+        _classified(transparent, {ComponentType.CTA_BG: 3.0}, bg_gradient_stops=(purple, blue))
     ]
 
     clusters = build_inventory(harvest, classified)
 
     p = next(c for c in clusters if c.color.hex == "#7c3bed")
     b = next(c for c in clusters if c.color.hex == "#3c83f6")
-    assert p.component_mass[ComponentType.cta_bg] == pytest.approx(1.5, abs=1e-9)
-    assert b.component_mass[ComponentType.cta_bg] == pytest.approx(1.5, abs=1e-9)
+    assert p.component_mass[ComponentType.CTA_BG] == pytest.approx(1.5, abs=1e-9)
+    assert b.component_mass[ComponentType.CTA_BG] == pytest.approx(1.5, abs=1e-9)
 
 
 def test_gradient_stops_ignored_when_background_color_is_opaque() -> None:
@@ -213,12 +213,12 @@ def test_gradient_stops_ignored_when_background_color_is_opaque() -> None:
     solid = _color("#101828")
     purple = _color("#7c3bed")
     harvest = _harvest([ScreenshotBin(color=solid, area_fraction=1.0)])
-    classified = [_classified(solid, {ComponentType.card_bg: 1.0}, bg_gradient_stops=(purple,))]
+    classified = [_classified(solid, {ComponentType.CARD_BG: 1.0}, bg_gradient_stops=(purple,))]
 
     clusters = build_inventory(harvest, classified)
 
     assert [c.color.hex for c in clusters] == ["#101828"]
-    assert clusters[0].component_mass[ComponentType.card_bg] == pytest.approx(1.0, abs=1e-9)
+    assert clusters[0].component_mass[ComponentType.CARD_BG] == pytest.approx(1.0, abs=1e-9)
 
 
 def test_semi_transparent_bg_vote_is_alpha_scaled() -> None:
@@ -227,12 +227,12 @@ def test_semi_transparent_bg_vote_is_alpha_scaled() -> None:
     tint = _color("rgba(124, 59, 237, 0.1)")
     assert tint.hex == "#7c3bed" and tint.alpha == pytest.approx(0.1)
     harvest = _harvest([ScreenshotBin(color=_color("#7c3bed"), area_fraction=1.0)])
-    classified = [_classified(tint, {ComponentType.badge: 2.0})]
+    classified = [_classified(tint, {ComponentType.BADGE: 2.0})]
 
     clusters = build_inventory(harvest, classified)
 
     purple = next(c for c in clusters if c.color.hex == "#7c3bed")
-    assert purple.component_mass[ComponentType.badge] == pytest.approx(0.2, abs=1e-9)
+    assert purple.component_mass[ComponentType.BADGE] == pytest.approx(0.2, abs=1e-9)
 
 
 def test_semi_transparent_border_vote_is_alpha_scaled() -> None:
@@ -246,8 +246,8 @@ def test_semi_transparent_border_vote_is_alpha_scaled() -> None:
     assert faint.hex == "#000000" and faint.alpha == pytest.approx(0.08)
     harvest = _harvest([ScreenshotBin(color=_color("#ffffff"), area_fraction=1.0)])
     classified = [
-        _classified(None, {ComponentType.border: 2.0}, border=faint),
-        _classified(None, {ComponentType.border: 2.0}, border=opaque),
+        _classified(None, {ComponentType.BORDER: 2.0}, border=faint),
+        _classified(None, {ComponentType.BORDER: 2.0}, border=opaque),
     ]
 
     clusters = build_inventory(harvest, classified)
@@ -255,7 +255,7 @@ def test_semi_transparent_border_vote_is_alpha_scaled() -> None:
     # Both borders are the same hex, so they cluster; the faint vote contributes 2.0*0.08
     # and the opaque one 2.0*1.0 -> 2.16 total (vs 4.0 if border were not alpha-scaled).
     black = next(c for c in clusters if c.color.hex == "#000000")
-    assert black.component_mass[ComponentType.border] == pytest.approx(2.16, abs=1e-9)
+    assert black.component_mass[ComponentType.BORDER] == pytest.approx(2.16, abs=1e-9)
 
 
 def test_text_vote_is_not_alpha_scaled() -> None:
@@ -264,25 +264,25 @@ def test_text_vote_is_not_alpha_scaled() -> None:
     faint_text = _color("rgba(0, 0, 0, 0.3)")
     assert faint_text.alpha == pytest.approx(0.3)
     harvest = _harvest([ScreenshotBin(color=_color("#ffffff"), area_fraction=1.0)])
-    classified = [_classified(None, {ComponentType.page_text: 2.0}, text=faint_text)]
+    classified = [_classified(None, {ComponentType.PAGE_TEXT: 2.0}, text=faint_text)]
 
     clusters = build_inventory(harvest, classified)
 
     black = next(c for c in clusters if c.color.hex == "#000000")
-    assert black.component_mass[ComponentType.page_text] == pytest.approx(2.0, abs=1e-9)
+    assert black.component_mass[ComponentType.PAGE_TEXT] == pytest.approx(2.0, abs=1e-9)
 
 
 def test_unmatched_element_creates_zero_area_entry() -> None:
     # No bins at all; an element's semantics must still be preserved.
     harvest = _harvest([])
-    classified = [_classified(_color("#112233"), {ComponentType.cta_bg: 1.0})]
+    classified = [_classified(_color("#112233"), {ComponentType.CTA_BG: 1.0})]
 
     clusters = build_inventory(harvest, classified)
 
     assert len(clusters) == 1
     assert clusters[0].area_weight == pytest.approx(0.0, abs=1e-9)
     assert clusters[0].color.hex == "#112233"
-    assert max(clusters[0].component_mix) == ComponentType.cta_bg
+    assert max(clusters[0].component_mix) == ComponentType.CTA_BG
 
 
 def test_link_mass_routes_to_text_color_not_bg() -> None:
@@ -291,14 +291,14 @@ def test_link_mass_routes_to_text_color_not_bg() -> None:
     blue_text = _color("#0969da")
     bg = _color("#ffffff")
     harvest = _harvest([ScreenshotBin(color=bg, area_fraction=0.9)])
-    classified = [_classified(bg, {ComponentType.link: 1.0}, text=blue_text)]
+    classified = [_classified(bg, {ComponentType.LINK: 1.0}, text=blue_text)]
 
     clusters = build_inventory(harvest, classified)
 
     blue = next(c for c in clusters if c.color.hex == "#0969da")
     white = next(c for c in clusters if c.color.hex == "#ffffff")
-    assert ComponentType.link in blue.component_mix
-    assert ComponentType.link not in white.component_mix
+    assert ComponentType.LINK in blue.component_mix
+    assert ComponentType.LINK not in white.component_mix
 
 
 def test_fully_transparent_channel_color_donates_no_mass() -> None:
@@ -306,7 +306,7 @@ def test_fully_transparent_channel_color_donates_no_mass() -> None:
     # backgrounds would pile votes onto a phantom #000000 zero-area cluster.
     transparent = Color(hex="#000000", lightness=0.0, chroma=0.0, hue=0.0, alpha=0.0)
     harvest = _harvest([ScreenshotBin(color=_color("#ffffff"), area_fraction=1.0)])
-    classified = [_classified(transparent, {ComponentType.card_bg: 1.0})]
+    classified = [_classified(transparent, {ComponentType.CARD_BG: 1.0})]
 
     clusters = build_inventory(harvest, classified)
 
@@ -322,19 +322,19 @@ def test_element_far_from_all_bins_is_new_cluster() -> None:
     far = _color("#000000")
     assert delta_e(far, _color("#ffffff")) > MAX_TEXT_BORDER_MATCH_DELTA_E
 
-    classified = [_classified(None, {ComponentType.page_text: 1.0}, text=far)]
+    classified = [_classified(None, {ComponentType.PAGE_TEXT: 1.0}, text=far)]
     clusters = build_inventory(harvest, classified)
 
     assert len(clusters) == 2
     black = next(c for c in clusters if c.color.hex == "#000000")
     assert black.area_weight == pytest.approx(0.0, abs=1e-9)
-    assert max(black.component_mix) == ComponentType.page_text
+    assert max(black.component_mix) == ComponentType.PAGE_TEXT
 
 
 def test_element_without_bg_or_dist_is_ignored() -> None:
     harvest = _harvest([ScreenshotBin(color=_color("#3366cc"), area_fraction=0.5)])
     classified = [
-        _classified(None, {ComponentType.cta_bg: 1.0}),
+        _classified(None, {ComponentType.CTA_BG: 1.0}),
         _classified(_color("#3366cc"), {}),
     ]
 
@@ -353,7 +353,7 @@ def test_text_mass_routes_to_text_color_not_bg() -> None:
     classified = [
         _classified(
             light_bg,
-            {ComponentType.page_bg: 0.6, ComponentType.page_text: 0.4},
+            {ComponentType.PAGE_BG: 0.6, ComponentType.PAGE_TEXT: 0.4},
             text=dark_text,
         )
     ]
@@ -364,9 +364,9 @@ def test_text_mass_routes_to_text_color_not_bg() -> None:
     white = next(c for c in clusters if c.color.hex == "#ffffff")
     black = next(c for c in clusters if c.color.hex == "#111111")
     # page_text mass lives on the TEXT color's cluster, not the bg cluster.
-    assert ComponentType.page_text in black.component_mix
-    assert ComponentType.page_text not in white.component_mix
-    assert ComponentType.page_bg in white.component_mix
+    assert ComponentType.PAGE_TEXT in black.component_mix
+    assert ComponentType.PAGE_TEXT not in white.component_mix
+    assert ComponentType.PAGE_BG in white.component_mix
 
 
 def test_border_mass_routes_to_border_color() -> None:
@@ -378,7 +378,7 @@ def test_border_mass_routes_to_border_color() -> None:
     classified = [
         _classified(
             bg,
-            {ComponentType.input_bg: 0.7, ComponentType.border: 0.3},
+            {ComponentType.INPUT_BG: 0.7, ComponentType.BORDER: 0.3},
             border=border,
         )
     ]
@@ -387,33 +387,33 @@ def test_border_mass_routes_to_border_color() -> None:
 
     blue = next(c for c in clusters if c.color.hex == "#3366cc")
     white = next(c for c in clusters if c.color.hex == "#ffffff")
-    assert max(blue.component_mix) == ComponentType.border
-    assert ComponentType.border not in white.component_mix
-    assert ComponentType.input_bg in white.component_mix
+    assert max(blue.component_mix) == ComponentType.BORDER
+    assert ComponentType.BORDER not in white.component_mix
+    assert ComponentType.INPUT_BG in white.component_mix
 
 
 def test_element_with_no_bg_still_contributes_text_mass() -> None:
     dark_text = _color("#222222")
     harvest = _harvest([])
-    classified = [_classified(None, {ComponentType.cta_text: 1.0}, text=dark_text)]
+    classified = [_classified(None, {ComponentType.CTA_TEXT: 1.0}, text=dark_text)]
 
     clusters = build_inventory(harvest, classified)
 
     assert len(clusters) == 1
     assert clusters[0].color.hex == "#222222"
-    assert max(clusters[0].component_mix) == ComponentType.cta_text
+    assert max(clusters[0].component_mix) == ComponentType.CTA_TEXT
 
 
 def test_channel_without_color_drops_only_that_channel() -> None:
     bg = _color("#ffffff")
     harvest = _harvest([ScreenshotBin(color=bg, area_fraction=1.0)])
     # text is None, so the page_text mass is dropped; the bg mass still lands.
-    classified = [_classified(bg, {ComponentType.page_bg: 0.5, ComponentType.page_text: 0.5})]
+    classified = [_classified(bg, {ComponentType.PAGE_BG: 0.5, ComponentType.PAGE_TEXT: 0.5})]
 
     clusters = build_inventory(harvest, classified)
 
     assert len(clusters) == 1
-    assert clusters[0].component_mix == {ComponentType.page_bg: pytest.approx(1.0)}
+    assert clusters[0].component_mix == {ComponentType.PAGE_BG: pytest.approx(1.0)}
 
 
 def test_clusters_sorted_by_area_descending() -> None:
@@ -439,8 +439,8 @@ def test_determinism() -> None:
         ]
     )
     classified = [
-        _classified(_color("#3366cc"), {ComponentType.cta_bg: 1.0}),
-        _classified(_color("#ffffff"), {ComponentType.page_bg: 1.0}),
+        _classified(_color("#3366cc"), {ComponentType.CTA_BG: 1.0}),
+        _classified(_color("#ffffff"), {ComponentType.PAGE_BG: 1.0}),
     ]
 
     first = build_inventory(harvest, classified)
@@ -484,11 +484,11 @@ def test_build_inventory_permutation_invariant_on_well_separated_colors() -> Non
         ScreenshotBin(color=red, area_fraction=0.2),
     ]
     elements = [
-        _classified(white, {ComponentType.page_bg: 1.0}),
-        _classified(blue, {ComponentType.cta_bg: 1.0}),
-        _classified(blue, {ComponentType.link: 1.0}),
+        _classified(white, {ComponentType.PAGE_BG: 1.0}),
+        _classified(blue, {ComponentType.CTA_BG: 1.0}),
+        _classified(blue, {ComponentType.LINK: 1.0}),
         # Far from every bin: creates a zero-area entry.
-        _classified(None, {ComponentType.page_text: 1.0}, text=black),
+        _classified(None, {ComponentType.PAGE_TEXT: 1.0}, text=black),
     ]
 
     base = build_inventory(_harvest(bins), elements)
@@ -535,27 +535,27 @@ def test_text_color_near_dark_surface_bin_forms_distinct_entry() -> None:
     assert MAX_TEXT_BORDER_MATCH_DELTA_E < gap <= MAX_BG_MATCH_DELTA_E  # the regression window
 
     harvest = _harvest([ScreenshotBin(color=surface, area_fraction=0.2)])
-    classified = [_classified(None, {ComponentType.page_text: 1.0}, text=text)]
+    classified = [_classified(None, {ComponentType.PAGE_TEXT: 1.0}, text=text)]
     clusters = build_inventory(harvest, classified)
 
     # Two distinct clusters: the text did NOT merge into the dark surface bin.
     assert len(clusters) == 2
     text_cluster = next(c for c in clusters if c.color.hex == text.hex)
     assert text_cluster.area_weight == pytest.approx(0.0, abs=1e-9)
-    assert max(text_cluster.component_mix) == ComponentType.page_text
+    assert max(text_cluster.component_mix) == ComponentType.PAGE_TEXT
     bin_cluster = next(c for c in clusters if c.color.hex == surface.hex)
-    assert ComponentType.page_text not in bin_cluster.component_mix
+    assert ComponentType.PAGE_TEXT not in bin_cluster.component_mix
 
 
 def test_border_channel_uses_tight_radius() -> None:
     surface, border = _color(_DARK_SURFACE), _color(_NEAR_BLACK_TEXT)
     harvest = _harvest([ScreenshotBin(color=surface, area_fraction=0.2)])
-    classified = [_classified(None, {ComponentType.border: 1.0}, border=border)]
+    classified = [_classified(None, {ComponentType.BORDER: 1.0}, border=border)]
     clusters = build_inventory(harvest, classified)
 
     assert len(clusters) == 2
     border_cluster = next(c for c in clusters if c.color.hex == border.hex)
-    assert max(border_cluster.component_mix) == ComponentType.border
+    assert max(border_cluster.component_mix) == ComponentType.BORDER
 
 
 def test_bg_channel_keeps_loose_radius_at_same_distance() -> None:
@@ -563,12 +563,12 @@ def test_bg_channel_keeps_loose_radius_at_same_distance() -> None:
     # anti-aliasing smear backgrounds, so bg keeps the generous 0.10 join radius.
     surface, bg = _color(_DARK_SURFACE), _color(_NEAR_BLACK_TEXT)
     harvest = _harvest([ScreenshotBin(color=surface, area_fraction=0.2)])
-    classified = [_classified(bg, {ComponentType.card_bg: 1.0})]
+    classified = [_classified(bg, {ComponentType.CARD_BG: 1.0})]
     clusters = build_inventory(harvest, classified)
 
     assert len(clusters) == 1
     assert clusters[0].color.hex == surface.hex
-    assert max(clusters[0].component_mix) == ComponentType.card_bg
+    assert max(clusters[0].component_mix) == ComponentType.CARD_BG
 
 
 # ---------------------------------------------------------------------------
@@ -589,10 +589,10 @@ def test_text_color_near_large_bg_bin_keeps_own_hex() -> None:
     assert delta_e(surface, text) <= MAX_TEXT_BORDER_MATCH_DELTA_E
 
     harvest = _harvest([ScreenshotBin(color=surface, area_fraction=0.9)])
-    classified = [_classified(None, {ComponentType.page_text: 1.0}, text=text)]
+    classified = [_classified(None, {ComponentType.PAGE_TEXT: 1.0}, text=text)]
     clusters = build_inventory(harvest, classified)
 
-    text_cluster = next(c for c in clusters if ComponentType.page_text in c.component_mix)
+    text_cluster = next(c for c in clusters if ComponentType.PAGE_TEXT in c.component_mix)
     assert text_cluster.color.hex == text.hex  # did NOT adopt the bin's hex
     assert text_cluster.area_weight == pytest.approx(0.0, abs=1e-9)
 
@@ -603,10 +603,10 @@ def test_border_color_near_bg_bin_keeps_own_hex() -> None:
     assert delta_e(surface, border) <= MAX_TEXT_BORDER_MATCH_DELTA_E
 
     harvest = _harvest([ScreenshotBin(color=surface, area_fraction=0.9)])
-    classified = [_classified(None, {ComponentType.border: 1.0}, border=border)]
+    classified = [_classified(None, {ComponentType.BORDER: 1.0}, border=border)]
     clusters = build_inventory(harvest, classified)
 
-    border_cluster = next(c for c in clusters if ComponentType.border in c.component_mix)
+    border_cluster = next(c for c in clusters if ComponentType.BORDER in c.component_mix)
     assert border_cluster.color.hex == border.hex
     assert border_cluster.area_weight == pytest.approx(0.0, abs=1e-9)
 
@@ -616,13 +616,13 @@ def test_background_output_unchanged_for_simple_page_bg_input() -> None:
     # behavior: one cluster, page bin's hex, full area, page_bg mass.
     page = _color("#ffffff")
     harvest = _harvest([ScreenshotBin(color=page, area_fraction=1.0)])
-    classified = [_classified(page, {ComponentType.page_bg: 1.0})]
+    classified = [_classified(page, {ComponentType.PAGE_BG: 1.0})]
 
     clusters = build_inventory(harvest, classified)
 
     assert [c.color.hex for c in clusters] == ["#ffffff"]
     assert clusters[0].area_weight == pytest.approx(1.0, abs=1e-9)
-    assert clusters[0].component_mix == {ComponentType.page_bg: pytest.approx(1.0)}
+    assert clusters[0].component_mix == {ComponentType.PAGE_BG: pytest.approx(1.0)}
 
 
 def test_text_border_representative_is_max_in_family_mass() -> None:
@@ -635,17 +635,17 @@ def test_text_border_representative_is_max_in_family_mass() -> None:
     assert delta_e(low, high) <= MAX_CLUSTER_MERGE_DELTA_E
 
     low_entry = _Entry(low, 0.0)
-    low_entry.vote_mass[ComponentType.page_text] = 1.0
+    low_entry.vote_mass[ComponentType.PAGE_TEXT] = 1.0
     high_entry = _Entry(high, 0.0)
-    high_entry.vote_mass[ComponentType.page_text] = 5.0
+    high_entry.vote_mass[ComponentType.PAGE_TEXT] = 5.0
 
-    clusters = _cluster_pool([low_entry, high_entry], PropertyFamily.text)
+    clusters = _cluster_pool([low_entry, high_entry], PropertyFamily.TEXT)
 
     assert len(clusters) == 1
     # `high` carries more in-family mass, so it is the representative hex (not max area:
     # both areas are 0). The bg path would instead break the tie by smallest hex (`low`).
     assert clusters[0].color.hex == high.hex
-    assert _cluster_pool([low_entry, high_entry], PropertyFamily.background)[0].color.hex == low.hex
+    assert _cluster_pool([low_entry, high_entry], PropertyFamily.BACKGROUND)[0].color.hex == low.hex
 
 
 def test_background_representative_is_max_area() -> None:
@@ -675,9 +675,9 @@ def test_segregated_determinism_same_input_identical_output() -> None:
         ]
     )
     classified = [
-        _classified(None, {ComponentType.page_text: 1.0}, text=_color("#1f2328")),
-        _classified(None, {ComponentType.border: 1.0}, border=_color("#30363d")),
-        _classified(_color("#0d1117"), {ComponentType.page_bg: 1.0}),
+        _classified(None, {ComponentType.PAGE_TEXT: 1.0}, text=_color("#1f2328")),
+        _classified(None, {ComponentType.BORDER: 1.0}, border=_color("#30363d")),
+        _classified(_color("#0d1117"), {ComponentType.PAGE_BG: 1.0}),
     ]
 
     first = build_inventory(harvest, classified)
@@ -734,15 +734,15 @@ def test_text_pool_splits_distinct_near_whites() -> None:
     # onto one text entry (OKLab); with it they stay as two distinct text colors.
     harvest = _harvest([ScreenshotBin(color=_color("#0d1117"), area_fraction=1.0)])
     classified = [
-        _classified(None, {ComponentType.page_text: 1.0}, text=_color(_WHITE)),
-        _classified(None, {ComponentType.page_text: 1.0}, text=_color(_PRIMER_NEAR_WHITE)),
+        _classified(None, {ComponentType.PAGE_TEXT: 1.0}, text=_color(_WHITE)),
+        _classified(None, {ComponentType.PAGE_TEXT: 1.0}, text=_color(_PRIMER_NEAR_WHITE)),
     ]
 
     clusters = build_inventory(harvest, classified)
     text_hexes = {
         c.color.hex
         for c in clusters
-        if any(comp == ComponentType.page_text for comp in c.component_mass)
+        if any(comp == ComponentType.PAGE_TEXT for comp in c.component_mass)
     }
     assert text_hexes == {_WHITE, _PRIMER_NEAR_WHITE}
 
@@ -760,7 +760,7 @@ def test_near_white_guard_survives_union_find_transitivity() -> None:
     assert delta_e(a, b) <= MAX_CLUSTER_MERGE_DELTA_E and delta_e(b, c) <= MAX_CLUSTER_MERGE_DELTA_E
 
     entries = [_Entry(a, 0.0), _Entry(b, 0.0), _Entry(c, 0.0)]
-    clusters = _cluster_pool(entries, PropertyFamily.text)
+    clusters = _cluster_pool(entries, PropertyFamily.TEXT)
     reps = {cluster.color.hex for cluster in clusters}
 
     assert len(clusters) == 2  # A and C never co-cluster, even through the bridge
@@ -775,7 +775,7 @@ def test_near_white_anti_alias_variants_still_collapse() -> None:
         assert not _is_distinct_near_white_pair(first, second)
 
     entries = [_Entry(v, 0.0) for v in variants]
-    clusters = _cluster_pool(entries, PropertyFamily.text)
+    clusters = _cluster_pool(entries, PropertyFamily.TEXT)
     assert len(clusters) == 1
     assert clusters[0].member_count == 3
 
@@ -840,9 +840,9 @@ def test_cta_bg_guard_allows_near_black_anti_alias_variants_to_merge() -> None:
 
 def test_entry_has_cta_action_mass() -> None:
     cta = _Entry(_color(_NB_CTA_BG), 0.0)
-    cta.vote_mass[ComponentType.cta_bg] = 1.0
+    cta.vote_mass[ComponentType.CTA_BG] = 1.0
     surface = _Entry(_color(_NB_SURFACE), 0.1)
-    surface.vote_mass[ComponentType.footer_bg] = 1.0
+    surface.vote_mass[ComponentType.FOOTER_BG] = 1.0
     assert _entry_has_cta_action_mass(cta)
     assert not _entry_has_cta_action_mass(surface)
 
@@ -852,15 +852,15 @@ def test_cta_bg_splits_from_near_black_surface_bin() -> None:
     # is `#030711` must surface as its own background cluster carrying cta_bg mass, not be absorbed
     # into the `#050505` footer bin that OKLab would merge it into.
     harvest = _harvest([ScreenshotBin(color=_color(_NB_SURFACE), area_fraction=0.4)])
-    classified = [_classified(_color(_NB_CTA_BG), {ComponentType.cta_bg: 1.0})]
+    classified = [_classified(_color(_NB_CTA_BG), {ComponentType.CTA_BG: 1.0})]
 
     clusters = build_inventory(harvest, classified)
-    cta_clusters = [c for c in clusters if ComponentType.cta_bg in c.component_mass]
+    cta_clusters = [c for c in clusters if ComponentType.CTA_BG in c.component_mass]
     assert len(cta_clusters) == 1
     assert cta_clusters[0].color.hex == _NB_CTA_BG
     # The surface bin keeps its area and does NOT pick up the cta_bg mass.
     surface = [c for c in clusters if c.color.hex == _NB_SURFACE]
-    assert surface and ComponentType.cta_bg not in surface[0].component_mass
+    assert surface and ComponentType.CTA_BG not in surface[0].component_mass
 
 
 def test_near_black_page_bg_still_merges_into_surface_bin() -> None:
@@ -868,13 +868,13 @@ def test_near_black_page_bg_still_merges_into_surface_bin() -> None:
     # above merges when the element's mass is page_bg (not cta/action) — page/surface attribution
     # keeps the pure OKLab radius so the denoiser stays intact.
     harvest = _harvest([ScreenshotBin(color=_color(_NB_SURFACE), area_fraction=0.4)])
-    classified = [_classified(_color(_NB_CTA_BG), {ComponentType.page_bg: 1.0})]
+    classified = [_classified(_color(_NB_CTA_BG), {ComponentType.PAGE_BG: 1.0})]
 
     clusters = build_inventory(harvest, classified)
     bg_clusters = [c for c in clusters if c.area_weight > 0.0 or c.component_mass]
     assert len(bg_clusters) == 1  # one merged background cluster
     assert bg_clusters[0].color.hex == _NB_SURFACE  # max-area member wins
-    assert ComponentType.page_bg in bg_clusters[0].component_mass
+    assert ComponentType.PAGE_BG in bg_clusters[0].component_mass
 
 
 def test_near_black_mixed_cta_and_page_mass_splits_by_component() -> None:
@@ -885,21 +885,21 @@ def test_near_black_mixed_cta_and_page_mass_splits_by_component() -> None:
     # bin — the correctness promise of `_CTA_ACTION_BG_COMPONENTS` (per-component, not whole-vote).
     harvest = _harvest([ScreenshotBin(color=_color(_NB_SURFACE), area_fraction=0.4)])
     classified = [
-        _classified(_color(_NB_CTA_BG), {ComponentType.page_bg: 0.9, ComponentType.cta_bg: 0.1})
+        _classified(_color(_NB_CTA_BG), {ComponentType.PAGE_BG: 0.9, ComponentType.CTA_BG: 0.1})
     ]
 
     clusters = build_inventory(harvest, classified)
     # The CTA color splits off as its own entry carrying ONLY the cta_bg share — never page_bg.
     cta_clusters = [c for c in clusters if c.color.hex == _NB_CTA_BG]
     assert len(cta_clusters) == 1
-    assert ComponentType.cta_bg in cta_clusters[0].component_mass
-    assert ComponentType.page_bg not in cta_clusters[0].component_mass
+    assert ComponentType.CTA_BG in cta_clusters[0].component_mass
+    assert ComponentType.PAGE_BG not in cta_clusters[0].component_mass
     # The page_bg share stays on the unguarded join and lands on the area-ranked surface bin, which
     # keeps its area AND now carries the page_bg mass — page/surface attribution is left alone.
     surface = next(c for c in clusters if c.color.hex == _NB_SURFACE)
     assert surface.area_weight == pytest.approx(0.4, abs=1e-9)
-    assert ComponentType.page_bg in surface.component_mass
-    assert ComponentType.cta_bg not in surface.component_mass
+    assert ComponentType.PAGE_BG in surface.component_mass
+    assert ComponentType.CTA_BG not in surface.component_mass
 
 
 def test_cta_bg_guard_survives_union_find_transitivity() -> None:
@@ -915,9 +915,9 @@ def test_cta_bg_guard_survives_union_find_transitivity() -> None:
     # Equal (zero) areas so the representative tiebreak falls to the smallest hex, isolating the
     # transitivity behaviour from area-based representative selection.
     entry_a = _Entry(a, 0.0)
-    entry_a.vote_mass[ComponentType.cta_bg] = 1.0  # the CTA that must keep its identity
+    entry_a.vote_mass[ComponentType.CTA_BG] = 1.0  # the CTA that must keep its identity
     entries = [entry_a, _Entry(b, 0.0), _Entry(c, 0.0)]
-    clusters = _cluster_pool(entries, PropertyFamily.background)
+    clusters = _cluster_pool(entries, PropertyFamily.BACKGROUND)
 
     reps = {cluster.color.hex for cluster in clusters}
     assert len(clusters) == 2  # A and C never co-cluster, even through the bridge

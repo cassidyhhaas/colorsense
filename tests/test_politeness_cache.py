@@ -110,11 +110,11 @@ async def test_concurrent_same_key_coalesces_to_one_render(config: Config) -> No
     harvester = _GatedHarvester()
     policy = PolitenessPolicy(harvester=harvester, robots_loader=_no_robots)
 
-    leader = asyncio.ensure_future(policy.fetch(URL, Theme.light, config, VIEWPORT))
+    leader = asyncio.ensure_future(policy.fetch(URL, Theme.LIGHT, config, VIEWPORT))
     # Wait until the leader is genuinely inside the (blocked) harvester before the follower
     # even starts, so the follower can only join via the in-flight Future.
     await harvester.entered.wait()
-    follower = asyncio.ensure_future(policy.fetch(URL, Theme.light, config, VIEWPORT))
+    follower = asyncio.ensure_future(policy.fetch(URL, Theme.LIGHT, config, VIEWPORT))
     # Give the follower a chance to run and register as a follower.
     await asyncio.sleep(0)
 
@@ -130,10 +130,10 @@ async def test_many_concurrent_same_key_single_render(config: Config) -> None:
     harvester = _GatedHarvester()
     policy = PolitenessPolicy(harvester=harvester, robots_loader=_no_robots)
 
-    leader = asyncio.ensure_future(policy.fetch(URL, Theme.light, config, VIEWPORT))
+    leader = asyncio.ensure_future(policy.fetch(URL, Theme.LIGHT, config, VIEWPORT))
     await harvester.entered.wait()
     followers = [
-        asyncio.ensure_future(policy.fetch(URL, Theme.light, config, VIEWPORT)) for _ in range(5)
+        asyncio.ensure_future(policy.fetch(URL, Theme.LIGHT, config, VIEWPORT)) for _ in range(5)
     ]
     await asyncio.sleep(0)
 
@@ -149,8 +149,8 @@ async def test_distinct_keys_render_in_parallel(config: Config) -> None:
     harvester = _GatedHarvester()
     policy = PolitenessPolicy(harvester=harvester, robots_loader=_no_robots)
 
-    light = asyncio.ensure_future(policy.fetch(URL, Theme.light, config, VIEWPORT))
-    dark = asyncio.ensure_future(policy.fetch(URL, Theme.dark, config, VIEWPORT))
+    light = asyncio.ensure_future(policy.fetch(URL, Theme.LIGHT, config, VIEWPORT))
+    dark = asyncio.ensure_future(policy.fetch(URL, Theme.DARK, config, VIEWPORT))
     # Let both reach the harvester so they are genuinely concurrent.
     while harvester.concurrent < 2:
         await asyncio.sleep(0)
@@ -160,8 +160,8 @@ async def test_distinct_keys_render_in_parallel(config: Config) -> None:
 
     assert harvester.calls == 2
     assert harvester.max_concurrent == 2  # truly parallel, not coalesced
-    assert light_harvest.theme is Theme.light
-    assert dark_harvest.theme is Theme.dark
+    assert light_harvest.theme is Theme.LIGHT
+    assert dark_harvest.theme is Theme.DARK
 
 
 async def test_failure_propagates_to_all_and_is_not_cached(config: Config) -> None:
@@ -170,9 +170,9 @@ async def test_failure_propagates_to_all_and_is_not_cached(config: Config) -> No
     failing = _FailingHarvester()
     policy = PolitenessPolicy(harvester=failing, robots_loader=_no_robots)
 
-    leader = asyncio.ensure_future(policy.fetch(URL, Theme.light, config, VIEWPORT))
+    leader = asyncio.ensure_future(policy.fetch(URL, Theme.LIGHT, config, VIEWPORT))
     await failing.entered.wait()
-    follower = asyncio.ensure_future(policy.fetch(URL, Theme.light, config, VIEWPORT))
+    follower = asyncio.ensure_future(policy.fetch(URL, Theme.LIGHT, config, VIEWPORT))
     await asyncio.sleep(0)
 
     failing.gate.set()
@@ -188,7 +188,7 @@ async def test_failure_propagates_to_all_and_is_not_cached(config: Config) -> No
     ok = _GatedHarvester()
     ok.gate.set()
     policy._harvester = ok  # type: ignore[assignment]
-    harvest = await policy.fetch(URL, Theme.light, config, VIEWPORT)
+    harvest = await policy.fetch(URL, Theme.LIGHT, config, VIEWPORT)
     assert ok.calls == 1
     assert harvest.url == URL
 
@@ -199,8 +199,8 @@ async def test_robots_disallow_propagates_and_is_not_cached(config: Config) -> N
     harvester = _GatedHarvester()
     policy = PolitenessPolicy(harvester=harvester, robots_loader=_disallow_all)
 
-    a = asyncio.ensure_future(policy.fetch(URL, Theme.light, config, VIEWPORT))
-    b = asyncio.ensure_future(policy.fetch(URL, Theme.light, config, VIEWPORT))
+    a = asyncio.ensure_future(policy.fetch(URL, Theme.LIGHT, config, VIEWPORT))
+    b = asyncio.ensure_future(policy.fetch(URL, Theme.LIGHT, config, VIEWPORT))
     results = await asyncio.gather(a, b, return_exceptions=True)
 
     assert harvester.calls == 0  # gate rejected before any render
@@ -268,13 +268,13 @@ async def test_robots_fetch_is_throttled_without_double_waiting(config: Config) 
         sleeper=sleeper,
     )
 
-    await policy.fetch("https://host.test/a", Theme.light, config, VIEWPORT)
+    await policy.fetch("https://host.test/a", Theme.LIGHT, config, VIEWPORT)
     # First contact: robots GET + page nav share one reservation, so no sleep at all.
     assert robots_urls == ["https://host.test/robots.txt"]
     assert slept == []
 
     clock.t += 0.5  # only 0.5s passes before the next same-host fetch
-    await policy.fetch("https://host.test/b", Theme.light, config, VIEWPORT)
+    await policy.fetch("https://host.test/b", Theme.LIGHT, config, VIEWPORT)
     # robots.txt is cached per host, so the second fetch makes no second robots GET; the page
     # nav waits the remaining 1.5s of the interval — proof the host slot was reserved.
     assert robots_urls == ["https://host.test/robots.txt"]
@@ -303,13 +303,13 @@ async def test_different_hosts_do_not_serialize(config: Config) -> None:
     )
 
     # Prime host A so its next fetch must wait, then launch that waiting fetch.
-    await policy.fetch("https://a.test/1", Theme.light, config, VIEWPORT)
-    a_again = asyncio.ensure_future(policy.fetch("https://a.test/2", Theme.light, config, VIEWPORT))
+    await policy.fetch("https://a.test/1", Theme.LIGHT, config, VIEWPORT)
+    a_again = asyncio.ensure_future(policy.fetch("https://a.test/2", Theme.LIGHT, config, VIEWPORT))
     await started.wait()  # host A is now parked inside the sleeper
 
     # Host B (never fetched) must complete WITHOUT waiting on host A's lock/sleep.
     b = await asyncio.wait_for(
-        policy.fetch("https://b.test/1", Theme.light, config, VIEWPORT), timeout=1.0
+        policy.fetch("https://b.test/1", Theme.LIGHT, config, VIEWPORT), timeout=1.0
     )
     assert b.url == "https://b.test/1"
 
@@ -338,8 +338,8 @@ async def test_concurrent_same_host_distinct_keys_chain(config: Config) -> None:
 
     # Different themes => distinct cache keys => not coalesced; both throttle the same host.
     await asyncio.gather(
-        policy.fetch("https://host.test/p", Theme.light, config, VIEWPORT),
-        policy.fetch("https://host.test/p", Theme.dark, config, VIEWPORT),
+        policy.fetch("https://host.test/p", Theme.LIGHT, config, VIEWPORT),
+        policy.fetch("https://host.test/p", Theme.DARK, config, VIEWPORT),
     )
     # First caller: no wait. Second caller: chains a full interval after the first's slot.
     assert slept == [pytest.approx(3.0)]
@@ -353,15 +353,15 @@ async def test_completed_coalesced_render_served_from_cache(config: Config) -> N
     policy = PolitenessPolicy(harvester=harvester, robots_loader=_no_robots)
 
     first, second = await asyncio.gather(
-        policy.fetch(URL, Theme.light, config, VIEWPORT),
-        policy.fetch(URL, Theme.light, config, VIEWPORT),
+        policy.fetch(URL, Theme.LIGHT, config, VIEWPORT),
+        policy.fetch(URL, Theme.LIGHT, config, VIEWPORT),
     )
     assert first is second
     in_flight_calls = harvester.calls
     assert in_flight_calls == 1
     assert not policy._inflight
 
-    later = await policy.fetch(URL, Theme.light, config, VIEWPORT)
+    later = await policy.fetch(URL, Theme.LIGHT, config, VIEWPORT)
     assert harvester.calls == in_flight_calls  # served from cache, no new render
     assert later is first
     assert not policy._inflight
@@ -410,10 +410,10 @@ async def test_crawl_delay_raises_effective_interval(config: Config) -> None:
     robots = "User-agent: *\nCrawl-delay: 5\nDisallow:\n"
     policy, slept = _delay_policy(robots, min_interval=1.0)
 
-    await policy.fetch("https://host.test/a", Theme.light, config, VIEWPORT)
+    await policy.fetch("https://host.test/a", Theme.LIGHT, config, VIEWPORT)
     assert slept == []  # crawl delay not yet known when the first fetch was throttled
 
-    await policy.fetch("https://host.test/b", Theme.light, config, VIEWPORT)
+    await policy.fetch("https://host.test/b", Theme.LIGHT, config, VIEWPORT)
     assert slept == [pytest.approx(5.0)]  # the learned 5s delay, not min_interval's 1s
 
 
@@ -423,14 +423,14 @@ async def test_crawl_delay_clamped_to_max(config: Config) -> None:
     robots = "User-agent: *\nCrawl-delay: 86400\nDisallow:\n"
     policy, slept = _delay_policy(robots, min_interval=1.0)
 
-    await policy.fetch("https://host.test/a", Theme.light, config, VIEWPORT)
-    await policy.fetch("https://host.test/b", Theme.light, config, VIEWPORT)
+    await policy.fetch("https://host.test/a", Theme.LIGHT, config, VIEWPORT)
+    await policy.fetch("https://host.test/b", Theme.LIGHT, config, VIEWPORT)
     assert slept == [pytest.approx(30.0)]
 
     # Consumers can raise the cap explicitly.
     policy2, slept2 = _delay_policy(robots, min_interval=1.0, max_crawl_delay=120.0)
-    await policy2.fetch("https://host.test/a", Theme.light, config, VIEWPORT)
-    await policy2.fetch("https://host.test/b", Theme.light, config, VIEWPORT)
+    await policy2.fetch("https://host.test/a", Theme.LIGHT, config, VIEWPORT)
+    await policy2.fetch("https://host.test/b", Theme.LIGHT, config, VIEWPORT)
     assert slept2 == [pytest.approx(120.0)]
 
 
@@ -439,8 +439,8 @@ async def test_no_crawl_delay_keeps_min_interval(config: Config) -> None:
     robots = "User-agent: *\nDisallow:\n"
     policy, slept = _delay_policy(robots, min_interval=2.0)
 
-    await policy.fetch("https://host.test/a", Theme.light, config, VIEWPORT)
-    await policy.fetch("https://host.test/b", Theme.light, config, VIEWPORT)
+    await policy.fetch("https://host.test/a", Theme.LIGHT, config, VIEWPORT)
+    await policy.fetch("https://host.test/b", Theme.LIGHT, config, VIEWPORT)
     assert slept == [pytest.approx(2.0)]
 
 
@@ -450,6 +450,6 @@ async def test_min_interval_wins_over_smaller_crawl_delay(config: Config) -> Non
     robots = "User-agent: *\nCrawl-delay: 1\nDisallow:\n"
     policy, slept = _delay_policy(robots, min_interval=4.0)
 
-    await policy.fetch("https://host.test/a", Theme.light, config, VIEWPORT)
-    await policy.fetch("https://host.test/b", Theme.light, config, VIEWPORT)
+    await policy.fetch("https://host.test/a", Theme.LIGHT, config, VIEWPORT)
+    await policy.fetch("https://host.test/b", Theme.LIGHT, config, VIEWPORT)
     assert slept == [pytest.approx(4.0)]

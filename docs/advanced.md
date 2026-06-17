@@ -23,7 +23,7 @@ each theme's `ThemePalette`:
 
 ```python
 result = await analyze(url, include_tokens=True)
-palette = result.themes[Theme.light]
+palette = result.themes[Theme.LIGHT]
 for token in palette.tokens or ():
     print(token.name, token.color.hex, token.semantic_role)
 for item in palette.divergence:

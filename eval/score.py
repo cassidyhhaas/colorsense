@@ -106,8 +106,8 @@ BLEED_EPS: float = IDENTITY_TOLERANCE
 
 # Background roles, used by the family-bleed check: a text/link/border winner that matches
 # one of these roles' colors has leaked a surface hex into an element-color answer.
-_BG_ROLES = (UsageRole.page, UsageRole.surface, UsageRole.banner)
-_ELEMENT_COLOR_ROLES = (UsageRole.text, UsageRole.link, UsageRole.border)
+_BG_ROLES = (UsageRole.PAGE, UsageRole.SURFACE, UsageRole.BANNER)
+_ELEMENT_COLOR_ROLES = (UsageRole.TEXT, UsageRole.LINK, UsageRole.BORDER)
 
 
 # --------------------------------------------------------------------------- #

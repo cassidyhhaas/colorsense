@@ -134,7 +134,7 @@ NEAR_WHITE_MERGE_MAX_DE2000: float = 3.0
 # distinctness check. The background pool is excluded: its colors are quantized screenshot pixels
 # where OKLab's coarseness usefully denoises antialiasing, so it keeps the pure OKLab radius.
 _EXACT_COLOR_FAMILIES: frozenset[PropertyFamily] = frozenset(
-    {PropertyFamily.text, PropertyFamily.border}
+    {PropertyFamily.TEXT, PropertyFamily.BORDER}
 )
 
 # --- Near-black CTA/action background distinctness check --------------------------------
@@ -175,7 +175,7 @@ NEAR_BLACK_MERGE_MAX_DE2000: float = 3.0
 # the gate is per-entry presence (`_entry_has_cta_action_mass`): an entry carrying any CTA/action
 # mass is kept off a CIEDE2000-distinct near-black surface bin; pure page/surface entries are not.
 CTA_ACTION_BG_COMPONENTS: frozenset[ComponentType] = frozenset(
-    {ComponentType.cta_bg, ComponentType.badge, ComponentType.button_secondary}
+    {ComponentType.CTA_BG, ComponentType.BADGE, ComponentType.BUTTON_SECONDARY}
 )
 
 
@@ -219,9 +219,9 @@ def _nearest_mergeable_near_black_entry(
 
 # Per-family join radius: background loose, text/border tight (see the constants above).
 _MATCH_BY_FAMILY: dict[PropertyFamily, float] = {
-    PropertyFamily.background: MAX_BG_MATCH_DELTA_E,
-    PropertyFamily.text: MAX_TEXT_BORDER_MATCH_DELTA_E,
-    PropertyFamily.border: MAX_TEXT_BORDER_MATCH_DELTA_E,
+    PropertyFamily.BACKGROUND: MAX_BG_MATCH_DELTA_E,
+    PropertyFamily.TEXT: MAX_TEXT_BORDER_MATCH_DELTA_E,
+    PropertyFamily.BORDER: MAX_TEXT_BORDER_MATCH_DELTA_E,
 }
 
 
@@ -365,7 +365,7 @@ def _cluster_pool(entries: list[_Entry], family: PropertyFamily) -> list[ColorCl
         return []
 
     is_exact_color_family = family in _EXACT_COLOR_FAMILIES
-    is_background_family = family is PropertyFamily.background
+    is_background_family = family is PropertyFamily.BACKGROUND
     parent = list(range(entry_count))
     for i in range(entry_count):
         for j in range(i + 1, entry_count):
@@ -400,7 +400,7 @@ def _cluster_pool(entries: list[_Entry], family: PropertyFamily) -> list[ColorCl
     for members in groups.values():
         group = [entries[i] for i in members]
 
-        if family is PropertyFamily.background:
+        if family is PropertyFamily.BACKGROUND:
             # Area truth: largest area weight, ties (and all-zero) broken by smallest hex.
             representative = min(group, key=lambda entry: (-entry.area_weight, entry.color.hex))
         else:
@@ -469,11 +469,11 @@ def build_inventory(harvest: Harvest, classified: list[ClassifiedElement]) -> li
     ties, keeping the output deterministic).
     """
     pools: dict[PropertyFamily, list[_Entry]] = {
-        PropertyFamily.background: [
+        PropertyFamily.BACKGROUND: [
             _Entry(bin_.color, bin_.area_fraction) for bin_ in harvest.screenshot_bins
         ],
-        PropertyFamily.text: [],
-        PropertyFamily.border: [],
+        PropertyFamily.TEXT: [],
+        PropertyFamily.BORDER: [],
     }
 
     # STEP 1b: attribute element semantics to the nearest entry in the family's pool
@@ -486,9 +486,9 @@ def build_inventory(harvest: Harvest, classified: list[ClassifiedElement]) -> li
         # shared `ComponentType.property_family` (same convention the component classifier
         # normalizes by).
         family_distributions: dict[PropertyFamily, dict[ComponentType, float]] = {
-            PropertyFamily.background: {},
-            PropertyFamily.text: {},
-            PropertyFamily.border: {},
+            PropertyFamily.BACKGROUND: {},
+            PropertyFamily.TEXT: {},
+            PropertyFamily.BORDER: {},
         }
         for component, mass in classification.component_dist.items():
             family_distributions[component.property_family][component] = mass
@@ -497,9 +497,9 @@ def build_inventory(harvest: Harvest, classified: list[ClassifiedElement]) -> li
         # fill color — a gradient CTA paints every opaque stop (see `_bg_fill_colors`) —
         # so each family resolves to a list; text/border are always single.
         for family, colors in (
-            (PropertyFamily.background, _bg_fill_colors(classification.element)),
-            (PropertyFamily.text, [classification.element.text]),
-            (PropertyFamily.border, [classification.element.border]),
+            (PropertyFamily.BACKGROUND, _bg_fill_colors(classification.element)),
+            (PropertyFamily.TEXT, [classification.element.text]),
+            (PropertyFamily.BORDER, [classification.element.border]),
         ):
             family_distribution = family_distributions[family]
             if not family_distribution:
@@ -538,7 +538,7 @@ def build_inventory(harvest: Harvest, classified: list[ClassifiedElement]) -> li
             # page/surface attribution when a near-black element carries both kinds of mass (a
             # dark clickable panel). See `CTA_ACTION_BG_COMPONENTS` for why the CTA gate is
             # presence-based, not dominance.
-            vote_has_cta_action_mass = family is PropertyFamily.background and any(
+            vote_has_cta_action_mass = family is PropertyFamily.BACKGROUND and any(
                 component in CTA_ACTION_BG_COMPONENTS for component in family_distribution
             )
             radius = _MATCH_BY_FAMILY[family]
@@ -546,7 +546,7 @@ def build_inventory(harvest: Harvest, classified: list[ClassifiedElement]) -> li
             for color in fills:
                 weight = (
                     color.alpha
-                    if family in (PropertyFamily.background, PropertyFamily.border)
+                    if family in (PropertyFamily.BACKGROUND, PropertyFamily.BORDER)
                     else 1.0
                 ) / fill_count
 
@@ -610,7 +610,7 @@ def build_inventory(harvest: Harvest, classified: list[ClassifiedElement]) -> li
     # STEP 2: cluster each family pool independently, then assemble the flat union in
     # fixed family order and stably re-sort by (-area_weight, hex).
     clusters: list[ColorCluster] = []
-    for family in (PropertyFamily.background, PropertyFamily.text, PropertyFamily.border):
+    for family in (PropertyFamily.BACKGROUND, PropertyFamily.TEXT, PropertyFamily.BORDER):
         clusters.extend(_cluster_pool(pools[family], family))
 
     clusters.sort(key=lambda cluster: (-cluster.area_weight, cluster.color.hex))

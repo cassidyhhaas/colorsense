@@ -46,20 +46,20 @@ def _dummy_result(*, tokens: tuple[DesignToken, ...] | None = None) -> AnalysisR
 
     usage = UsagePalette(
         mapping={
-            UsageRole.page: (
+            UsageRole.PAGE: (
                 UsageEntry(
                     color=white,
                     probability=0.8,
                     area=0.6,
-                    components={ComponentType.page_bg: 1.0},
+                    components={ComponentType.PAGE_BG: 1.0},
                 ),
             ),
-            UsageRole.cta: (
+            UsageRole.CTA: (
                 UsageEntry(
                     color=brand,
                     probability=0.7,
                     area=0.05,
-                    components={ComponentType.cta_bg: 1.0},
+                    components={ComponentType.CTA_BG: 1.0},
                 ),
             ),
         }
@@ -71,10 +71,10 @@ def _dummy_result(*, tokens: tuple[DesignToken, ...] | None = None) -> AnalysisR
             area=0.6,
             usages=(
                 Usage(
-                    role=UsageRole.page,
-                    property_family=PropertyFamily.background,
+                    role=UsageRole.PAGE,
+                    property_family=PropertyFamily.BACKGROUND,
                     weight=1.0,
-                    components={ComponentType.page_bg: 1.0},
+                    components={ComponentType.PAGE_BG: 1.0},
                 ),
             ),
         ),
@@ -84,36 +84,36 @@ def _dummy_result(*, tokens: tuple[DesignToken, ...] | None = None) -> AnalysisR
             area=0.05,
             usages=(
                 Usage(
-                    role=UsageRole.cta,
-                    property_family=PropertyFamily.background,
+                    role=UsageRole.CTA,
+                    property_family=PropertyFamily.BACKGROUND,
                     weight=0.7,
-                    components={ComponentType.cta_bg: 1.0},
+                    components={ComponentType.CTA_BG: 1.0},
                 ),
                 Usage(
-                    role=UsageRole.link,
-                    property_family=PropertyFamily.text,
+                    role=UsageRole.LINK,
+                    property_family=PropertyFamily.TEXT,
                     weight=0.3,
-                    components={ComponentType.link: 1.0},
+                    components={ComponentType.LINK: 1.0},
                 ),
             ),
         ),
     )
     theme_palette = ThemePalette(
-        theme=Theme.light,
+        theme=Theme.LIGHT,
         colors=colors,
         usage=usage,
-        divergence=(DivergenceItem(role=UsageRole.page, color=dark, note="declared but unused"),),
+        divergence=(DivergenceItem(role=UsageRole.PAGE, color=dark, note="declared but unused"),),
         tokens=tokens,
     )
 
     return AnalysisResult(
         url="https://example.com",
         viewport=viewport,
-        themes={Theme.light: theme_palette},
+        themes={Theme.LIGHT: theme_palette},
         third_party_colors=(_color("#00ff00", 0.8),),
         metadata=RunMetadata(
-            themes_requested=(Theme.light, Theme.dark),
-            themes_analyzed=(Theme.light,),
+            themes_requested=(Theme.LIGHT, Theme.DARK),
+            themes_analyzed=(Theme.LIGHT,),
             user_agent="colorsense",
             respect_robots=True,
         ),
@@ -124,23 +124,23 @@ def _design_token() -> DesignToken:
     return DesignToken(
         name="--color-primary",
         color=_color("#3366cc", 0.55),
-        semantic_role=TokenSemanticRole.brand_primary,
+        semantic_role=TokenSemanticRole.BRAND_PRIMARY,
     )
 
 
 def test_usage_role_property_family_maps_every_role() -> None:
     # UsageRole.property_family is total over UsageRole and matches the documented rollup.
-    assert UsageRole.text.property_family is PropertyFamily.text
-    assert UsageRole.link.property_family is PropertyFamily.text
-    assert UsageRole.border.property_family is PropertyFamily.border
+    assert UsageRole.TEXT.property_family is PropertyFamily.TEXT
+    assert UsageRole.LINK.property_family is PropertyFamily.TEXT
+    assert UsageRole.BORDER.property_family is PropertyFamily.BORDER
     for role in (
-        UsageRole.page,
-        UsageRole.surface,
-        UsageRole.banner,
-        UsageRole.cta,
-        UsageRole.action,
+        UsageRole.PAGE,
+        UsageRole.SURFACE,
+        UsageRole.BANNER,
+        UsageRole.CTA,
+        UsageRole.ACTION,
     ):
-        assert role.property_family is PropertyFamily.background
+        assert role.property_family is PropertyFamily.BACKGROUND
     # Total: defined for every role.
     assert {r.property_family for r in UsageRole} <= set(PropertyFamily)
 
@@ -148,12 +148,12 @@ def test_usage_role_property_family_maps_every_role() -> None:
 def test_component_type_property_family_matches_routing() -> None:
     # ComponentType.property_family follows the fixed routing convention:
     # *_text plus link -> text, border -> border, everything else -> background.
-    assert ComponentType.cta_text.property_family is PropertyFamily.text
-    assert ComponentType.link.property_family is PropertyFamily.text
-    assert ComponentType.border.property_family is PropertyFamily.border
-    assert ComponentType.cta_bg.property_family is PropertyFamily.background
-    assert ComponentType.badge.property_family is PropertyFamily.background
-    assert ComponentType.button_secondary.property_family is PropertyFamily.background
+    assert ComponentType.CTA_TEXT.property_family is PropertyFamily.TEXT
+    assert ComponentType.LINK.property_family is PropertyFamily.TEXT
+    assert ComponentType.BORDER.property_family is PropertyFamily.BORDER
+    assert ComponentType.CTA_BG.property_family is PropertyFamily.BACKGROUND
+    assert ComponentType.BADGE.property_family is PropertyFamily.BACKGROUND
+    assert ComponentType.BUTTON_SECONDARY.property_family is PropertyFamily.BACKGROUND
     # Total: defined for every component type.
     assert {c.property_family for c in ComponentType} <= set(PropertyFamily)
 
@@ -208,7 +208,7 @@ def test_output_models_are_frozen() -> None:
         result.url = "https://other.example"  # type: ignore[misc]
     assert result.url == "https://example.com"
 
-    palette = result.themes[Theme.light]
+    palette = result.themes[Theme.LIGHT]
     color_usage = palette.colors[0]
     with pytest.raises(ValidationError):
         color_usage.prominence = 0.1  # type: ignore[misc]
@@ -216,7 +216,7 @@ def test_output_models_are_frozen() -> None:
     with pytest.raises(ValidationError):
         usage_slot.weight = 0.1  # type: ignore[misc]
 
-    entry = palette.usage.mapping[UsageRole.page][0]
+    entry = palette.usage.mapping[UsageRole.PAGE][0]
     with pytest.raises(ValidationError):
         entry.probability = 0.1  # type: ignore[misc]
 
@@ -235,7 +235,7 @@ def test_output_sequence_fields_are_tuples_not_appendable() -> None:
     # has no ``append``/``extend``, so the attempt raises AttributeError, not a silent edit.
     result = _dummy_result(tokens=(_design_token(),))
     assert isinstance(result.third_party_colors, tuple)
-    palette = result.themes[Theme.light]
+    palette = result.themes[Theme.LIGHT]
     assert isinstance(palette.divergence, tuple)
     with pytest.raises(AttributeError):
         palette.divergence.extend([])  # type: ignore[attr-defined]
@@ -248,7 +248,7 @@ def test_output_sequence_fields_are_tuples_not_appendable() -> None:
         palette.colors.append(palette.colors[0])  # type: ignore[attr-defined]
     assert isinstance(palette.colors[0].usages, tuple)
 
-    entries = palette.usage.mapping[UsageRole.page]
+    entries = palette.usage.mapping[UsageRole.PAGE]
     assert isinstance(entries, tuple)
     with pytest.raises(AttributeError):
         entries.append(entries[0])  # type: ignore[attr-defined]
@@ -263,22 +263,22 @@ def test_usage_palette_backfills_all_roles() -> None:
 
     partial = UsagePalette(
         mapping={
-            UsageRole.text: (UsageEntry(color=_color(), probability=1.0, area=0.0),),
+            UsageRole.TEXT: (UsageEntry(color=_color(), probability=1.0, area=0.0),),
         }
     )
     assert set(partial.mapping) == set(UsageRole)
-    assert partial.mapping[UsageRole.text] != ()
+    assert partial.mapping[UsageRole.TEXT] != ()
     for role in UsageRole:
-        if role is not UsageRole.text:
+        if role is not UsageRole.TEXT:
             assert partial.mapping[role] == ()
 
 
 def test_theme_palette_tokens_none_vs_empty() -> None:
     # None = tokens not requested (include_tokens=False); () = requested but none found.
-    not_requested = _dummy_result(tokens=None).themes[Theme.light]
+    not_requested = _dummy_result(tokens=None).themes[Theme.LIGHT]
     assert not_requested.tokens is None
 
-    requested_but_none = _dummy_result(tokens=()).themes[Theme.light]
+    requested_but_none = _dummy_result(tokens=()).themes[Theme.LIGHT]
     assert requested_but_none.tokens == ()
     assert requested_but_none.tokens is not None
 
@@ -322,11 +322,11 @@ def test_harvest_models_construct() -> None:
         color=_color(),
         area_weight=0.3,
         member_count=4,
-        component_mix={ComponentType.card_bg: 1.0},
-        component_mass={ComponentType.card_bg: 7.5},
+        component_mix={ComponentType.CARD_BG: 1.0},
+        component_mass={ComponentType.CARD_BG: 7.5},
     )
     assert cluster.member_count == 4
-    assert cluster.component_mass == {ComponentType.card_bg: 7.5}
+    assert cluster.component_mass == {ComponentType.CARD_BG: 7.5}
 
 
 def test_internal_classified_token_carries_origin_and_usage_intent() -> None:
@@ -337,15 +337,15 @@ def test_internal_classified_token_carries_origin_and_usage_intent() -> None:
             resolved=_color(),
             scope=":root",
         ),
-        semantic_role=TokenSemanticRole.brand_primary,
+        semantic_role=TokenSemanticRole.BRAND_PRIMARY,
         weight=5.0,
-        usage_intent={UsageRole.cta: 0.5, UsageRole.surface: 0.5},
-        origin=TokenOrigin.name_rule,
+        usage_intent={UsageRole.CTA: 0.5, UsageRole.SURFACE: 0.5},
+        origin=TokenOrigin.NAME_RULE,
     )
-    assert token.origin is TokenOrigin.name_rule
+    assert token.origin is TokenOrigin.NAME_RULE
     assert sum(token.usage_intent.values()) == 1.0
     # Origin defaults to fallback when unspecified.
-    assert ClassifiedToken.model_fields["origin"].default is TokenOrigin.fallback
+    assert ClassifiedToken.model_fields["origin"].default is TokenOrigin.FALLBACK
 
 
 def test_analysis_result_json_round_trip() -> None:
@@ -355,22 +355,22 @@ def test_analysis_result_json_round_trip() -> None:
 
     assert restored == original
     # Enum-keyed dicts survive the round trip.
-    assert Theme.light in restored.themes
-    palette = restored.themes[Theme.light]
-    assert UsageRole.page in palette.usage.mapping
-    page_entry = palette.usage.mapping[UsageRole.page][0]
+    assert Theme.LIGHT in restored.themes
+    palette = restored.themes[Theme.LIGHT]
+    assert UsageRole.PAGE in palette.usage.mapping
+    page_entry = palette.usage.mapping[UsageRole.PAGE][0]
     assert page_entry.color.hex == "#ffffff"
-    assert page_entry.components[ComponentType.page_bg] == 1.0
+    assert page_entry.components[ComponentType.PAGE_BG] == 1.0
     # Color-keyed index round-trips, including nested Usage slots and their family.
     assert palette.colors[0].color.hex == "#ffffff"
     brand_color = palette.colors[1]
-    assert brand_color.usages[0].role is UsageRole.cta
-    assert brand_color.usages[1].property_family is PropertyFamily.text
+    assert brand_color.usages[0].role is UsageRole.CTA
+    assert brand_color.usages[1].property_family is PropertyFamily.TEXT
     assert palette.tokens is not None
-    assert palette.tokens[0].semantic_role is TokenSemanticRole.brand_primary
-    assert palette.divergence[0].role is UsageRole.page
+    assert palette.tokens[0].semantic_role is TokenSemanticRole.BRAND_PRIMARY
+    assert palette.divergence[0].role is UsageRole.PAGE
     assert restored.metadata.user_agent == "colorsense"
-    assert restored.metadata.themes_requested == (Theme.light, Theme.dark)
+    assert restored.metadata.themes_requested == (Theme.LIGHT, Theme.DARK)
     # Sequence fields round-trip as tuples (typed ``tuple[X, ...]``), not lists.
     assert isinstance(restored.third_party_colors, tuple)
     assert isinstance(palette.divergence, tuple)
@@ -378,7 +378,7 @@ def test_analysis_result_json_round_trip() -> None:
     assert isinstance(restored.metadata.themes_requested, tuple)
     assert isinstance(palette.colors, tuple)
     assert isinstance(palette.colors[1].usages, tuple)
-    assert isinstance(palette.usage.mapping[UsageRole.page], tuple)
+    assert isinstance(palette.usage.mapping[UsageRole.PAGE], tuple)
 
 
 def test_public_api_exports() -> None:

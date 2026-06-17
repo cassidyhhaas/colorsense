@@ -65,9 +65,9 @@ def _classify_role_without_alias_inheritance(
     relational = config.match_relational(name)
     if relational is not None:
         return _TokenRoleClassification(
-            semantic_role=TokenSemanticRole.text_on,
+            semantic_role=TokenSemanticRole.TEXT_ON,
             weight=relational.weight,
-            origin=TokenOrigin.relational,
+            origin=TokenOrigin.RELATIONAL,
         )
 
     # 2. Direct name rule.
@@ -75,7 +75,7 @@ def _classify_role_without_alias_inheritance(
     if name_match is not None:
         role, weight = name_match
         return _TokenRoleClassification(
-            semantic_role=role, weight=weight, origin=TokenOrigin.name_rule
+            semantic_role=role, weight=weight, origin=TokenOrigin.NAME_RULE
         )
 
     # 3. Numbered-scale detection. Like every other classifier weight, the scale family's
@@ -89,19 +89,19 @@ def _classify_role_without_alias_inheritance(
             if scale.is_anchor:
                 weight *= scale_config.scale_present_confidence_boost
             return _TokenRoleClassification(
-                semantic_role=TokenSemanticRole.brand_accent,
+                semantic_role=TokenSemanticRole.BRAND_ACCENT,
                 weight=weight,
-                origin=TokenOrigin.scale,
+                origin=TokenOrigin.SCALE,
             )
         return _TokenRoleClassification(
-            semantic_role=TokenSemanticRole.neutral,
+            semantic_role=TokenSemanticRole.NEUTRAL,
             weight=scale_config.base_weight,
-            origin=TokenOrigin.scale,
+            origin=TokenOrigin.SCALE,
         )
 
     # 4. Fallback.
     return _TokenRoleClassification(
-        semantic_role=TokenSemanticRole.ignore, weight=0.0, origin=TokenOrigin.fallback
+        semantic_role=TokenSemanticRole.IGNORE, weight=0.0, origin=TokenOrigin.FALLBACK
     )
 
 
@@ -132,7 +132,7 @@ def _resolve_alias_role(
     """Follow ``alias_target`` links until a non-``ignore`` classification is found.
 
     Returns the inherited classification with origin rewritten to
-    `TokenOrigin.alias` (the alias itself was not matched, its target was), or
+    `TokenOrigin.ALIAS` (the alias itself was not matched, its target was), or
     ``None`` when the chain dead-ends (missing target, cycle, or all targets are
     ``ignore``).
     """
@@ -146,11 +146,11 @@ def _resolve_alias_role(
         if target is None:
             return None
         target_classification = pre_alias_role_classifications[target.name]
-        if target_classification.semantic_role is not TokenSemanticRole.ignore:
+        if target_classification.semantic_role is not TokenSemanticRole.IGNORE:
             return _TokenRoleClassification(
                 semantic_role=target_classification.semantic_role,
                 weight=target_classification.weight,
-                origin=TokenOrigin.alias,
+                origin=TokenOrigin.ALIAS,
             )
         target_name = target.alias_target
     return None
@@ -180,7 +180,7 @@ def classify_tokens(tokens: list[TokenRecord], config: Config) -> list[Classifie
         role_classification = pre_alias_role_classifications[record.name]
 
         # Alias inheritance: an `ignore` token may adopt its target's role.
-        is_ignore = role_classification.semantic_role is TokenSemanticRole.ignore
+        is_ignore = role_classification.semantic_role is TokenSemanticRole.IGNORE
         if is_ignore and record.alias_target is not None:
             inherited = _resolve_alias_role(record, index, pre_alias_role_classifications)
             if inherited is not None:
@@ -190,7 +190,7 @@ def classify_tokens(tokens: list[TokenRecord], config: Config) -> list[Classifie
         usage_intent = _usage_intent_for_role(role, config)
 
         if (
-            role is TokenSemanticRole.status
+            role is TokenSemanticRole.STATUS
             and config.token_vocabulary.status_excluded_from_palette
         ):
             usage_intent = {}
