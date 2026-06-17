@@ -332,7 +332,7 @@ canonical case is disconetwork's dark CTA anchors painting `#030711`, which is O
 `#050505` footer bin (inside both radii) but CIEDE2000 4.33 away: the CTA mass lands on the footer,
 so `#030711` is missing from `cta` and `#050505` shows up there as noise instead. So two
 *near-black* (lightness ≤ 0.15) background colors that are CIEDE2000-distinct (> 3.0,
-`_CTA_BG_GUARD_MAX_DE2000`) are kept apart — at the join and the cluster step — **but only when a
+`NEAR_BLACK_MERGE_MAX_DE2000`) are kept apart — at the join and the cluster step — **but only when a
 CTA/action component is part of the vote**. That second scope is essential: unlike near-white text,
 the near-black background region is densely packed with CIEDE2000-distinct page/surface variants
 where OKLab's coarseness is the load-bearing denoiser, so guarding the *whole* pool regresses the

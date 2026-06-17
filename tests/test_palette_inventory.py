@@ -20,18 +20,18 @@ from colorsense.models import (
     Viewport,
 )
 from colorsense.palette.inventory import (
-    _CTA_BG_GUARD_MAX_DE2000,
-    _NEAR_BLACK_LIGHTNESS,
     DELTA_E_CLUSTER,
     DELTA_E_MATCH_BG,
     DELTA_E_MATCH_TEXT_BORDER,
-    NEAR_WHITE_LIGHTNESS,
+    NEAR_BLACK_MAX_LIGHTNESS,
+    NEAR_BLACK_MERGE_MAX_DE2000,
     NEAR_WHITE_MERGE_MAX_DE2000,
+    NEAR_WHITE_MIN_LIGHTNESS,
     _cluster_pool,
     _Entry,
     _entry_has_cta_action_mass,
-    _forbids_cta_bg_merge,
-    _forbids_near_white_merge,
+    _is_distinct_near_black_pair,
+    _is_distinct_near_white_pair,
     build_inventory,
 )
 
@@ -635,9 +635,9 @@ def test_text_border_representative_is_max_in_family_mass() -> None:
     assert delta_e(low, high) <= DELTA_E_CLUSTER
 
     low_entry = _Entry(low, 0.0)
-    low_entry.component_mix[ComponentType.page_text] = 1.0
+    low_entry.vote_mass[ComponentType.page_text] = 1.0
     high_entry = _Entry(high, 0.0)
-    high_entry.component_mix[ComponentType.page_text] = 5.0
+    high_entry.vote_mass[ComponentType.page_text] = 5.0
 
     clusters = _cluster_pool([low_entry, high_entry], PropertyFamily.text)
 
@@ -687,7 +687,7 @@ def test_segregated_determinism_same_input_identical_output() -> None:
 
 # --------------------------------------------------------------------------- #
 # Near-white guard (text/border pools): OKLab collapses perceptually-distinct
-# near-white text colors; CIEDE2000 keeps them apart. See `_forbids_near_white_merge`.
+# near-white text colors; CIEDE2000 keeps them apart. See `_is_distinct_near_white_pair`.
 # --------------------------------------------------------------------------- #
 
 # GitHub's canonical case: dominant white body text vs Primer's near-white `--fgColor-default`.
@@ -702,13 +702,13 @@ def test_near_white_guard_predicate_distinguishes_the_github_pair() -> None:
     # OKLab would merge them (within the cluster radius); CIEDE2000 says clearly distinct.
     assert delta_e(white, primer) <= DELTA_E_CLUSTER
     assert ciede2000(white, primer) > NEAR_WHITE_MERGE_MAX_DE2000
-    assert white.lightness >= NEAR_WHITE_LIGHTNESS
-    assert primer.lightness >= NEAR_WHITE_LIGHTNESS
+    assert white.lightness >= NEAR_WHITE_MIN_LIGHTNESS
+    assert primer.lightness >= NEAR_WHITE_MIN_LIGHTNESS
 
-    assert _forbids_near_white_merge(white, primer)
+    assert _is_distinct_near_white_pair(white, primer)
     # Symmetric, and a color never forbids merging with itself.
-    assert _forbids_near_white_merge(primer, white)
-    assert not _forbids_near_white_merge(white, white)
+    assert _is_distinct_near_white_pair(primer, white)
+    assert not _is_distinct_near_white_pair(white, white)
 
 
 def test_near_white_guard_ignores_colors_below_the_regime() -> None:
@@ -716,8 +716,8 @@ def test_near_white_guard_ignores_colors_below_the_regime() -> None:
     # (the gray is excluded by lightness before any CIEDE2000 call).
     white = _color(_WHITE)
     gray = _color("#9198a1")
-    assert gray.lightness < NEAR_WHITE_LIGHTNESS
-    assert not _forbids_near_white_merge(white, gray)
+    assert gray.lightness < NEAR_WHITE_MIN_LIGHTNESS
+    assert not _is_distinct_near_white_pair(white, gray)
 
 
 def test_near_white_guard_allows_anti_alias_variants_to_merge() -> None:
@@ -726,7 +726,7 @@ def test_near_white_guard_allows_anti_alias_variants_to_merge() -> None:
     white = _color(_WHITE)
     faint = _color("#fcfdff")  # ~1.1 ΔE2000 from white — an anti-alias-scale variant
     assert ciede2000(white, faint) <= NEAR_WHITE_MERGE_MAX_DE2000
-    assert not _forbids_near_white_merge(white, faint)
+    assert not _is_distinct_near_white_pair(white, faint)
 
 
 def test_text_pool_splits_distinct_near_whites() -> None:
@@ -754,9 +754,9 @@ def test_near_white_guard_survives_union_find_transitivity() -> None:
     a = _color("#ebebeb")
     b = _color("#ebebef")  # the bridge
     c = _color("#ebebf3")
-    assert _forbids_near_white_merge(a, c)
-    assert not _forbids_near_white_merge(a, b)
-    assert not _forbids_near_white_merge(b, c)
+    assert _is_distinct_near_white_pair(a, c)
+    assert not _is_distinct_near_white_pair(a, b)
+    assert not _is_distinct_near_white_pair(b, c)
     assert delta_e(a, b) <= DELTA_E_CLUSTER and delta_e(b, c) <= DELTA_E_CLUSTER
 
     entries = [_Entry(a, 0.0), _Entry(b, 0.0), _Entry(c, 0.0)]
@@ -772,7 +772,7 @@ def test_near_white_anti_alias_variants_still_collapse() -> None:
     # within the denoising radius) still collapse to a single text cluster.
     variants = [_color("#ffffff"), _color("#fefefe"), _color("#fdfdfd")]
     for first, second in itertools.combinations(variants, 2):
-        assert not _forbids_near_white_merge(first, second)
+        assert not _is_distinct_near_white_pair(first, second)
 
     entries = [_Entry(v, 0.0) for v in variants]
     clusters = _cluster_pool(entries, PropertyFamily.text)
@@ -808,13 +808,13 @@ def test_cta_bg_guard_predicate_distinguishes_the_disco_pair() -> None:
 
     # OKLab would merge them (within the cluster radius); CIEDE2000 says clearly distinct.
     assert delta_e(cta, surface) <= DELTA_E_CLUSTER
-    assert ciede2000(cta, surface) > _CTA_BG_GUARD_MAX_DE2000
-    assert cta.lightness <= _NEAR_BLACK_LIGHTNESS
-    assert surface.lightness <= _NEAR_BLACK_LIGHTNESS
+    assert ciede2000(cta, surface) > NEAR_BLACK_MERGE_MAX_DE2000
+    assert cta.lightness <= NEAR_BLACK_MAX_LIGHTNESS
+    assert surface.lightness <= NEAR_BLACK_MAX_LIGHTNESS
 
-    assert _forbids_cta_bg_merge(cta, surface)
-    assert _forbids_cta_bg_merge(surface, cta)  # symmetric
-    assert not _forbids_cta_bg_merge(cta, cta)  # never forbids itself
+    assert _is_distinct_near_black_pair(cta, surface)
+    assert _is_distinct_near_black_pair(surface, cta)  # symmetric
+    assert not _is_distinct_near_black_pair(cta, cta)  # never forbids itself
 
 
 def test_cta_bg_guard_is_near_black_only_not_near_white() -> None:
@@ -823,26 +823,26 @@ def test_cta_bg_guard_is_near_black_only_not_near_white() -> None:
     # for a CIEDE2000-distinct pair (measured: a symmetric variant regresses the panel).
     white = _color(_WHITE)
     primer = _color(_PRIMER_NEAR_WHITE)
-    assert ciede2000(white, primer) > _CTA_BG_GUARD_MAX_DE2000  # distinct...
-    assert not _forbids_cta_bg_merge(white, primer)  # ...yet the near-black guard ignores it
+    assert ciede2000(white, primer) > NEAR_BLACK_MERGE_MAX_DE2000  # distinct...
+    assert not _is_distinct_near_black_pair(white, primer)  # ...yet the near-black guard ignores it
 
     # A near-black and a mid-gray: not both near-black, so the guard never engages.
-    assert not _forbids_cta_bg_merge(_color(_NB_CTA_BG), _color("#9198a1"))
+    assert not _is_distinct_near_black_pair(_color(_NB_CTA_BG), _color("#9198a1"))
 
 
 def test_cta_bg_guard_allows_near_black_anti_alias_variants_to_merge() -> None:
     # The radius is a denoising radius: genuine near-black surface variants still merge.
     for a, b in (("#000000", "#010101"), ("#08090b", _NB_SURFACE)):
         first, second = _color(a), _color(b)
-        assert ciede2000(first, second) <= _CTA_BG_GUARD_MAX_DE2000
-        assert not _forbids_cta_bg_merge(first, second)
+        assert ciede2000(first, second) <= NEAR_BLACK_MERGE_MAX_DE2000
+        assert not _is_distinct_near_black_pair(first, second)
 
 
 def test_entry_has_cta_action_mass() -> None:
     cta = _Entry(_color(_NB_CTA_BG), 0.0)
-    cta.component_mix[ComponentType.cta_bg] = 1.0
+    cta.vote_mass[ComponentType.cta_bg] = 1.0
     surface = _Entry(_color(_NB_SURFACE), 0.1)
-    surface.component_mix[ComponentType.footer_bg] = 1.0
+    surface.vote_mass[ComponentType.footer_bg] = 1.0
     assert _entry_has_cta_action_mass(cta)
     assert not _entry_has_cta_action_mass(surface)
 
@@ -907,15 +907,15 @@ def test_cta_bg_guard_survives_union_find_transitivity() -> None:
     # bridge B is mergeable with each. A must not chain to C through B. The guard only blocks
     # because a member of the offending pair carries CTA/action mass.
     a, b, c = _color("#000000"), _color("#000002"), _color("#000008")
-    assert _forbids_cta_bg_merge(a, c)
-    assert not _forbids_cta_bg_merge(a, b)
-    assert not _forbids_cta_bg_merge(b, c)
+    assert _is_distinct_near_black_pair(a, c)
+    assert not _is_distinct_near_black_pair(a, b)
+    assert not _is_distinct_near_black_pair(b, c)
     assert delta_e(a, b) <= DELTA_E_CLUSTER and delta_e(b, c) <= DELTA_E_CLUSTER
 
     # Equal (zero) areas so the representative tiebreak falls to the smallest hex, isolating the
     # transitivity behaviour from area-based representative selection.
     entry_a = _Entry(a, 0.0)
-    entry_a.component_mix[ComponentType.cta_bg] = 1.0  # the CTA that must keep its identity
+    entry_a.vote_mass[ComponentType.cta_bg] = 1.0  # the CTA that must keep its identity
     entries = [entry_a, _Entry(b, 0.0), _Entry(c, 0.0)]
     clusters = _cluster_pool(entries, PropertyFamily.background)
 
