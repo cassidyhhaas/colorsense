@@ -231,6 +231,43 @@ def test_semi_transparent_bg_vote_is_alpha_scaled() -> None:
     assert purple.component_mass[ComponentType.badge] == pytest.approx(0.2, abs=1e-9)
 
 
+def test_semi_transparent_border_vote_is_alpha_scaled() -> None:
+    # Like the bg channel, the border channel scales its vote by the border's alpha: a
+    # near-transparent hairline border keeps its hex but votes in proportion to how much it
+    # actually paints. This is what keeps a swarm of faint icon-container outlines from
+    # out-voting the one opaque divider (the vercel #000000-over-#ebebeb case). The text
+    # channel, by contrast, is NOT alpha-scaled.
+    faint = _color("rgba(0, 0, 0, 0.08)")
+    opaque = _color("rgba(0, 0, 0, 1.0)")
+    assert faint.hex == "#000000" and faint.alpha == pytest.approx(0.08)
+    harvest = _harvest([ScreenshotBin(color=_color("#ffffff"), area_fraction=1.0)])
+    classified = [
+        _classified(None, {ComponentType.border: 2.0}, border=faint),
+        _classified(None, {ComponentType.border: 2.0}, border=opaque),
+    ]
+
+    clusters = build_inventory(harvest, classified)
+
+    # Both borders are the same hex, so they cluster; the faint vote contributes 2.0*0.08
+    # and the opaque one 2.0*1.0 -> 2.16 total (vs 4.0 if border were not alpha-scaled).
+    black = next(c for c in clusters if c.color.hex == "#000000")
+    assert black.component_mass[ComponentType.border] == pytest.approx(2.16, abs=1e-9)
+
+
+def test_text_vote_is_not_alpha_scaled() -> None:
+    # The text channel deliberately does NOT alpha-scale: a low-opacity glyph still reads as
+    # its text color, so it votes at full mass (only bg and border are alpha-scaled).
+    faint_text = _color("rgba(0, 0, 0, 0.3)")
+    assert faint_text.alpha == pytest.approx(0.3)
+    harvest = _harvest([ScreenshotBin(color=_color("#ffffff"), area_fraction=1.0)])
+    classified = [_classified(None, {ComponentType.page_text: 2.0}, text=faint_text)]
+
+    clusters = build_inventory(harvest, classified)
+
+    black = next(c for c in clusters if c.color.hex == "#000000")
+    assert black.component_mass[ComponentType.page_text] == pytest.approx(2.0, abs=1e-9)
+
+
 def test_unmatched_element_creates_zero_area_entry() -> None:
     # No bins at all; an element's semantics must still be preserved.
     harvest = _harvest([])

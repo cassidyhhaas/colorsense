@@ -9,7 +9,22 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
-- **The page canvas now surfaces on sites whose `<html>`/`<body>`/`<main>` are transparent.**
+- **Near-transparent hairline borders no longer out-vote the divider that structures the page.**
+  The `border` usage role could be won by a near-invisible color: on vercel.com 48 icon-container
+  outlines painted at `alpha 0.08` accumulated more border vote mass than the single opaque
+  `#ebebeb` divider, so the `border` role reported `#000000`. The background channel already
+  scaled each vote by the fill's opacity (a faint tint should vote faintly); the border channel
+  did not. It now does — a border votes in proportion to how much it actually paints — so the 48
+  `alpha 0.08` hairlines collapse to ~8% of their former weight and the opaque divider wins. The
+  text channel is deliberately left unscaled (a low-opacity glyph still reads as that text color).
+  Measured on the offline quality panel: vercel's `border` winner corrects from `#000000` to
+  `#ebebeb`, and linear's corrects the same way — its old winner was 71 white hairline borders at
+  alpha ≈ 0.06, now demoted below the opaque dark border (`#24282c`). Borders that are *genuinely*
+  semi-transparent rank on the same basis and keep winning where they should: github's `#484f58`
+  divider (alpha 0.70) and notion's `#000000` borders (alpha 0.10) are unaffected. The one cost is
+  a single recall point: stripe drops `#4834db`, a lone alpha-0.70 clickable button-outline whose
+  30%-reduced vote falls under the prune threshold — the mechanism down-weights every translucent
+  border, not only near-invisible swarms.
   Modern utility-CSS sites (e.g. shadcn, Tailwind's own site) leave the document root with
   `background: transparent` and paint the page color on a single full-viewport `<div>` instead.
   That div's only `page_bg` signal was a couple of weak class-token votes, which the geometry

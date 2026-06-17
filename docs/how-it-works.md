@@ -256,10 +256,15 @@ family** — background, text, and border — and a color never crosses between 
    mass split evenly across them, so a two-stop button donates the same total background
    evidence as a solid one. (These stops are opaque by construction — a gradient with any
    fully-transparent stop is treated as decorative and dropped back at harvest.)
-   Independently, the background channel's vote mass is scaled by each fill's *opacity*,
-   which is what matters for a translucent *solid* background: a faint tint such as
-   `bg-primary/10` votes its intended saturated color in proportion to how little it paints,
-   rather than at full strength.
+   Independently, the background **and border** channels scale their vote mass by each fill's
+   *opacity*, which is what matters for a translucent fill: a faint tint such as
+   `bg-primary/10`, or a near-transparent hairline border, votes its intended color in
+   proportion to how little it paints, rather than at full strength. (The text channel is
+   *not* opacity-scaled — a low-opacity glyph still reads as that text color.) Scaling the
+   border channel is what keeps a swarm of faint outlines from out-voting an opaque divider:
+   on vercel.com 48 `alpha 0.08` icon-container borders once out-massed the one opaque
+   `#ebebeb` divider and the `border` role reported a near-invisible `#000000`; weighting each
+   border vote by its opacity drops those 48 hairlines to ~8% and the real divider wins.
    Each fill's vote mass is added to the nearest existing entry **in that channel's family
    pool** within the channel's **join radius** — or, if nothing is close enough, a new entry
    with `area_weight = 0` is created in that pool so the semantics aren't lost.

@@ -400,17 +400,21 @@ def build_inventory(harvest: Harvest, classified: list[ClassifiedElement]) -> li
 
             # Split the element's channel mass evenly across its fill colors so a
             # multi-stop gradient is not double-counted (a purple->blue button donates
-            # the same total cta_bg mass as a solid one, half to each stop). On the bg
-            # channel the per-fill share is additionally scaled by the fill's alpha, so a
-            # faint ``bg-primary/10`` tint votes its intended (saturated) hex in
-            # proportion to how much it actually paints; text/border are not alpha-scaled.
+            # the same total cta_bg mass as a solid one, half to each stop). On the bg and
+            # border channels the per-fill share is additionally scaled by the fill's alpha,
+            # so a faint ``bg-primary/10`` tint or a near-transparent hairline border votes
+            # its intended hex in proportion to how much it actually paints; text is not
+            # alpha-scaled (a low-opacity glyph still reads as that text color). Scaling the
+            # border channel is what stops a swarm of near-transparent hairline borders (e.g.
+            # 48 ``alpha 0.08`` icon-container outlines) from out-voting the one opaque
+            # divider that actually structures the page.
             # The text/border pools apply the near-white guard so OKLab cannot collapse two
             # perceptually-distinct near-white text colors onto one entry (see
             # `_forbids_near_white_merge`); the background pool keeps the unguarded shared helper.
             guarded_family = _FAMILY_BY_CHANNEL[channel] in _GUARDED_FAMILIES
             fill_count = len(fills)
             for color in fills:
-                weight = (color.alpha if channel == "bg" else 1.0) / fill_count
+                weight = (color.alpha if channel in ("bg", "border") else 1.0) / fill_count
 
                 if guarded_family:
                     nearest_index = _nearest_text_border_entry(
