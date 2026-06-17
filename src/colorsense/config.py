@@ -94,9 +94,9 @@ _KNOWN_SUPPRESSORS = frozenset(
 class MatchType(StrEnum):
     """How a name rule's ``match`` string is compared against a token name."""
 
-    substring = "substring"
-    exact = "exact"
-    regex = "regex"
+    SUBSTRING = "substring"
+    EXACT = "exact"
+    REGEX = "regex"
 
 
 # ---------------------------------------------------------------------------
@@ -112,7 +112,7 @@ class NameRule(BaseModel):
     match: str
     role: TokenSemanticRole
     weight: float = Field(ge=0.0)
-    match_type: MatchType = MatchType.substring
+    match_type: MatchType = MatchType.SUBSTRING
 
 
 class RelationalModifier(BaseModel):
@@ -603,14 +603,14 @@ class Config(BaseModel):
 
         # 1. exact
         for rule in rules:
-            if rule.match_type is MatchType.exact and rule.match.lower() == lowered:
+            if rule.match_type is MatchType.EXACT and rule.match.lower() == lowered:
                 matched = rule
                 break
 
         # 2. regex
         if matched is None:
             for rule in rules:
-                if rule.match_type is MatchType.regex and re.search(
+                if rule.match_type is MatchType.REGEX and re.search(
                     rule.match, lowered, re.IGNORECASE
                 ):
                     matched = rule
@@ -621,7 +621,7 @@ class Config(BaseModel):
             best_len = -1
             for rule in rules:
                 if (
-                    rule.match_type is MatchType.substring
+                    rule.match_type is MatchType.SUBSTRING
                     and rule.match.lower() in lowered
                     and len(rule.match) > best_len
                 ):

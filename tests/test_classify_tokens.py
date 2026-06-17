@@ -54,9 +54,9 @@ def test_color_primary_is_cta_dominant() -> None:
     """--color-primary strips to 'primary' -> brand_primary -> cta-dominant usage intent."""
     classified = classify_tokens([_record("--color-primary")], CONFIG)
     token = _by_name(classified, "--color-primary")
-    assert token.semantic_role is TokenSemanticRole.brand_primary
-    assert token.origin is TokenOrigin.name_rule
-    assert _get_usage_role_with_largest_probability_mass(token.usage_intent) is UsageRole.cta
+    assert token.semantic_role is TokenSemanticRole.BRAND_PRIMARY
+    assert token.origin is TokenOrigin.NAME_RULE
+    assert _get_usage_role_with_largest_probability_mass(token.usage_intent) is UsageRole.CTA
 
 
 def test_gray_scale_gets_plain_neutral_usage_intent() -> None:
@@ -79,18 +79,18 @@ def test_gray_scale_gets_plain_neutral_usage_intent() -> None:
     )
     for name in ("--gray-100", "--gray-900"):
         token = _by_name(classified_tokens, name)
-        assert token.semantic_role is TokenSemanticRole.neutral
+        assert token.semantic_role is TokenSemanticRole.NEUTRAL
         # "gray" is a name rule, which outranks scale detection in the precedence.
-        assert token.origin is TokenOrigin.name_rule
+        assert token.origin is TokenOrigin.NAME_RULE
         assert set(token.usage_intent) == {
-            UsageRole.page,
-            UsageRole.surface,
-            UsageRole.banner,
-            UsageRole.text,
-            UsageRole.border,
+            UsageRole.PAGE,
+            UsageRole.SURFACE,
+            UsageRole.BANNER,
+            UsageRole.TEXT,
+            UsageRole.BORDER,
         }
         # Text carries the most neutral mass in the remapped usage intent
-        assert _get_usage_role_with_largest_probability_mass(token.usage_intent) is UsageRole.text
+        assert _get_usage_role_with_largest_probability_mass(token.usage_intent) is UsageRole.TEXT
     # Light and dark resolve to the SAME usage intent now: no measured-lightness rerouting.
     assert (
         _by_name(classified_tokens, "--gray-100").usage_intent
@@ -104,7 +104,7 @@ def test_destructive_is_status_with_empty_usage_intent() -> None:
     assert red is not None
     classified = classify_tokens([_record("--destructive", "#ef4444", resolved=red)], CONFIG)
     token = _by_name(classified, "--destructive")
-    assert token.semantic_role is TokenSemanticRole.status
+    assert token.semantic_role is TokenSemanticRole.STATUS
     assert token.usage_intent == {}
     # Still classified (not dropped): it surfaces to consumers via DesignToken.
     assert token.record.resolved == red
@@ -120,7 +120,7 @@ def test_alias_inherits_brand_accent_with_alias_origin() -> None:
     """
     # Sanity: the aliasing name self-classifies to ignore on its own.
     solo = classify_tokens([_record("--zxqw")], CONFIG)
-    assert solo[0].semantic_role is TokenSemanticRole.ignore
+    assert solo[0].semantic_role is TokenSemanticRole.IGNORE
 
     tokens = [
         _record("--accent"),
@@ -128,19 +128,19 @@ def test_alias_inherits_brand_accent_with_alias_origin() -> None:
     ]
     classified = classify_tokens(tokens, CONFIG)
     aliased = _by_name(classified, "--zxqw")
-    assert aliased.semantic_role is TokenSemanticRole.brand_accent
-    assert aliased.origin is TokenOrigin.alias
-    assert _get_usage_role_with_largest_probability_mass(aliased.usage_intent) is UsageRole.cta
+    assert aliased.semantic_role is TokenSemanticRole.BRAND_ACCENT
+    assert aliased.origin is TokenOrigin.ALIAS
+    assert _get_usage_role_with_largest_probability_mass(aliased.usage_intent) is UsageRole.CTA
     # The target itself keeps its own (name_rule) origin.
-    assert _by_name(classified, "--accent").origin is TokenOrigin.name_rule
+    assert _by_name(classified, "--accent").origin is TokenOrigin.NAME_RULE
 
 
 def test_relational_text_on_classification() -> None:
     """--on-primary routes to text_on with an empty usage intent and relational origin."""
     classified = classify_tokens([_record("--on-primary")], CONFIG)
     token = _by_name(classified, "--on-primary")
-    assert token.semantic_role is TokenSemanticRole.text_on
-    assert token.origin is TokenOrigin.relational
+    assert token.semantic_role is TokenSemanticRole.TEXT_ON
+    assert token.origin is TokenOrigin.RELATIONAL
     assert token.usage_intent == {}
 
 
@@ -148,25 +148,25 @@ def test_chromatic_scale_origin_is_scale() -> None:
     """--blue-500 -> brand_accent via the scale detector, origin ``scale``."""
     classified = classify_tokens([_record("--blue-500")], CONFIG)
     token = _by_name(classified, "--blue-500")
-    assert token.semantic_role is TokenSemanticRole.brand_accent
-    assert token.origin is TokenOrigin.scale
-    assert _get_usage_role_with_largest_probability_mass(token.usage_intent) is UsageRole.cta
+    assert token.semantic_role is TokenSemanticRole.BRAND_ACCENT
+    assert token.origin is TokenOrigin.SCALE
+    assert _get_usage_role_with_largest_probability_mass(token.usage_intent) is UsageRole.CTA
 
 
 def test_neutral_scale_family_origin_is_scale() -> None:
     """--sand-100: a neutral scale family with no name rule -> neutral via scale."""
     classified = classify_tokens([_record("--sand-100")], CONFIG)
     token = _by_name(classified, "--sand-100")
-    assert token.semantic_role is TokenSemanticRole.neutral
-    assert token.origin is TokenOrigin.scale
+    assert token.semantic_role is TokenSemanticRole.NEUTRAL
+    assert token.origin is TokenOrigin.SCALE
 
 
 def test_unmatched_token_is_ignored_with_fallback_origin() -> None:
     """A name with no rule/scale/relational match falls back to ignore."""
     classified = classify_tokens([_record("--zxqw")], CONFIG)
     token = _by_name(classified, "--zxqw")
-    assert token.semantic_role is TokenSemanticRole.ignore
-    assert token.origin is TokenOrigin.fallback
+    assert token.semantic_role is TokenSemanticRole.IGNORE
+    assert token.origin is TokenOrigin.FALLBACK
     assert token.weight == 0.0
     assert token.usage_intent == {}
 
@@ -178,10 +178,10 @@ def test_alias_cycle_does_not_hang() -> None:
         _record("--b", alias_target="--a"),
     ]
     classified = classify_tokens(tokens, CONFIG)
-    assert _by_name(classified, "--a").semantic_role is TokenSemanticRole.ignore
-    assert _by_name(classified, "--b").semantic_role is TokenSemanticRole.ignore
+    assert _by_name(classified, "--a").semantic_role is TokenSemanticRole.IGNORE
+    assert _by_name(classified, "--b").semantic_role is TokenSemanticRole.IGNORE
     # The chain dead-ended: the classification stays the fallback, origin included.
-    assert _by_name(classified, "--a").origin is TokenOrigin.fallback
+    assert _by_name(classified, "--a").origin is TokenOrigin.FALLBACK
 
 
 def test_usage_intent_table_sanity() -> None:
@@ -198,17 +198,17 @@ def test_usage_intent_table_sanity() -> None:
     # surface_base now leans the page canvas (the old surface mass split across roles).
     background_usage_intent = _by_name(classified_tokens, "--background").usage_intent
     assert set(background_usage_intent) == {
-        UsageRole.page,
-        UsageRole.surface,
-        UsageRole.banner,
+        UsageRole.PAGE,
+        UsageRole.SURFACE,
+        UsageRole.BANNER,
     }
-    assert _get_usage_role_with_largest_probability_mass(background_usage_intent) is UsageRole.page
-    assert _by_name(classified_tokens, "--text").usage_intent == {UsageRole.text: 1.0}
-    assert _by_name(classified_tokens, "--border").usage_intent == {UsageRole.border: 1.0}
+    assert _get_usage_role_with_largest_probability_mass(background_usage_intent) is UsageRole.PAGE
+    assert _by_name(classified_tokens, "--text").usage_intent == {UsageRole.TEXT: 1.0}
+    assert _by_name(classified_tokens, "--border").usage_intent == {UsageRole.BORDER: 1.0}
     # interactive (--link) splits across cta/link/action, cta-dominant.
     link_usage_intent = _by_name(classified_tokens, "--link").usage_intent
-    assert set(link_usage_intent) == {UsageRole.cta, UsageRole.link, UsageRole.action}
-    assert _get_usage_role_with_largest_probability_mass(link_usage_intent) is UsageRole.cta
+    assert set(link_usage_intent) == {UsageRole.CTA, UsageRole.LINK, UsageRole.ACTION}
+    assert _get_usage_role_with_largest_probability_mass(link_usage_intent) is UsageRole.CTA
 
 
 def test_all_nonempty_distributions_sum_to_one() -> None:

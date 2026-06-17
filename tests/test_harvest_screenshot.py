@@ -496,7 +496,7 @@ async def test_harvest_page_wraps_oversized_capture_as_render_error(
     _install_fake_session(monkeypatch, _HarvestFakePage(image=_bomb_png_bytes()))
 
     with pytest.raises(RenderError) as excinfo:
-        await harvest_page(url, Theme.light, load_default_config(), VIEWPORT)
+        await harvest_page(url, Theme.LIGHT, load_default_config(), VIEWPORT)
 
     assert excinfo.value.url == url
     assert isinstance(excinfo.value.__cause__, _OversizedCaptureError)
@@ -516,7 +516,7 @@ async def test_harvest_page_wraps_malformed_payload_as_render_error(
     )
 
     with pytest.raises(RenderError) as excinfo:
-        await harvest_page(url, Theme.light, load_default_config(), VIEWPORT)
+        await harvest_page(url, Theme.LIGHT, load_default_config(), VIEWPORT)
 
     assert excinfo.value.url == url
     assert excinfo.value.__cause__ is not None

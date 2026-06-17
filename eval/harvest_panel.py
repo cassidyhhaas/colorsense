@@ -49,7 +49,7 @@ VIEWPORT = Viewport(width=1280, height=800, device_scale_factor=1.0)
 
 async def _capture(name: str, url: str) -> None:
     config = load_default_config()
-    harvest = await harvest_page(url, Theme.light, config, VIEWPORT)
+    harvest = await harvest_page(url, Theme.LIGHT, config, VIEWPORT)
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     path = OUT_DIR / f"{name}.json.gz"
     path.write_bytes(gzip.compress(harvest.model_dump_json().encode()))

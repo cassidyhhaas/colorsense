@@ -34,7 +34,7 @@ Result & contracts
   [`UsageRole.property_family`][colorsense.UsageRole.property_family]),
   [`ComponentType`][colorsense.ComponentType],
   [`TokenSemanticRole`][colorsense.TokenSemanticRole] — the enums that key the result (e.g.
-  ``usage.mapping[UsageRole.cta]``).
+  ``usage.mapping[UsageRole.CTA]``).
 
 Inputs & policy
 ---------------

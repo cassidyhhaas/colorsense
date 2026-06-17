@@ -21,7 +21,7 @@ import asyncio
 from colorsense import Theme, UsageRole, analyze
 
 result = asyncio.run(analyze("https://example.com"))
-ctas = result.themes[Theme.light].usage.mapping[UsageRole.cta]
+ctas = result.themes[Theme.LIGHT].usage.mapping[UsageRole.CTA]
 print(ctas[0].color.hex)  # ranked entries; empty tuple when none detected
 ```
 

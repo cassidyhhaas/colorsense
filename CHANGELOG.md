@@ -7,6 +7,16 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- **BREAKING (enums): all `StrEnum` members renamed to PEP 8 `UPPER_CASE`.** Members of
+  `PropertyFamily`, `UsageRole`, `TokenSemanticRole`, `ComponentType`, `Theme`, `TokenOrigin`,
+  and `MatchType` now use screaming-snake-case identifiers (e.g. `UsageRole.cta` →
+  `UsageRole.CTA`, `Theme.light` → `Theme.LIGHT`). The string **values** are unchanged
+  (`UsageRole.CTA == "cta"`), so serialized output, JSON, the YAML config, and any code that
+  compares against the string values are unaffected — only attribute access on the enum classes
+  needs updating. Part of the PEP 8/PEP 257 cleanup ahead of the major version bump.
+
 ### Fixed
 
 - **Dark CTA buttons are no longer buried in the near-black page/footer color.** A small dark
@@ -225,7 +235,7 @@ regenerated.
   first-class `PropertyFamily` (`background`/`text`/`border`) rollup and a code-level
   `family_of(role)` mapping. The worst symptom this fixes: link text and CTA button
   backgrounds no longer share one slot, so "what color are the CTA buttons?" is answerable
-  directly (`usage.mapping[UsageRole.cta]`). The role taxonomy and the colored-CTA-retention
+  directly (`usage.mapping[UsageRole.CTA]`). The role taxonomy and the colored-CTA-retention
   behavior were validated against 12 real sites.
 
   Each `ThemePalette` now carries:

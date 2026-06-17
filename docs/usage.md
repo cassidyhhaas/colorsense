@@ -34,7 +34,7 @@ directly — no threadpool hop required.
 
 By default `analyze` renders **light mode only** — most sites have no dark mode, and a
 second theme roughly doubles the render cost. Pass `themes=LIGHT_AND_DARK` (equivalently
-`themes=(Theme.light, Theme.dark)`) to also analyze dark mode. Sites that ignore
+`themes=(Theme.LIGHT, Theme.DARK)`) to also analyze dark mode. Sites that ignore
 `prefers-color-scheme` (near-identical light/dark renders) collapse to a single reported
 theme; `result.metadata` records when that happened.
 
@@ -167,7 +167,7 @@ usage in some other role), and `components` is never empty. Each `UsageEntry` ca
 ```python
 from colorsense import UsageRole
 
-for entry in result.themes[theme].usage.mapping[UsageRole.cta]:
+for entry in result.themes[theme].usage.mapping[UsageRole.CTA]:
     print(entry.color.hex, entry.probability, entry.components)
 ```
 

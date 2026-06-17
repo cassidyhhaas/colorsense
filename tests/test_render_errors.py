@@ -91,7 +91,7 @@ async def test_render_error_raised_on_navigation_failure(monkeypatch: pytest.Mon
 
     config = load_default_config()
     with pytest.raises(RenderError) as excinfo:
-        await harvest_page(url, Theme.light, config, VIEWPORT)
+        await harvest_page(url, Theme.LIGHT, config, VIEWPORT)
 
     err = excinfo.value
     assert isinstance(err, RenderError)  # catchable as the typed public class
@@ -141,7 +141,7 @@ class _MotionFakePage:
 
 
 def _session_with_page(page: _MotionFakePage) -> RenderSession:
-    session = RenderSession(Theme.light, VIEWPORT)
+    session = RenderSession(Theme.LIGHT, VIEWPORT)
     session._page = page  # type: ignore[assignment]
     return session
 
@@ -212,7 +212,7 @@ class _Playwright:
 
 def _session_with_fakes() -> tuple[RenderSession, _Closer, _Closer, _Playwright]:
     """A RenderSession with its Playwright handles replaced by recording stubs."""
-    session = RenderSession(Theme.light, VIEWPORT)
+    session = RenderSession(Theme.LIGHT, VIEWPORT)
     context, browser, pw = _Closer(), _Closer(), _Playwright()
     session._context = context  # type: ignore[assignment]
     session._browser = browser  # type: ignore[assignment]
@@ -333,7 +333,7 @@ async def test_policy_passes_configured_user_agent_to_harvester() -> None:
 
     policy = PolitenessPolicy(user_agent=CUSTOM_UA, harvester=harvester, robots_loader=no_robots)
     config = load_default_config()
-    await policy.fetch("https://example.com/page", Theme.light, config, VIEWPORT)
+    await policy.fetch("https://example.com/page", Theme.LIGHT, config, VIEWPORT)
     assert harvester.user_agents == [CUSTOM_UA]
 
 
@@ -354,11 +354,11 @@ async def test_policy_passes_request_filter_to_harvester() -> None:
     policy = PolitenessPolicy(
         harvester=harvester, robots_loader=no_robots, request_filter=only_example
     )
-    await policy.fetch("https://example.com/page", Theme.light, config, VIEWPORT)
+    await policy.fetch("https://example.com/page", Theme.LIGHT, config, VIEWPORT)
     assert harvester.request_filters == [only_example]
 
     default_policy = PolitenessPolicy(harvester=harvester, robots_loader=no_robots)
-    await default_policy.fetch("https://example.com/page", Theme.light, config, VIEWPORT)
+    await default_policy.fetch("https://example.com/page", Theme.LIGHT, config, VIEWPORT)
     assert harvester.request_filters == [only_example, None]
 
 
@@ -565,7 +565,7 @@ async def test_render_session_forwards_user_agent_to_new_context(
 ) -> None:
     browser = _patch_playwright(monkeypatch)
 
-    async with RenderSession(Theme.light, VIEWPORT, user_agent=CUSTOM_UA):
+    async with RenderSession(Theme.LIGHT, VIEWPORT, user_agent=CUSTOM_UA):
         pass
 
     assert len(browser.context_kwargs) == 1
@@ -579,7 +579,7 @@ async def test_render_session_default_keeps_stock_user_agent(
     # default (the stock UA) — never an empty string or a stale override.
     browser = _patch_playwright(monkeypatch)
 
-    async with RenderSession(Theme.light, VIEWPORT):
+    async with RenderSession(Theme.LIGHT, VIEWPORT):
         pass
 
     assert browser.context_kwargs[0]["user_agent"] is None
@@ -595,9 +595,9 @@ async def test_render_session_always_blocks_service_workers(
     # creation — unconditionally, filter or no filter (SW are irrelevant to harvesting).
     browser = _patch_playwright(monkeypatch)
 
-    async with RenderSession(Theme.light, VIEWPORT):
+    async with RenderSession(Theme.LIGHT, VIEWPORT):
         pass
-    async with RenderSession(Theme.light, VIEWPORT, request_filter=lambda _url: True):
+    async with RenderSession(Theme.LIGHT, VIEWPORT, request_filter=lambda _url: True):
         pass
 
     assert [kwargs["service_workers"] for kwargs in browser.context_kwargs] == ["block", "block"]
@@ -611,7 +611,7 @@ async def test_render_session_installs_ws_refusal_route_with_filter(
     # HTTP route never sees).
     browser = _patch_playwright(monkeypatch)
 
-    async with RenderSession(Theme.light, VIEWPORT, request_filter=lambda _url: True):
+    async with RenderSession(Theme.LIGHT, VIEWPORT, request_filter=lambda _url: True):
         pass
 
     (context,) = browser.contexts
@@ -625,7 +625,7 @@ async def test_render_session_installs_no_routes_without_filter(
     # The default (no filter) path stays interception-free: zero routes of either kind.
     browser = _patch_playwright(monkeypatch)
 
-    async with RenderSession(Theme.light, VIEWPORT):
+    async with RenderSession(Theme.LIGHT, VIEWPORT):
         pass
 
     (context,) = browser.contexts

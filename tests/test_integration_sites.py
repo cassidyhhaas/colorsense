@@ -241,20 +241,20 @@ async def test_design_system_site(fixtures_dir: Path) -> None:
     assert {str(t) for t in result.themes} == {"light", "dark"}
     assert len(result.metadata.themes_analyzed) == 2
 
-    light = result.themes[Theme.light]
+    light = result.themes[Theme.LIGHT]
     assert light.tokens is not None
 
     # Tokens classify by name, with the `--color-` namespace stripped first.
     semantic = {t.name: t.semantic_role for t in light.tokens}
-    assert semantic["--color-primary"] is TokenSemanticRole.brand_primary
-    assert semantic["--color-secondary"] is TokenSemanticRole.brand_secondary
-    assert semantic["--color-accent"] is TokenSemanticRole.brand_accent
-    assert semantic["--color-on-primary"] is TokenSemanticRole.text_on
-    assert semantic["--color-bg"] is TokenSemanticRole.surface_base
-    assert semantic["--color-border"] is TokenSemanticRole.border
+    assert semantic["--color-primary"] is TokenSemanticRole.BRAND_PRIMARY
+    assert semantic["--color-secondary"] is TokenSemanticRole.BRAND_SECONDARY
+    assert semantic["--color-accent"] is TokenSemanticRole.BRAND_ACCENT
+    assert semantic["--color-on-primary"] is TokenSemanticRole.TEXT_ON
+    assert semantic["--color-bg"] is TokenSemanticRole.SURFACE_BASE
+    assert semantic["--color-border"] is TokenSemanticRole.BORDER
 
     # Status tokens are kept out of the palette views but still surface as DesignTokens.
-    assert semantic["--color-success"] is TokenSemanticRole.status
+    assert semantic["--color-success"] is TokenSemanticRole.STATUS
     status_hexes = {t.color.hex for t in light.tokens if t.semantic_role == "status"}
     assert status_hexes == {"#16a34a", "#dc2626"}
     all_usage_hexes = {e.color.hex for entries in light.usage.mapping.values() for e in entries}
@@ -264,7 +264,7 @@ async def test_design_system_site(fixtures_dir: Path) -> None:
     # Dominance (perceptual, platform-robust): a declared brand color leads the cta
     # usage role.
     brand_hexes = ("#2563eb", "#7c3aed", "#f59e0b")
-    cta = light.usage.mapping[UsageRole.cta]
+    cta = light.usage.mapping[UsageRole.CTA]
     assert cta, "expected cta usage entries"
     assert any(_color_near([cta[0].color], h) for h in brand_hexes)
 
@@ -341,34 +341,34 @@ async def test_usage_redesign_captures_neutral_layered_design(fixtures_dir: Path
     usage = palette.usage.mapping
 
     # PAGE: the white page background dominates the base-canvas role.
-    page = usage[UsageRole.page]
+    page = usage[UsageRole.PAGE]
     assert page, "expected page entries"
     assert _color_near([page[0].color], "#ffffff")
     # The layered light-gray surfaces (header/nav/cards, #f6f8fa) land in the
     # background-family roles (banner for header/nav, surface for cards).
     background_colors = [
         e.color
-        for role in (UsageRole.page, UsageRole.surface, UsageRole.banner)
+        for role in (UsageRole.PAGE, UsageRole.SURFACE, UsageRole.BANNER)
         for e in usage[role]
     ]
     assert _color_near(background_colors, "#f6f8fa")
 
     # TEXT: the gray text scale survives — at least two distinct grays (dark body
     # #1f2328 and muted #59636e), a structure a coarse aesthetic split would lose entirely.
-    text_colors = [e.color for e in usage[UsageRole.text]]
+    text_colors = [e.color for e in usage[UsageRole.TEXT]]
     assert len(text_colors) >= 2
     assert _color_near(text_colors, "#1f2328")
     assert _color_near(text_colors, "#59636e")
 
     # LINK vs CTA — the redesign's payoff: the blue links and the green CTA buttons now
     # live in distinct roles instead of one fused "interactive" slot.
-    link_colors = [e.color for e in usage[UsageRole.link]]
+    link_colors = [e.color for e in usage[UsageRole.LINK]]
     assert _color_near(link_colors, "#0969da")
-    cta_colors = [e.color for e in usage[UsageRole.cta]]
+    cta_colors = [e.color for e in usage[UsageRole.CTA]]
     assert _color_near(cta_colors, "#1f883d")
 
     # BORDER: the gray border/divider color.
-    border_colors = [e.color for e in usage[UsageRole.border]]
+    border_colors = [e.color for e in usage[UsageRole.BORDER]]
     assert _color_near(border_colors, "#d1d9e0")
 
     _check_golden("repo_site", _digest(result))
@@ -412,16 +412,16 @@ async def test_live_probe_regressions_encoded_offline(fixtures_dir: Path) -> Non
     # BACKGROUNDS: the white page dominates the page role; the dark code-block surface is
     # present somewhere in the background-family roles (page/surface/banner).
     background_colors = [
-        e.color for r in (UsageRole.page, UsageRole.surface, UsageRole.banner) for e in usage[r]
+        e.color for r in (UsageRole.PAGE, UsageRole.SURFACE, UsageRole.BANNER) for e in usage[r]
     ]
-    assert _color_near([usage[UsageRole.page][0].color], "#ffffff")
+    assert _color_near([usage[UsageRole.PAGE][0].color], "#ffffff")
     assert _color_near(background_colors, "#0d1117")
 
     # TEXT (text_presence + tight text-channel join radius): the near-black body
     # text forms its OWN entry — it must not have merged into the adjacent dark
     # code-block bin (0.078 deltaEOK away, inside the old 0.10 bg radius) — and the
     # plain-span muted gray is measured as a second distinct gray.
-    text_colors = [e.color for e in usage[UsageRole.text]]
+    text_colors = [e.color for e in usage[UsageRole.TEXT]]
     body_text = parse_css_color("#1f2328")
     assert body_text is not None
     # (The tight tolerance IS the no-merge assertion: had the text merged, the
@@ -434,7 +434,7 @@ async def test_live_probe_regressions_encoded_offline(fixtures_dir: Path) -> Non
 
     # BORDER (border_presence, NO inputs anywhere): measured, component-backed, and
     # led by the real card/divider border — not by declared exotic border tokens.
-    border = usage[UsageRole.border]
+    border = usage[UsageRole.BORDER]
     assert border, "expected border entries"
     assert border[0].components, "top border entry must carry component evidence"
     assert _color_near([border[0].color], "#d1d9e0")
@@ -451,9 +451,9 @@ async def test_live_probe_regressions_encoded_offline(fixtures_dir: Path) -> Non
     # LINK vs CTA: the five blue links populate the link role; the single green
     # Primer-classed CTA survives in its OWN dedicated cta role (it no longer has to
     # outvote ~200 link votes for a shared interactive slot).
-    link_colors = [e.color for e in usage[UsageRole.link]]
+    link_colors = [e.color for e in usage[UsageRole.LINK]]
     assert _color_near(link_colors, "#0969da")
-    cta_colors = [e.color for e in usage[UsageRole.cta]]
+    cta_colors = [e.color for e in usage[UsageRole.CTA]]
     assert _color_near(cta_colors, "#1f883d")
 
     _check_golden("repo_probe_site", _digest(result))

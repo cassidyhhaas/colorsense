@@ -30,7 +30,7 @@ def config() -> Config:
     return load_default_config()
 
 
-async def _harvest(fixture: Path, config: Config, theme: Theme = Theme.light) -> Harvest:
+async def _harvest(fixture: Path, config: Config, theme: Theme = Theme.LIGHT) -> Harvest:
     return await harvest_page(fixture.as_uri(), theme, config, VIEWPORT)
 
 
@@ -143,11 +143,11 @@ async def test_min_corner_radius_harvested_and_pill_chips_classify_as_badge(
     by_element = {id(c.element): c for c in classified}
     for chip in chips:
         dist = by_element[id(chip)].component_dist
-        assert max(dist, key=lambda comp: dist[comp]) is ComponentType.badge
-        assert ComponentType.card_bg not in dist
+        assert max(dist, key=lambda comp: dist[comp]) is ComponentType.BADGE
+        assert ComponentType.CARD_BG not in dist
 
     tab_dist = by_element[id(tab)].component_dist
-    assert ComponentType.badge not in tab_dist
+    assert ComponentType.BADGE not in tab_dist
 
 
 async def test_gradient_cta_stops_harvested_and_vote_both_brand_colors(
@@ -191,8 +191,8 @@ async def test_gradient_cta_stops_harvested_and_vote_both_brand_colors(
     clusters = build_inventory(harvest, classified)
     by_hex = {c.color.hex: c for c in clusters}
     # Both brand stops carry the CTA's interactive (cta_bg) mass.
-    assert ComponentType.cta_bg in by_hex["#7c3bed"].component_mass
-    assert ComponentType.cta_bg in by_hex["#3c83f6"].component_mass
+    assert ComponentType.CTA_BG in by_hex["#7c3bed"].component_mass
+    assert ComponentType.CTA_BG in by_hex["#3c83f6"].component_mass
 
 
 async def test_has_text_set_for_direct_text_only(fixtures_dir: Path, config: Config) -> None:
@@ -352,7 +352,7 @@ async def test_request_filter_blocks_subresource_but_page_still_harvests(
     def block_asset(url: str) -> bool:
         return not url.endswith("subresource_asset.css")
 
-    async with RenderSession(Theme.light, VIEWPORT, request_filter=block_asset) as session:
+    async with RenderSession(Theme.LIGHT, VIEWPORT, request_filter=block_asset) as session:
         await session.goto(page_url)
         bg = await session.page.evaluate("() => getComputedStyle(document.body).backgroundColor")
     assert bg == "rgb(255, 255, 255)"  # the blocked stylesheet never painted the body red
@@ -362,7 +362,7 @@ async def test_no_request_filter_lets_subresource_load(fixtures_dir: Path) -> No
     # Control for the blocking test above: without a filter the stylesheet loads and paints
     # the body red — proving the blocked-case assertion is meaningful.
     page_url = (fixtures_dir / "subresource.html").as_uri()
-    async with RenderSession(Theme.light, VIEWPORT) as session:
+    async with RenderSession(Theme.LIGHT, VIEWPORT) as session:
         await session.goto(page_url)
         bg = await session.page.evaluate("() => getComputedStyle(document.body).backgroundColor")
     assert bg == "rgb(255, 0, 0)"
@@ -380,7 +380,7 @@ async def test_websocket_refused_when_request_filter_installed(fixtures_dir: Pat
     def allow_all_http(_url: str) -> bool:
         return True
 
-    async with RenderSession(Theme.light, VIEWPORT, request_filter=allow_all_http) as session:
+    async with RenderSession(Theme.LIGHT, VIEWPORT, request_filter=allow_all_http) as session:
         await session.goto(page_url)
         await session.page.wait_for_function("() => window.__wsDone", timeout=5000)
         events = await session.page.evaluate("() => window.__wsEvents")
@@ -398,7 +398,7 @@ async def test_websocket_fixture_harvests_under_request_filter(
     # completes normally with a request_filter installed (the dead socket is harmless).
     harvest = await harvest_page(
         (fixtures_dir / "websocket.html").as_uri(),
-        Theme.light,
+        Theme.LIGHT,
         config,
         VIEWPORT,
         request_filter=lambda _url: True,
@@ -407,7 +407,7 @@ async def test_websocket_fixture_harvests_under_request_filter(
 
 
 async def test_render_session_exposes_page_and_consent(fixtures_dir: Path) -> None:
-    async with RenderSession(Theme.light, VIEWPORT) as session:
+    async with RenderSession(Theme.LIGHT, VIEWPORT) as session:
         await session.goto((fixtures_dir / "consent.html").as_uri())
         # The page is exposed for module JS.
         title = await session.page.title()
@@ -417,7 +417,7 @@ async def test_render_session_exposes_page_and_consent(fixtures_dir: Path) -> No
 
 
 async def test_render_session_exposes_media_rects(fixtures_dir: Path) -> None:
-    async with RenderSession(Theme.light, VIEWPORT) as session:
+    async with RenderSession(Theme.LIGHT, VIEWPORT) as session:
         await session.goto((fixtures_dir / "media_mask.html").as_uri())
         # The url()-background photo (and only it) was detected as maskable raster media;
         # the gradient and inline <svg> bands must NOT contribute rects.
@@ -450,7 +450,7 @@ async def test_duplicate_id_selectors_resolve_uniquely(fixtures_dir: Path) -> No
     from colorsense.harvest.dom import harvest_elements
 
     fixture = fixtures_dir / "harvest_hardening.html"
-    async with RenderSession(Theme.light, VIEWPORT) as session:
+    async with RenderSession(Theme.LIGHT, VIEWPORT) as session:
         await session.goto(fixture.as_uri())
         _elements, selectors = await harvest_elements(session.page, [])
         assert "#dup" not in selectors
@@ -471,7 +471,7 @@ async def test_element_payload_cap_keeps_largest_area(fixtures_dir: Path) -> Non
     from colorsense.harvest.dom import _COLLECT_DOM_JS
 
     fixture = fixtures_dir / "harvest_hardening.html"
-    async with RenderSession(Theme.light, VIEWPORT) as session:
+    async with RenderSession(Theme.LIGHT, VIEWPORT) as session:
         await session.goto(fixture.as_uri())
         uncapped = await session.page.evaluate(_COLLECT_DOM_JS, 10_000)
         assert len(uncapped) > 3
@@ -495,7 +495,7 @@ async def test_token_payload_cap_stops_collection(fixtures_dir: Path) -> None:
     from colorsense.harvest.tokens import _COLLECT_TOKENS_JS
 
     fixture = fixtures_dir / "harvest_hardening.html"
-    async with RenderSession(Theme.light, VIEWPORT) as session:
+    async with RenderSession(Theme.LIGHT, VIEWPORT) as session:
         await session.goto(fixture.as_uri())
         uncapped = await session.page.evaluate(_COLLECT_TOKENS_JS, 5_000)
         assert len(uncapped) >= 3  # two declared + one adopted

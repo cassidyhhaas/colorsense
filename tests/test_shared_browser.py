@@ -212,7 +212,7 @@ async def test_render_session_external_browser_not_closed(
     stack = _patch_playwright(monkeypatch)
     external = _FakeBrowser()
 
-    async with RenderSession(Theme.light, VIEWPORT, browser=external):  # type: ignore[arg-type]
+    async with RenderSession(Theme.LIGHT, VIEWPORT, browser=external):  # type: ignore[arg-type]
         pass
 
     assert stack.starts == 0  # no dedicated Playwright/Chromium was launched
@@ -233,10 +233,10 @@ async def test_two_sessions_share_browser_with_isolated_contexts(
     def allow_all(_url: str) -> bool:
         return True
 
-    async with RenderSession(Theme.light, VIEWPORT, browser=external):  # type: ignore[arg-type]
+    async with RenderSession(Theme.LIGHT, VIEWPORT, browser=external):  # type: ignore[arg-type]
         pass
     async with RenderSession(
-        Theme.dark,
+        Theme.DARK,
         VIEWPORT,
         request_filter=allow_all,
         browser=external,  # type: ignore[arg-type]
@@ -282,7 +282,7 @@ async def test_shared_browser_default_args_unchanged(monkeypatch: pytest.MonkeyP
 async def test_render_session_args_reach_owned_launch(monkeypatch: pytest.MonkeyPatch) -> None:
     # The dedicated-launch path (no external browser) honors browser_args too.
     stack = _patch_playwright(monkeypatch)
-    async with RenderSession(Theme.light, VIEWPORT, browser_args=(V8_CAP,)):
+    async with RenderSession(Theme.LIGHT, VIEWPORT, browser_args=(V8_CAP,)):
         pass
     (kwargs,) = stack.launch_kwargs
     assert kwargs == {"headless": True, "args": [V8_CAP]}
@@ -296,7 +296,7 @@ async def test_render_session_rejects_args_with_external_browser(
     stack = _patch_playwright(monkeypatch)
     external = _FakeBrowser()
     with pytest.raises(ValueError, match="browser_args"):
-        RenderSession(Theme.light, VIEWPORT, browser=external, browser_args=(V8_CAP,))  # type: ignore[arg-type]
+        RenderSession(Theme.LIGHT, VIEWPORT, browser=external, browser_args=(V8_CAP,))  # type: ignore[arg-type]
     assert stack.starts == 0
 
 
@@ -309,7 +309,7 @@ async def test_harvest_page_rejects_args_with_shared_browser(
     async with SharedBrowser() as shared:
         with pytest.raises(ValueError, match="browser_args"):
             await harvest_page(
-                URL, Theme.light, config, VIEWPORT, browser=shared, browser_args=(V8_CAP,)
+                URL, Theme.LIGHT, config, VIEWPORT, browser=shared, browser_args=(V8_CAP,)
             )
     assert (stack.starts, stack.launches) == (0, 0)
 
@@ -324,7 +324,7 @@ async def test_invalid_browser_args_raise_type_error(
     with pytest.raises(TypeError, match="browser_args"):
         SharedBrowser(browser_args=bad)  # type: ignore[arg-type]
     with pytest.raises(TypeError, match="browser_args"):
-        RenderSession(Theme.light, VIEWPORT, browser_args=bad)  # type: ignore[arg-type]
+        RenderSession(Theme.LIGHT, VIEWPORT, browser_args=bad)  # type: ignore[arg-type]
     assert stack.starts == 0
 
 
@@ -364,8 +364,8 @@ async def test_fetch_forwards_browser_handle_to_harvester(
     policy = PolitenessPolicy(harvester=harvester, robots_loader=_no_robots)
 
     async with SharedBrowser() as shared:
-        await policy.fetch("https://example.test/a", Theme.light, config, VIEWPORT, browser=shared)
-        await policy.fetch("https://example.test/b", Theme.light, config, VIEWPORT)
+        await policy.fetch("https://example.test/a", Theme.LIGHT, config, VIEWPORT, browser=shared)
+        await policy.fetch("https://example.test/b", Theme.LIGHT, config, VIEWPORT)
 
     assert harvester.browsers == [shared, None]  # forwarded when given, None otherwise
     assert stack.starts == 0  # the policy never touched the handle
@@ -380,9 +380,9 @@ async def test_cache_hit_skips_render_and_never_launches(
     harvester = _BrowserRecordingHarvester()
     policy = PolitenessPolicy(harvester=harvester, robots_loader=_no_robots)
 
-    await policy.fetch(URL, Theme.light, config, VIEWPORT)
+    await policy.fetch(URL, Theme.LIGHT, config, VIEWPORT)
     async with SharedBrowser() as shared:
-        hit = await policy.fetch(URL, Theme.light, config, VIEWPORT, browser=shared)
+        hit = await policy.fetch(URL, Theme.LIGHT, config, VIEWPORT, browser=shared)
 
     assert hit.url == URL
     assert harvester.browsers == [None]  # one render total; the hit never reached the seam
@@ -524,15 +524,15 @@ async def test_harvest_page_renders_both_themes_in_one_browser(fixtures_dir: Pat
     url = (fixtures_dir / "tokens.html").as_uri()
 
     async with SharedBrowser() as shared:
-        light = await harvest_page(url, Theme.light, config, VIEWPORT, browser=shared)
-        dark = await harvest_page(url, Theme.dark, config, VIEWPORT, browser=shared)
+        light = await harvest_page(url, Theme.LIGHT, config, VIEWPORT, browser=shared)
+        dark = await harvest_page(url, Theme.DARK, config, VIEWPORT, browser=shared)
         browser = await shared.get()  # the same underlying browser both renders used
         assert browser.is_connected()  # renders finished, the shared browser is still up
         assert browser.contexts == []  # each session closed its own context behind it
 
     assert not browser.is_connected()  # teardown closed it
-    assert light.theme is Theme.light
-    assert dark.theme is Theme.dark
+    assert light.theme is Theme.LIGHT
+    assert dark.theme is Theme.DARK
     # tokens.html declares CSS custom properties: both context renders genuinely harvested.
     assert light.tokens and dark.tokens
 
@@ -558,7 +558,7 @@ async def test_analyze_end_to_end_with_shared_browser(fixtures_dir: Path) -> Non
     # two-theme fixture must still yield both themes with full palettes.
     url = (fixtures_dir / "tokens.html").as_uri()
     result = await analyze(url, viewport=VIEWPORT, themes=LIGHT_AND_DARK, politeness=file_policy())
-    assert set(result.themes) == {Theme.light, Theme.dark}
+    assert set(result.themes) == {Theme.LIGHT, Theme.DARK}
     assert all(palette.colors for palette in result.themes.values())
 
 
@@ -609,7 +609,7 @@ async def test_render_session_enter_failure_stops_started_playwright(
     monkeypatch.setattr(render_mod, "async_playwright", stack)
 
     with pytest.raises(RuntimeError, match="Executable doesn't exist"):
-        await RenderSession(Theme.light, VIEWPORT).__aenter__()
+        await RenderSession(Theme.LIGHT, VIEWPORT).__aenter__()
 
     assert stack.starts == 1
     assert stack.stops == 1  # the started driver is stopped, not leaked
@@ -624,7 +624,7 @@ async def test_render_session_enter_failure_after_launch_closes_browser(
     monkeypatch.setattr(render_mod, "async_playwright", stack)
 
     with pytest.raises(RuntimeError, match="new_context failed"):
-        await RenderSession(Theme.light, VIEWPORT).__aenter__()
+        await RenderSession(Theme.LIGHT, VIEWPORT).__aenter__()
 
     assert stack.browsers[0].closes == 1
     assert stack.stops == 1
@@ -638,7 +638,7 @@ async def test_render_session_enter_failure_never_closes_external_browser(
     browser = _FailingContextBrowser()
 
     with pytest.raises(RuntimeError, match="new_context failed"):
-        await RenderSession(Theme.light, VIEWPORT, browser=browser).__aenter__()  # type: ignore[arg-type]
+        await RenderSession(Theme.LIGHT, VIEWPORT, browser=browser).__aenter__()  # type: ignore[arg-type]
 
     assert browser.closes == 0
 

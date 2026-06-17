@@ -96,7 +96,7 @@ UNDECLARED_MIN_PROB: float = 0.15
 #: ``relational`` tokens carry no usage intent (channel-routed) and report through the
 #: dedicated `_aggregate_relational` pass, attributed to ``text``.
 HIGH_INTENT_ORIGINS: frozenset[TokenOrigin] = frozenset(
-    {TokenOrigin.relational, TokenOrigin.name_rule}
+    {TokenOrigin.RELATIONAL, TokenOrigin.NAME_RULE}
 )
 
 
@@ -181,7 +181,7 @@ def _aggregate_relational(tokens: list[ClassifiedToken]) -> list[_IntentGroup]:
         [
             t
             for t in tokens
-            if t.origin is TokenOrigin.relational
+            if t.origin is TokenOrigin.RELATIONAL
             and t.record.resolved is not None
             and not t.usage_intent
         ]
@@ -382,7 +382,7 @@ def _build_divergence(
             continue
         items.append(
             DivergenceItem(
-                role=UsageRole.text,
+                role=UsageRole.TEXT,
                 color=group.color,
                 note=f"declared '{group.representative_name}' unused in render",
             )

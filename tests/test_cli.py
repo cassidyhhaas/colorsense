@@ -56,7 +56,7 @@ def fake_result(url: str, *, include_tokens: bool = False) -> AnalysisResult:
     blue = Color(hex="#336699", lightness=0.5, chroma=0.1, hue=250.0)
     usage = UsagePalette(
         mapping={
-            UsageRole.page: (UsageEntry(color=blue, probability=0.9, area=0.6),),
+            UsageRole.PAGE: (UsageEntry(color=blue, probability=0.9, area=0.6),),
         }
     )
     colors = (
@@ -66,8 +66,8 @@ def fake_result(url: str, *, include_tokens: bool = False) -> AnalysisResult:
             area=0.6,
             usages=(
                 Usage(
-                    role=UsageRole.page,
-                    property_family=PropertyFamily.background,
+                    role=UsageRole.PAGE,
+                    property_family=PropertyFamily.BACKGROUND,
                     weight=1.0,
                     components={},
                 ),
@@ -75,7 +75,7 @@ def fake_result(url: str, *, include_tokens: bool = False) -> AnalysisResult:
         ),
     )
     tokens = (
-        (DesignToken(name="--brand", color=blue, semantic_role=TokenSemanticRole.brand_primary),)
+        (DesignToken(name="--brand", color=blue, semantic_role=TokenSemanticRole.BRAND_PRIMARY),)
         if include_tokens
         else None
     )
@@ -83,8 +83,8 @@ def fake_result(url: str, *, include_tokens: bool = False) -> AnalysisResult:
         url=url,
         viewport=VIEWPORT,
         themes={
-            Theme.light: ThemePalette(
-                theme=Theme.light,
+            Theme.LIGHT: ThemePalette(
+                theme=Theme.LIGHT,
                 colors=colors,
                 usage=usage,
                 tokens=tokens,

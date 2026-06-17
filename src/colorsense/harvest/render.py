@@ -82,8 +82,8 @@ async def evaluate_request_filter(request_filter: RequestFilter, url: str) -> bo
 
 # Map our Theme to Playwright's color_scheme literal.
 _COLOR_SCHEME: dict[Theme, Literal["light", "dark"]] = {
-    Theme.light: "light",
-    Theme.dark: "dark",
+    Theme.LIGHT: "light",
+    Theme.DARK: "dark",
 }
 
 # Inject CSS killing transitions/animations so computed colors are deterministic.
@@ -315,8 +315,8 @@ class SharedBrowser:
 
         async with SharedBrowser() as shared:
             # each render opens its own context inside the one browser
-            await harvest_page(url, Theme.light, config, viewport, browser=shared)
-            await harvest_page(url, Theme.dark, config, viewport, browser=shared)
+            await harvest_page(url, Theme.LIGHT, config, viewport, browser=shared)
+            await harvest_page(url, Theme.DARK, config, viewport, browser=shared)
 
     Parameters
     ----------

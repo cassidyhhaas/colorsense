@@ -35,9 +35,9 @@ def test_distribution_rows_normalized_and_channels_recognized(config: Config) ->
     rows = config.token_vocabulary.semantic_role_to_usage_intent_or_channel
 
     channel_roles = {
-        TokenSemanticRole.text_on,
-        TokenSemanticRole.status,
-        TokenSemanticRole.ignore,
+        TokenSemanticRole.TEXT_ON,
+        TokenSemanticRole.STATUS,
+        TokenSemanticRole.IGNORE,
     }
     for role, row in rows.items():
         if role in channel_roles:
@@ -53,7 +53,7 @@ def test_match_name_rule_applies_known_system_boost(config: Config) -> None:
     result = config.match_name_rule("--bs-primary")
     assert result is not None
     role, weight = result
-    assert role is TokenSemanticRole.brand_primary
+    assert role is TokenSemanticRole.BRAND_PRIMARY
     assert weight == pytest.approx(5.0 * 1.25)
 
 
@@ -61,7 +61,7 @@ def test_match_name_rule_no_boost_without_system_prefix(config: Config) -> None:
     result = config.match_name_rule("--primary")
     assert result is not None
     role, weight = result
-    assert role is TokenSemanticRole.brand_primary
+    assert role is TokenSemanticRole.BRAND_PRIMARY
     assert weight == pytest.approx(5.0)
 
 

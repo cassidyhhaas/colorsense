@@ -715,14 +715,14 @@ def classify_components(
         # families at once (the generic `clickable` rule AND the `area<=small_area & clickable`
         # geometry rule are both link sources on a small CTA label); moving the accumulated
         # total is the only way to fully re-route it. The move preserves total text-family
-        # mass (`cta_text.property_family == link.property_family == PropertyFamily.text`), so
+        # mass (`cta_text.property_family == link.property_family == PropertyFamily.TEXT`), so
         # the per-family recombination weights are unchanged and the background family never
         # gains mass — the hard S27 lesson that DELETING link regresses cta/surface noise.
         if _is_cta_label(element, page_canvas, relabel_config):
-            link_mass = vote_totals.pop(ComponentType.link, 0.0)
+            link_mass = vote_totals.pop(ComponentType.LINK, 0.0)
             if link_mass > 0.0:
-                vote_totals[ComponentType.cta_text] = (
-                    vote_totals.get(ComponentType.cta_text, 0.0) + link_mass
+                vote_totals[ComponentType.CTA_TEXT] = (
+                    vote_totals.get(ComponentType.CTA_TEXT, 0.0) + link_mass
                 )
 
         # 8. Page-canvas fallback. On a transparent-canonical-canvas site, the single
@@ -738,8 +738,8 @@ def classify_components(
                 except ValueError:
                     continue
                 vote_totals.pop(suppressed, None)
-            vote_totals[ComponentType.page_bg] = (
-                vote_totals.get(ComponentType.page_bg, 0.0) + canvas_fallback.page_bg_vote
+            vote_totals[ComponentType.PAGE_BG] = (
+                vote_totals.get(ComponentType.PAGE_BG, 0.0) + canvas_fallback.page_bg_vote
             )
 
         # Suppressors, then softmax/prune/renormalize.
