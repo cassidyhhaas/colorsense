@@ -518,7 +518,7 @@ class Usage(BaseModel):
 
 
 class ColorUsage(BaseModel):
-    """A measured color and where it is used — the color-keyed canonical inventory atom.
+    """A measured color and where it is used — one entry of the color-keyed canonical inventory.
 
     ``prominence`` is the overall ranking signal blending area-truth (primary) with routed
     vote mass (secondary), so dominant backgrounds rank high while zero-area brand accents

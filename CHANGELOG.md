@@ -70,12 +70,13 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the offline quality panel: Supabase's black badges win `action`, Vercel's amber dot leaves the
   palette, and Disco's corner chips route correctly.
 - **Genuine low-mass colors no longer get diluted out of a crowded role.** The usage view
-  prunes entries below a *relative* share threshold (`MIN_SHARE`, 2%), so when a role
+  prunes entries below a *relative* share threshold (`MIN_PROBABILITY_SHARE`, 2%), so when a role
   accumulates many colors — for example after the near-white text fix below splits one
   near-white cluster into several — every entry's share shrinks and a real, low-mass color
   could fall below the threshold purely from dilution rather than from being any less real
   (e.g. Resend's `#46fea5` neon-green accent text). Element-color entries (text/link/CTA/
-  action/border) whose raw in-role vote mass clears a new absolute floor (`MIN_MASS`, ≈ one
+  action/border) whose raw in-role vote mass clears a new absolute floor (`MIN_EXEMPT_VOTE_MASS`,
+  ≈ one
   element's worth of confident vote) are now exempt from the share prune — an absolute
   evidence floor is immune to entry-count dilution. The area-ranked structural-surface
   roles (page/surface/banner) rank by screenshot area and are unaffected. Measured on the

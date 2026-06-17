@@ -52,20 +52,22 @@ def prune_distribution[T](
     if not items:
         return []
 
-    total = sum(weights)
-    if total <= 0.0:
+    total_weight = sum(weights)
+    if total_weight <= 0.0:
         return [(min(items, key=tie_key), 1.0)]
 
-    keep_floor = protected if protected is not None else [False] * len(items)
-    probs = [w / total for w in weights]
+    protected_flags = protected if protected is not None else [False] * len(items)
+    probabilities = [w / total_weight for w in weights]
     kept = [
         (item, p)
-        for item, p, keep in zip(items, probs, keep_floor, strict=True)
+        for item, p, keep in zip(items, probabilities, protected_flags, strict=True)
         if p >= min_share or keep
     ]
     if not kept:
-        best, _ = min(zip(items, probs, strict=True), key=lambda ip: (-ip[1], tie_key(ip[0])))
-        return [(best, 1.0)]
+        highest_probability_item, _ = min(
+            zip(items, probabilities, strict=True), key=lambda ip: (-ip[1], tie_key(ip[0]))
+        )
+        return [(highest_probability_item, 1.0)]
 
     kept_total = sum(p for _, p in kept)
     return [(item, p / kept_total) for item, p in kept]

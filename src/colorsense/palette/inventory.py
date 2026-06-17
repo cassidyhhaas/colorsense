@@ -96,19 +96,19 @@ def _bg_fill_colors(element: HarvestedElement) -> list[Color]:
 # bin) and so donates its component mass to it. deltaEOK units are small. Backgrounds
 # match loosely (0.10): screenshot quantization + anti-aliasing smear large surfaces,
 # so a generous join radius is what ties element bgs back to their area-truth bins.
-DELTA_E_MATCH_BG: float = 0.10
+MAX_BG_MATCH_DELTA_E: float = 0.10
 
 # Maximum distance for the TEXT and BORDER channels — deliberately tighter (0.05, the
 # cluster radius below). Text/border colors are exact computed values, not quantized
 # pixels, and dark colors sit perceptually close in OKLab: at 0.10 near-black text gets
 # absorbed into adjacent dark surface bins instead of forming its own zero-area entry,
 # erasing the text hierarchy from the usage view (see docs/how-it-works.md).
-DELTA_E_MATCH_TEXT_BORDER: float = 0.05
+MAX_TEXT_BORDER_MATCH_DELTA_E: float = 0.05
 
 # Maximum OKLab deltaEOK distance at which two entries are merged into a single
 # perceptual cluster. Kept <= the match radii so that only truly near-identical
 # colors collapse together.
-DELTA_E_CLUSTER: float = 0.05
+MAX_CLUSTER_MERGE_DELTA_E: float = 0.05
 
 # --- Near-white distinctness check (text/border pools only) ----------------------------
 # OKLab deltaEOK is materially non-uniform near the lightness extremes: the 0.05 join/cluster
@@ -221,9 +221,9 @@ def _nearest_mergeable_near_black_entry(
 
 # Per-channel join radius: bg loose, text/border tight (see the constants above).
 _MATCH_BY_CHANNEL: dict[str, float] = {
-    "bg": DELTA_E_MATCH_BG,
-    "text": DELTA_E_MATCH_TEXT_BORDER,
-    "border": DELTA_E_MATCH_TEXT_BORDER,
+    "bg": MAX_BG_MATCH_DELTA_E,
+    "text": MAX_TEXT_BORDER_MATCH_DELTA_E,
+    "border": MAX_TEXT_BORDER_MATCH_DELTA_E,
 }
 
 # The PropertyFamily a color channel attributes into. Each channel's mass is clustered
@@ -379,7 +379,7 @@ def _cluster_pool(entries: list[_Entry], family: PropertyFamily) -> list[ColorCl
     parent = list(range(entry_count))
     for i in range(entry_count):
         for j in range(i + 1, entry_count):
-            if delta_e(entries[i].color, entries[j].color) > DELTA_E_CLUSTER:
+            if delta_e(entries[i].color, entries[j].color) > MAX_CLUSTER_MERGE_DELTA_E:
                 continue
             # Union-find is transitive: blocking only the direct (i, j) edge would let a
             # near-white "bridge" color (close to both) merge two distinct near-white colors
@@ -458,13 +458,13 @@ def build_inventory(harvest: Harvest, classified: list[ClassifiedElement]) -> li
        fixed (bg, text, border) order. For each channel whose measured color is
        non-``None`` and whose sub-distribution is non-empty, find the nearest
        entry **within that channel's family pool only** by `delta_e`. If that
-       nearest entry is within the channel's join radius (`DELTA_E_MATCH_BG` for
-       bg, the tighter `DELTA_E_MATCH_TEXT_BORDER` for text/border), add
+       nearest entry is within the channel's join radius (`MAX_BG_MATCH_DELTA_E` for
+       bg, the tighter `MAX_TEXT_BORDER_MATCH_DELTA_E` for text/border), add
        the channel's mass (each element weighted equally, raw) into the entry's
        mix. Otherwise append a new entry to that pool from the channel's color
        with ``area_weight = 0.0`` so its semantics are not lost. New entries are
        appended in element order then channel order, which is deterministic.
-    3. Cluster each pool independently via union-find under `DELTA_E_CLUSTER`. For
+    3. Cluster each pool independently via union-find under `MAX_CLUSTER_MERGE_DELTA_E`. For
        each group emit one `ColorCluster`: representative color =
        member with the largest area weight for ``background`` (largest in-family
        vote mass for ``text``/``border``), ties / all-zero broken by ``hex``;

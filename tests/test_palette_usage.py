@@ -16,8 +16,8 @@ from colorsense.models import (
 from colorsense.palette.usage import (
     _AREA_RANKED_ROLES,
     COMPONENT_ROLE,
-    MIN_MASS,
-    MIN_SHARE,
+    MIN_EXEMPT_VOTE_MASS,
+    MIN_PROBABILITY_SHARE,
     ROLE_COMPONENTS,
     build_color_index,
     build_usage,
@@ -159,8 +159,8 @@ def test_cta_brand_color_not_buried_by_high_area_page_background() -> None:
     # Regression for the area-ranked-cta bug: a huge-area page background that also carries
     # cta_bg mass (white "ghost"/secondary buttons share the page hex) must NOT bury the
     # small, zero-area brand CTA. Under the old area ranking the page bg (area 0.9) won the
-    # cta role outright and the brand green was pruned below MIN_SHARE; under mass ranking the
-    # higher-mass brand green wins and the page bg ranks below it. (The github case.)
+    # cta role outright and the brand green was pruned below MIN_PROBABILITY_SHARE; under mass
+    # ranking the higher-mass brand green wins and the page bg ranks below it. (The github case.)
     page = _cluster("#ffffff", 0.9, {ComponentType.page_bg: 1.0, ComponentType.cta_bg: 2.0})
     brand = _cluster("#08872b", 0.0, {ComponentType.cta_bg: 5.0})
     palette = build_usage([page, brand])
@@ -265,7 +265,7 @@ def test_all_zero_area_backgrounds_keep_argmax_fallback() -> None:
 def test_prune_below_min_share_with_renormalization() -> None:
     strong = _cluster("#111111", 0.0, {ComponentType.page_text: 99.0})
     weak = _cluster("#222222", 0.0, {ComponentType.page_text: 0.05})
-    assert math.log1p(0.05) / (math.log1p(99.0) + math.log1p(0.05)) < MIN_SHARE
+    assert math.log1p(0.05) / (math.log1p(99.0) + math.log1p(0.05)) < MIN_PROBABILITY_SHARE
     palette = build_usage([strong, weak])
 
     text = palette.mapping[UsageRole.text]
@@ -274,11 +274,12 @@ def test_prune_below_min_share_with_renormalization() -> None:
 
 
 def test_prune_emptying_role_keeps_argmax() -> None:
-    # Many equal entries, each well below MIN_SHARE (1/60) AND below MIN_MASS, so neither
-    # the share gate nor the mass-floor exemption keeps any: the argmax fallback fires.
+    # Many equal entries, each well below MIN_PROBABILITY_SHARE (1/60) AND below
+    # MIN_EXEMPT_VOTE_MASS, so neither the share gate nor the mass-floor exemption keeps any:
+    # the argmax fallback fires.
     n = 60
     mass = 0.1
-    assert mass < MIN_MASS
+    assert mass < MIN_EXEMPT_VOTE_MASS
     clusters = [_cluster(f"#0000{i:02x}", 0.0, {ComponentType.page_text: mass}) for i in range(n)]
     palette = build_usage(clusters)
 
@@ -289,20 +290,20 @@ def test_prune_emptying_role_keeps_argmax() -> None:
 
 
 def test_mass_floor_exempts_genuine_low_share_element_color() -> None:
-    # A role diluted by many entries: a genuine color's share falls below MIN_SHARE purely
-    # from dilution, but its raw vote mass clears MIN_MASS, so the floor keeps it. Mirrors
-    # the resend #46fea5 text recovery (a real accent diluted by the near-white text split).
+    # A role diluted by many entries: a genuine color's share falls below MIN_PROBABILITY_SHARE
+    # purely from dilution, but its raw vote mass clears MIN_EXEMPT_VOTE_MASS, so the floor keeps
+    # it. Mirrors the resend #46fea5 text recovery (a real accent diluted by the near-white split).
     dominant = _cluster("#111111", 0.0, {ComponentType.page_text: 99.0})
     fillers = [_cluster(f"#22{i:02x}00", 0.0, {ComponentType.page_text: 8.0}) for i in range(12)]
-    accent = _cluster("#46fea5", 0.0, {ComponentType.page_text: MIN_MASS + 0.05})
+    accent = _cluster("#46fea5", 0.0, {ComponentType.page_text: MIN_EXEMPT_VOTE_MASS + 0.05})
     palette = build_usage([dominant, *fillers, accent])
 
     text = palette.mapping[UsageRole.text]
     hexes = [e.color.hex for e in text]
-    accent_share = math.log1p(MIN_MASS + 0.05) / sum(
+    accent_share = math.log1p(MIN_EXEMPT_VOTE_MASS + 0.05) / sum(
         math.log1p(sum(c.component_mass.values())) for c in [dominant, *fillers, accent]
     )
-    assert accent_share < MIN_SHARE  # would be pruned on share alone
+    assert accent_share < MIN_PROBABILITY_SHARE  # would be pruned on share alone
     assert _color("#46fea5").hex in hexes  # ...but the mass floor keeps it
 
 

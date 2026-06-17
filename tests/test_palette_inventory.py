@@ -20,9 +20,9 @@ from colorsense.models import (
     Viewport,
 )
 from colorsense.palette.inventory import (
-    DELTA_E_CLUSTER,
-    DELTA_E_MATCH_BG,
-    DELTA_E_MATCH_TEXT_BORDER,
+    MAX_BG_MATCH_DELTA_E,
+    MAX_CLUSTER_MERGE_DELTA_E,
+    MAX_TEXT_BORDER_MATCH_DELTA_E,
     NEAR_BLACK_MAX_LIGHTNESS,
     NEAR_BLACK_MERGE_MAX_DE2000,
     NEAR_WHITE_MERGE_MAX_DE2000,
@@ -102,8 +102,8 @@ def test_near_identical_colors_merge() -> None:
     distinct = _color("#ffffff")
 
     # Sanity: these two truly merge / stay-separate under the module thresholds.
-    assert delta_e(near_a, near_b) <= DELTA_E_CLUSTER
-    assert delta_e(near_a, distinct) > DELTA_E_CLUSTER
+    assert delta_e(near_a, near_b) <= MAX_CLUSTER_MERGE_DELTA_E
+    assert delta_e(near_a, distinct) > MAX_CLUSTER_MERGE_DELTA_E
 
     harvest = _harvest(
         [
@@ -320,7 +320,7 @@ def test_element_far_from_all_bins_is_new_cluster() -> None:
     # measured text color, so the far color is now the text channel.
     harvest = _harvest([ScreenshotBin(color=_color("#ffffff"), area_fraction=0.8)])
     far = _color("#000000")
-    assert delta_e(far, _color("#ffffff")) > DELTA_E_MATCH_TEXT_BORDER
+    assert delta_e(far, _color("#ffffff")) > MAX_TEXT_BORDER_MATCH_DELTA_E
 
     classified = [_classified(None, {ComponentType.page_text: 1.0}, text=far)]
     clusters = build_inventory(harvest, classified)
@@ -347,7 +347,7 @@ def test_element_without_bg_or_dist_is_ignored() -> None:
 def test_text_mass_routes_to_text_color_not_bg() -> None:
     light_bg = _color("#ffffff")
     dark_text = _color("#111111")
-    assert delta_e(light_bg, dark_text) > DELTA_E_MATCH_TEXT_BORDER
+    assert delta_e(light_bg, dark_text) > MAX_TEXT_BORDER_MATCH_DELTA_E
 
     harvest = _harvest([ScreenshotBin(color=light_bg, area_fraction=0.9)])
     classified = [
@@ -372,7 +372,7 @@ def test_text_mass_routes_to_text_color_not_bg() -> None:
 def test_border_mass_routes_to_border_color() -> None:
     bg = _color("#ffffff")
     border = _color("#3366cc")
-    assert delta_e(bg, border) > DELTA_E_MATCH_TEXT_BORDER
+    assert delta_e(bg, border) > MAX_TEXT_BORDER_MATCH_DELTA_E
 
     harvest = _harvest([ScreenshotBin(color=bg, area_fraction=0.9)])
     classified = [
@@ -455,12 +455,12 @@ def test_build_inventory_permutation_invariant_on_well_separated_colors() -> Non
     CAVEAT (why the pinned property is deliberately weaker than full
     permutation-invariance): entry creation order can legitimately matter by
     design. Two elements whose colors are both far (beyond the channel's join
-    radius) from every bin but between DELTA_E_CLUSTER and the radius of each
+    radius) from every bin but between MAX_CLUSTER_MERGE_DELTA_E and the radius of each
     other join one entry whose color is whichever element came first, changing
     the cluster's representative hex. Likewise nearest-entry ties (`<=` keeps
     the later index) depend on bin order for equidistant bins. So we pin the
     property the module does guarantee: when every pairwise color distance
-    exceeds the largest join radius (DELTA_E_MATCH_BG), matching is unambiguous
+    exceeds the largest join radius (MAX_BG_MATCH_DELTA_E), matching is unambiguous
     and the output is exactly permutation-invariant.
 
     All masses are dyadic (1.0), so float summation order cannot perturb the
@@ -476,7 +476,7 @@ def test_build_inventory_permutation_invariant_on_well_separated_colors() -> Non
     colors = [white, blue, red, black]
     for i in range(len(colors)):
         for j in range(i + 1, len(colors)):
-            assert delta_e(colors[i], colors[j]) > DELTA_E_MATCH_BG
+            assert delta_e(colors[i], colors[j]) > MAX_BG_MATCH_DELTA_E
 
     bins = [
         ScreenshotBin(color=white, area_fraction=0.5),
@@ -514,7 +514,7 @@ def test_equal_area_clusters_sorted_by_hex() -> None:
 def test_thresholds_relationship() -> None:
     # Clustering threshold must not exceed either channel join radius, and the
     # text/border radius is deliberately the tighter of the two.
-    assert DELTA_E_CLUSTER <= DELTA_E_MATCH_TEXT_BORDER <= DELTA_E_MATCH_BG
+    assert MAX_CLUSTER_MERGE_DELTA_E <= MAX_TEXT_BORDER_MATCH_DELTA_E <= MAX_BG_MATCH_DELTA_E
 
 
 # ---------------------------------------------------------------------------
@@ -522,7 +522,7 @@ def test_thresholds_relationship() -> None:
 # ---------------------------------------------------------------------------
 
 # GitHub's near-black body text vs. its dark code-block surface: 0.078 deltaEOK —
-# between DELTA_E_MATCH_TEXT_BORDER (0.05) and DELTA_E_MATCH_BG (0.10). The live-probe
+# between MAX_TEXT_BORDER_MATCH_DELTA_E (0.05) and MAX_BG_MATCH_DELTA_E (0.10). The live-probe
 # regression: under a single 0.10 radius the text color was absorbed into the adjacent
 # dark surface bin, erasing the body-text color from the usage view.
 _DARK_SURFACE = "#0d1117"
@@ -532,7 +532,7 @@ _NEAR_BLACK_TEXT = "#1f2328"
 def test_text_color_near_dark_surface_bin_forms_distinct_entry() -> None:
     surface, text = _color(_DARK_SURFACE), _color(_NEAR_BLACK_TEXT)
     gap = delta_e(surface, text)
-    assert DELTA_E_MATCH_TEXT_BORDER < gap <= DELTA_E_MATCH_BG  # the regression window
+    assert MAX_TEXT_BORDER_MATCH_DELTA_E < gap <= MAX_BG_MATCH_DELTA_E  # the regression window
 
     harvest = _harvest([ScreenshotBin(color=surface, area_fraction=0.2)])
     classified = [_classified(None, {ComponentType.page_text: 1.0}, text=text)]
@@ -579,14 +579,14 @@ def test_bg_channel_keeps_loose_radius_at_same_distance() -> None:
 # A text/border color WITHIN the tight join radius of the big bg bin: this is the actual
 # family-bleed window. Under the OLD single-pool algorithm the text would join (or cluster
 # into) the higher-area bin and adopt ITS hex; family segregation keeps them apart.
-_BLEED_TEXT = "#10141a"  # deltaEOK 0.0136 from _DARK_SURFACE — inside DELTA_E_MATCH_TEXT_BORDER
+_BLEED_TEXT = "#10141a"  # deltaEOK 0.0136 from _DARK_SURFACE — inside MAX_TEXT_BORDER_MATCH_DELTA_E
 
 
 def test_text_color_near_large_bg_bin_keeps_own_hex() -> None:
     surface, text = _color(_DARK_SURFACE), _color(_BLEED_TEXT)
     # Inside the tight radius => the OLD code bled the text onto the bin's hex; the NEW
     # family-segregated code must keep the text's own hex.
-    assert delta_e(surface, text) <= DELTA_E_MATCH_TEXT_BORDER
+    assert delta_e(surface, text) <= MAX_TEXT_BORDER_MATCH_DELTA_E
 
     harvest = _harvest([ScreenshotBin(color=surface, area_fraction=0.9)])
     classified = [_classified(None, {ComponentType.page_text: 1.0}, text=text)]
@@ -600,7 +600,7 @@ def test_text_color_near_large_bg_bin_keeps_own_hex() -> None:
 def test_border_color_near_bg_bin_keeps_own_hex() -> None:
     # Same guarantee for the border channel: a border color near a bg bin keeps its hex.
     surface, border = _color(_DARK_SURFACE), _color(_BLEED_TEXT)
-    assert delta_e(surface, border) <= DELTA_E_MATCH_TEXT_BORDER
+    assert delta_e(surface, border) <= MAX_TEXT_BORDER_MATCH_DELTA_E
 
     harvest = _harvest([ScreenshotBin(color=surface, area_fraction=0.9)])
     classified = [_classified(None, {ComponentType.border: 1.0}, border=border)]
@@ -632,7 +632,7 @@ def test_text_border_representative_is_max_in_family_mass() -> None:
     # entry, so the multi-entry case is exercised at the _cluster_pool level.
     low = _color("#3366cc")
     high = _color("#3367cc")  # near enough to cluster with `low`
-    assert delta_e(low, high) <= DELTA_E_CLUSTER
+    assert delta_e(low, high) <= MAX_CLUSTER_MERGE_DELTA_E
 
     low_entry = _Entry(low, 0.0)
     low_entry.vote_mass[ComponentType.page_text] = 1.0
@@ -652,7 +652,7 @@ def test_background_representative_is_max_area() -> None:
     # Within a background cluster the representative is still the max-area member.
     small = _color("#3366cc")
     big = _color("#3367cc")
-    assert delta_e(small, big) <= DELTA_E_CLUSTER
+    assert delta_e(small, big) <= MAX_CLUSTER_MERGE_DELTA_E
 
     harvest = _harvest(
         [
@@ -700,7 +700,7 @@ def test_near_white_guard_predicate_distinguishes_the_github_pair() -> None:
     primer = _color(_PRIMER_NEAR_WHITE)
 
     # OKLab would merge them (within the cluster radius); CIEDE2000 says clearly distinct.
-    assert delta_e(white, primer) <= DELTA_E_CLUSTER
+    assert delta_e(white, primer) <= MAX_CLUSTER_MERGE_DELTA_E
     assert ciede2000(white, primer) > NEAR_WHITE_MERGE_MAX_DE2000
     assert white.lightness >= NEAR_WHITE_MIN_LIGHTNESS
     assert primer.lightness >= NEAR_WHITE_MIN_LIGHTNESS
@@ -757,7 +757,7 @@ def test_near_white_guard_survives_union_find_transitivity() -> None:
     assert _is_distinct_near_white_pair(a, c)
     assert not _is_distinct_near_white_pair(a, b)
     assert not _is_distinct_near_white_pair(b, c)
-    assert delta_e(a, b) <= DELTA_E_CLUSTER and delta_e(b, c) <= DELTA_E_CLUSTER
+    assert delta_e(a, b) <= MAX_CLUSTER_MERGE_DELTA_E and delta_e(b, c) <= MAX_CLUSTER_MERGE_DELTA_E
 
     entries = [_Entry(a, 0.0), _Entry(b, 0.0), _Entry(c, 0.0)]
     clusters = _cluster_pool(entries, PropertyFamily.text)
@@ -807,7 +807,7 @@ def test_cta_bg_guard_predicate_distinguishes_the_disco_pair() -> None:
     surface = _color(_NB_SURFACE)
 
     # OKLab would merge them (within the cluster radius); CIEDE2000 says clearly distinct.
-    assert delta_e(cta, surface) <= DELTA_E_CLUSTER
+    assert delta_e(cta, surface) <= MAX_CLUSTER_MERGE_DELTA_E
     assert ciede2000(cta, surface) > NEAR_BLACK_MERGE_MAX_DE2000
     assert cta.lightness <= NEAR_BLACK_MAX_LIGHTNESS
     assert surface.lightness <= NEAR_BLACK_MAX_LIGHTNESS
@@ -910,7 +910,7 @@ def test_cta_bg_guard_survives_union_find_transitivity() -> None:
     assert _is_distinct_near_black_pair(a, c)
     assert not _is_distinct_near_black_pair(a, b)
     assert not _is_distinct_near_black_pair(b, c)
-    assert delta_e(a, b) <= DELTA_E_CLUSTER and delta_e(b, c) <= DELTA_E_CLUSTER
+    assert delta_e(a, b) <= MAX_CLUSTER_MERGE_DELTA_E and delta_e(b, c) <= MAX_CLUSTER_MERGE_DELTA_E
 
     # Equal (zero) areas so the representative tiebreak falls to the smallest hex, isolating the
     # transitivity behaviour from area-based representative selection.
