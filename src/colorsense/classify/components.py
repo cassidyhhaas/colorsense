@@ -49,6 +49,7 @@ from colorsense.models import (
     HarvestedElement,
     Viewport,
     channel_for,
+    is_circle_shape,
     is_pill_shape,
 )
 
@@ -97,6 +98,20 @@ def _is_pill(element: HarvestedElement) -> bool:
     on top.
     """
     return is_pill_shape(element.rect.width, element.rect.height, element.min_corner_radius)
+
+
+def _is_small_circle(element: HarvestedElement, max_h_px: float) -> bool:
+    """Whether the element is a small fully-rounded **circle/dot** (``rounded-full``, w==h).
+
+    Pure shape plus a single absolute-size cap: a circle (`is_circle_shape`) no taller than
+    ``max_h_px`` — a UI chip/dot, not a large circular avatar or thumbnail. Used both to keep
+    small circles OUT of the card detector (a small circle is never a card) and to gate the
+    circle-badge promotion (which layers clickable + recurrence on top).
+    """
+    return (
+        is_circle_shape(element.rect.width, element.rect.height, element.min_corner_radius)
+        and element.rect.height <= max_h_px
+    )
 
 
 def _paints_visible_fill(element: HarvestedElement) -> bool:
@@ -163,6 +178,60 @@ def _derive_page_canvas_color(elements: list[HarvestedElement]) -> Color | None:
             best_area = area
             best = bg
     return best
+
+
+def _canonical_canvas_is_opaque(elements: list[HarvestedElement]) -> bool:
+    """Whether the canonical canvas (``html``/``body``/``main``) paints an opaque background.
+
+    The gate for the page-canvas fallback: a site whose root document elements all leave
+    ``background: transparent`` (alpha 0) paints its page color somewhere else (a
+    full-viewport ``<div>``), which is exactly the case the fallback exists to repair. An
+    opaque-body site returns ``True`` and is never touched.
+    """
+    for element in elements:
+        if element.tag in {"html", "body", "main"} and is_opaque(element.bg):
+            return True
+    return False
+
+
+def _page_canvas_index(
+    elements: list[HarvestedElement],
+    thresholds: GeometryThresholds,
+    viewport: Viewport,
+) -> int | None:
+    """Index of the fallback page-canvas element, or ``None`` if no fallback applies.
+
+    Returns an index ONLY when the canonical canvas (``html``/``body``/``main``) paints no
+    opaque background — otherwise the canonical canvas is the page surface and the fallback
+    must not fire. When it does apply, the canvas is the largest-area element that spans the
+    viewport width (``full_width``) near the top of the page (``top < top_band``) and paints
+    an opaque background: the full-viewport ``<div>`` carrying the page color on
+    transparent-canonical-canvas sites. ``elements`` is in deterministic document order, so
+    the ``max``-area tie-break (first-seen on equal area) is stable.
+    """
+    if _canonical_canvas_is_opaque(elements):
+        return None
+
+    vp_w = float(viewport.width)
+    vp_h = float(viewport.height)
+    if vp_w <= 0.0 or vp_h <= 0.0:
+        return None
+
+    best_index: int | None = None
+    best_area = -1.0
+    for index, element in enumerate(elements):
+        if not is_opaque(element.bg):
+            continue
+        rect = element.rect
+        full_width = (rect.width / vp_w) >= thresholds.full_width
+        top = rect.y / vp_h
+        if not (full_width and top < thresholds.top_band):
+            continue
+        area = rect.width * rect.height
+        if area > best_area:
+            best_area = area
+            best_index = index
+    return best_index
 
 
 def _is_cta_label(
@@ -327,13 +396,17 @@ def _repetition_member_indices(
     """
     rep = config.component_classifier.repetition
     requires_any = set(rep.requires_any)
+    circle_max_h = config.component_classifier.circle_badge.max_h_px
 
     def satisfies_requires_any(element: HarvestedElement) -> bool:
         # A pill/chip is never a card, however much it repeats: fully-rounded badges
         # (status pills, category chips) commonly recur in grids and carry a ring/bg,
         # which would otherwise satisfy the card heuristic and flood `card_bg` with their
         # accent colors. They are routed to `badge` by the geometry rule instead.
-        if _is_pill(element):
+        # A small fully-rounded circle (a dot / icon-only corner chip) is excluded for the
+        # same reason — `_is_pill` excludes circles (width == height), so they are handled
+        # here so a recurring or decorative `rounded-full` chip never leaks into `card_bg`.
+        if _is_pill(element) or _is_small_circle(element, circle_max_h):
             return False
         if not requires_any:
             return True
@@ -361,6 +434,47 @@ def _repetition_member_indices(
         qualifying = [i for i in indices if satisfies_requires_any(elements[i])]
         if len(qualifying) >= rep.min_siblings:
             members.update(qualifying)
+    return members
+
+
+def _circle_badge_member_indices(
+    elements: list[HarvestedElement],
+    config: Config,
+) -> set[int]:
+    """Indices of small clickable circular chips that RECUR as a structurally-similar group.
+
+    A perfect circle is not a pill, so the badge geometry rule skips it; an icon-only
+    circular chip (no text node) then falls through to ``card_bg``. This detector promotes
+    such a chip to ``badge`` only when it (1) is a small circle (`_is_small_circle`), (2) is
+    clickable, (3) paints a fill, and (4) belongs to a ``(tag, shared-class-token)`` group of
+    at least ``min_siblings`` members all meeting (1)-(3). The grouping mirrors
+    `_repetition_member_indices` — the same list-level stand-in for DOM sibling similarity.
+
+    The recurrence gate is the load-bearing discriminator: supabase's 54 identical black
+    corner badges form a qualifying group (→ ``action``), while a LONE clickable status dot
+    (e.g. vercel's single ``status-dot``) never reaches ``min_siblings`` and is left alone, so
+    its color keeps winning ``link`` from the text channel rather than being stolen into
+    ``action``. A non-clickable decorative dot is excluded by the clickable gate.
+    """
+    circle_cfg = config.component_classifier.circle_badge
+    max_h = circle_cfg.max_h_px
+
+    def is_chip(element: HarvestedElement) -> bool:
+        return (
+            element.clickable and _is_small_circle(element, max_h) and _paints_visible_fill(element)
+        )
+
+    buckets: dict[tuple[str, str], list[int]] = {}
+    for index, element in enumerate(elements):
+        if not is_chip(element):
+            continue
+        for token in element.class_tokens:
+            buckets.setdefault((element.tag, token.lower()), []).append(index)
+
+    members: set[int] = set()
+    for indices in buckets.values():
+        if len(indices) >= circle_cfg.min_siblings:
+            members.update(indices)
     return members
 
 
@@ -518,8 +632,11 @@ def classify_components(
     thresholds = classifier_config.geometry.thresholds
 
     repetition_members = _repetition_member_indices(elements, config)
+    circle_badge_members = _circle_badge_member_indices(elements, config)
     page_canvas = _derive_page_canvas_color(elements)
     relabel_config = classifier_config.contrast_relabel
+    canvas_fallback = classifier_config.page_canvas_fallback
+    page_canvas_index = _page_canvas_index(elements, thresholds, active_viewport)
 
     results: list[ClassifiedElement] = []
     for index, element in enumerate(elements):
@@ -560,6 +677,13 @@ def classify_components(
         if index in repetition_members:
             _add_votes(vote_totals, classifier_config.repetition.votes)
 
+        # 5b. Circle-badge group: a small clickable circular chip that recurs as a group is
+        # a badge (-> action), not a card. The detector already enforces clickable + small
+        # circle + fill + recurrence, so a lone status dot and a decorative dot never land
+        # here (see `_circle_badge_member_indices`).
+        if index in circle_badge_members:
+            _add_votes(vote_totals, classifier_config.circle_badge.votes)
+
         # 6. Origin / third-party.
         if element.is_iframe:
             _add_votes(vote_totals, classifier_config.third_party.votes_iframe)
@@ -587,6 +711,23 @@ def classify_components(
                 vote_totals[ComponentType.cta_text] = (
                     vote_totals.get(ComponentType.cta_text, 0.0) + link_mass
                 )
+
+        # 8. Page-canvas fallback. On a transparent-canonical-canvas site, the single
+        # full-viewport element carrying the page color reads as a hero (full-width, tall)
+        # and a repetition card (shared layout token), burying its weak page_bg signal.
+        # Inject a page_bg prior on that one element and clear the competing hero/card
+        # votes so the page color reaches the `page` role. Gated entirely on
+        # `page_canvas_index` being None for opaque-body sites (see `_page_canvas_index`).
+        if index == page_canvas_index:
+            for raw in canvas_fallback.suppress:
+                try:
+                    suppressed = ComponentType(raw)
+                except ValueError:
+                    continue
+                vote_totals.pop(suppressed, None)
+            vote_totals[ComponentType.page_bg] = (
+                vote_totals.get(ComponentType.page_bg, 0.0) + canvas_fallback.page_bg_vote
+            )
 
         # Suppressors, then softmax/prune/renormalize.
         _apply_suppressors(vote_totals, element, config)

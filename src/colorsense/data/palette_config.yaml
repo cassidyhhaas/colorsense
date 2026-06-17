@@ -383,6 +383,39 @@ component_classifier:
     requires_any: [box_shadow, border, distinct_bg_from_parent]
     votes: {card_bg: 3.5, card_text: 2.0}
 
+  # --- Circle-badge group (small recurring clickable circular chips). --------
+  # A perfect circle (`rounded-full`, width == height) is NOT a pill (the pill test demands
+  # width > height), so the badge geometry rule never matches it and a small circular chip
+  # with no text node falls through to the card detector, leaking its accent into `surface`.
+  # This promotes a small circle to `badge` (-> action) ONLY when it is clickable, paints a
+  # fill, and RECURS as a group of >= min_siblings structurally-similar siblings — the
+  # signature of a repeated UI chip (supabase's 54 black corner badges). A lone decorative
+  # dot (non-clickable) and a one-off clickable status dot (whose color already wins `link`
+  # from its text channel) are both spared: the first by the clickable gate, the second by
+  # the recurrence gate. No has_text gate — these chips carry an icon, not a text node. The
+  # 3.0 vote matches the geometry badge rule. Small circles are also excluded from the card
+  # detector below (a small circle is never a card), so the decorative dot leaks nowhere.
+  circle_badge:
+    max_h_px: 36
+    min_siblings: 3
+    votes: {badge: 3.0}
+
+  # --- Page-canvas fallback (transparent-canonical-canvas sites). ------------
+  # Fires ONLY when the canonical canvas (`html`/`body`/`main`) paints no opaque
+  # background — the modern utility-CSS pattern (e.g. shadcn) where the white page
+  # surface lives on a full-viewport `<div class="...bg-background...">` instead. On those
+  # sites the canvas div's only `page_bg` signal is a few weak layout class-token votes,
+  # which the geometry `hero_bg` (3.0) and repetition `card_bg` (3.5) votes bury in the
+  # bg-channel softmax, so the page color never reaches the `page` role. The classifier
+  # picks the largest viewport-spanning opaque-bg element near the top of the page (the
+  # full_width / top_band geometry thresholds) as the canvas, injects `page_bg`, and clears
+  # the competing hero/card votes from that one element. Opaque-body sites never trigger
+  # this. `page_bg_vote` matches the `body -> page_bg` semantic vote (5.0) so the canvas
+  # wins its bg channel exactly as a real opaque <body> would.
+  page_canvas_fallback:
+    page_bg_vote: 5.0
+    suppress: [hero_bg, hero_text, card_bg, card_text]
+
   # --- Feature family 6: origin / third-party. -------------------------------
   third_party:
     votes_iframe: {third_party: 5.0}

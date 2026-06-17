@@ -257,6 +257,24 @@ def is_pill_shape(width: float, height: float, min_corner_radius: float) -> bool
     return height > 0.0 and min_corner_radius >= height / 2.0 and width > height
 
 
+def is_circle_shape(width: float, height: float, min_corner_radius: float) -> bool:
+    """Whether a rect is a fully-rounded **circle/dot** (``rounded-full`` with ``width == height``).
+
+    The square counterpart to `is_pill_shape`: all four corners fully rounded
+    (``min_corner_radius >= height/2``) AND the rect is (within a 1px tolerance) square.
+    `is_pill_shape` deliberately *excludes* circles (it demands ``width > height``); this is
+    the predicate for that excluded case. Size-agnostic — it tests shape only. The badge
+    rule and the card-detector exclusion layer the absolute size/clickable/recurrence gates
+    on top, so the bare shape predicate stays reusable.
+
+    Lives here in the shared-contracts module alongside `is_pill_shape` so the harvester and
+    the component classifier share one definition and cannot drift out of sync. The 1px
+    tolerance absorbs sub-pixel layout rounding (a ``size-2.5`` dot computes to 10.0x10.0,
+    but fractional widths occur) without admitting plainly non-square rects.
+    """
+    return height > 0.0 and min_corner_radius >= height / 2.0 and abs(width - height) <= 1.0
+
+
 class Theme(StrEnum):
     """Color scheme a site is rendered under."""
 

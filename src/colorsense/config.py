@@ -355,6 +355,63 @@ class RepetitionConfig(BaseModel):
     votes: dict[str, float]
 
 
+class CircleBadgeConfig(BaseModel):
+    """Recognizes small recurring clickable circular chips as badges.
+
+    A perfect circle (``rounded-full`` with ``width == height``) is NOT a pill — the pill
+    test demands ``width > height`` — so the badge geometry rule never matches it, and a
+    small circular chip with no text node (an icon-only corner badge) falls through to the
+    card detector and leaks its accent into ``surface``. This family promotes a small circle
+    to ``badge`` ONLY when it is clickable, paints a fill, and RECURS as a group of at least
+    ``min_siblings`` structurally-similar siblings — the signature of a repeated UI chip
+    (supabase's 54 black corner badges), as opposed to a lone decorative dot (a single
+    ``rounded-full`` divot, kept out of every role) or a one-off clickable status dot (whose
+    color already wins ``link`` from its text channel — the recurrence gate is what protects
+    that lone dot from being wrongly promoted to ``action``). No ``has_text`` gate, because
+    these chips carry an icon, not a text node.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    # Maximum circle diameter (px) to treat as a chip: a one-line UI badge, not a large
+    # circular avatar/thumbnail. Shares the badge single-text-line height ceiling.
+    max_h_px: float = Field(gt=0.0)
+    # Minimum structurally-similar siblings before a clickable circle is a badge group.
+    # Matches the card detector's recurrence floor; the gate that spares vercel's lone
+    # clickable status dot (which must stay a `link`).
+    min_siblings: int = Field(ge=1)
+    votes: dict[str, float]
+
+
+class PageCanvasFallbackConfig(BaseModel):
+    """Fallback for sites whose canonical canvas (``html``/``body``/``main``) is transparent.
+
+    Modern utility-CSS sites (e.g. shadcn) leave ``html``/``body``/``main`` with
+    ``background: transparent`` and paint the white page surface on a single
+    full-viewport ``<div>`` instead. That div's only ``page_bg`` signal is a few weak
+    class-token votes, which the geometry ``hero_bg`` vote and the repetition ``card_bg``
+    vote bury in the bg-channel softmax — so the real page color never reaches the ``page``
+    role. When (and only when) the canonical canvas paints no opaque background, the
+    classifier treats the largest viewport-spanning opaque-bg element near the top of the
+    page as the page canvas: it injects a ``page_bg`` prior and removes the ``suppress``
+    components (the competing hero/card votes) from that one element. Opaque-body sites
+    never trigger this, so they are untouched. The full-width and top-band gates reuse the
+    geometry thresholds (``full_width``, ``top_band``), so this is a fraction-of-viewport
+    test, not absolute pixels.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    # The page_bg vote injected on the detected canvas element. Set to match the
+    # ``body -> page_bg`` semantic vote so the canvas wins its bg channel exactly as a
+    # real opaque <body> would.
+    page_bg_vote: float = Field(ge=0.0)
+    # Components removed from the canvas element's votes before finalization: the
+    # full-width/tall canvas otherwise reads as a hero, and a shared layout class token
+    # makes it a repetition "card". Both must clear for page_bg to win.
+    suppress: tuple[str, ...]
+
+
 class ThirdPartyConfig(BaseModel):
     """The origin / third-party feature family."""
 
@@ -427,6 +484,8 @@ class ComponentClassifierConfig(BaseModel):
     border_presence: PresenceRule
     text_presence: PresenceRule
     repetition: RepetitionConfig
+    circle_badge: CircleBadgeConfig
+    page_canvas_fallback: PageCanvasFallbackConfig
     third_party: ThirdPartyConfig
     suppressors: dict[str, Suppressor]
     brand_components: tuple[str, ...]
