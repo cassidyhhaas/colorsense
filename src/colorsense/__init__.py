@@ -30,8 +30,8 @@ Result & contracts
 * [`Color`][colorsense.Color] / [`Viewport`][colorsense.Viewport] — value types (``Viewport`` is
   also an ``analyze`` argument).
 * [`Theme`][colorsense.Theme], [`UsageRole`][colorsense.UsageRole],
-  [`PropertyFamily`][colorsense.PropertyFamily] (with the
-  [`family_of`][colorsense.family_of] role→family helper),
+  [`PropertyFamily`][colorsense.PropertyFamily] (a role rolls up to its family via
+  [`UsageRole.property_family`][colorsense.UsageRole.property_family]),
   [`ComponentType`][colorsense.ComponentType],
   [`TokenSemanticRole`][colorsense.TokenSemanticRole] — the enums that key the result (e.g.
   ``usage.mapping[UsageRole.cta]``).
@@ -84,7 +84,6 @@ from colorsense.models import (
     UsagePalette,
     UsageRole,
     Viewport,
-    family_of,
 )
 from colorsense.net.guard import block_private_networks
 from colorsense.net.politeness import (
@@ -122,7 +121,6 @@ __all__ = [
     "Viewport",
     "analyze",
     "block_private_networks",
-    "family_of",
     "load_config",
     "load_default_config",
 ]

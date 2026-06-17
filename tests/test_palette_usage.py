@@ -11,14 +11,13 @@ from colorsense.models import (
     ComponentType,
     PropertyFamily,
     UsageRole,
-    family_of,
 )
 from colorsense.palette.usage import (
     _AREA_RANKED_ROLES,
-    COMPONENT_ROLE,
-    MIN_MASS,
-    MIN_SHARE,
-    ROLE_COMPONENTS,
+    COMPONENT_TYPES_BY_USAGE_ROLE,
+    MIN_EXEMPT_VOTE_MASS,
+    MIN_PROBABILITY_SHARE,
+    USAGE_ROLE_BY_COMPONENT_TYPE,
     build_color_index,
     build_usage,
 )
@@ -47,26 +46,27 @@ def _cluster(
 
 
 # ---------------------------------------------------------------------------
-# ROLE_COMPONENTS / partition
+# COMPONENT_TYPES_BY_USAGE_ROLE / partition
 # ---------------------------------------------------------------------------
 
 
 def test_role_components_partitions_every_routed_component_once() -> None:
-    # COMPONENT_ROLE is the exact inverse of ROLE_COMPONENTS, one role per routed component.
-    flat = [c for comps in ROLE_COMPONENTS.values() for c in comps]
+    # USAGE_ROLE_BY_COMPONENT_TYPE is the exact inverse of COMPONENT_TYPES_BY_USAGE_ROLE:
+    # one role per routed component.
+    flat = [c for comps in COMPONENT_TYPES_BY_USAGE_ROLE.values() for c in comps]
     assert len(flat) == len(set(flat))  # no component routed twice
-    assert set(COMPONENT_ROLE) == set(flat)
-    for role, comps in ROLE_COMPONENTS.items():
+    assert set(USAGE_ROLE_BY_COMPONENT_TYPE) == set(flat)
+    for role, comps in COMPONENT_TYPES_BY_USAGE_ROLE.items():
         for comp in comps:
-            assert COMPONENT_ROLE[comp] is role
+            assert USAGE_ROLE_BY_COMPONENT_TYPE[comp] is role
 
 
 def test_cta_text_and_third_party_are_unrouted() -> None:
     # Both are deliberately absent from every role and from the inverse map.
-    assert ComponentType.cta_text not in COMPONENT_ROLE
-    assert ComponentType.third_party not in COMPONENT_ROLE
+    assert ComponentType.cta_text not in USAGE_ROLE_BY_COMPONENT_TYPE
+    assert ComponentType.third_party not in USAGE_ROLE_BY_COMPONENT_TYPE
     # Everything else IS routed.
-    assert set(COMPONENT_ROLE) == set(ComponentType) - {
+    assert set(USAGE_ROLE_BY_COMPONENT_TYPE) == set(ComponentType) - {
         ComponentType.cta_text,
         ComponentType.third_party,
     }
@@ -159,8 +159,8 @@ def test_cta_brand_color_not_buried_by_high_area_page_background() -> None:
     # Regression for the area-ranked-cta bug: a huge-area page background that also carries
     # cta_bg mass (white "ghost"/secondary buttons share the page hex) must NOT bury the
     # small, zero-area brand CTA. Under the old area ranking the page bg (area 0.9) won the
-    # cta role outright and the brand green was pruned below MIN_SHARE; under mass ranking the
-    # higher-mass brand green wins and the page bg ranks below it. (The github case.)
+    # cta role outright and the brand green was pruned below MIN_PROBABILITY_SHARE; under mass
+    # ranking the higher-mass brand green wins and the page bg ranks below it. (The github case.)
     page = _cluster("#ffffff", 0.9, {ComponentType.page_bg: 1.0, ComponentType.cta_bg: 2.0})
     brand = _cluster("#08872b", 0.0, {ComponentType.cta_bg: 5.0})
     palette = build_usage([page, brand])
@@ -265,7 +265,7 @@ def test_all_zero_area_backgrounds_keep_argmax_fallback() -> None:
 def test_prune_below_min_share_with_renormalization() -> None:
     strong = _cluster("#111111", 0.0, {ComponentType.page_text: 99.0})
     weak = _cluster("#222222", 0.0, {ComponentType.page_text: 0.05})
-    assert math.log1p(0.05) / (math.log1p(99.0) + math.log1p(0.05)) < MIN_SHARE
+    assert math.log1p(0.05) / (math.log1p(99.0) + math.log1p(0.05)) < MIN_PROBABILITY_SHARE
     palette = build_usage([strong, weak])
 
     text = palette.mapping[UsageRole.text]
@@ -274,11 +274,12 @@ def test_prune_below_min_share_with_renormalization() -> None:
 
 
 def test_prune_emptying_role_keeps_argmax() -> None:
-    # Many equal entries, each well below MIN_SHARE (1/60) AND below MIN_MASS, so neither
-    # the share gate nor the mass-floor exemption keeps any: the argmax fallback fires.
+    # Many equal entries, each well below MIN_PROBABILITY_SHARE (1/60) AND below
+    # MIN_EXEMPT_VOTE_MASS, so neither the share gate nor the mass-floor exemption keeps any:
+    # the argmax fallback fires.
     n = 60
     mass = 0.1
-    assert mass < MIN_MASS
+    assert mass < MIN_EXEMPT_VOTE_MASS
     clusters = [_cluster(f"#0000{i:02x}", 0.0, {ComponentType.page_text: mass}) for i in range(n)]
     palette = build_usage(clusters)
 
@@ -289,20 +290,20 @@ def test_prune_emptying_role_keeps_argmax() -> None:
 
 
 def test_mass_floor_exempts_genuine_low_share_element_color() -> None:
-    # A role diluted by many entries: a genuine color's share falls below MIN_SHARE purely
-    # from dilution, but its raw vote mass clears MIN_MASS, so the floor keeps it. Mirrors
-    # the resend #46fea5 text recovery (a real accent diluted by the near-white text split).
+    # A role diluted by many entries: a genuine color's share falls below MIN_PROBABILITY_SHARE
+    # purely from dilution, but its raw vote mass clears MIN_EXEMPT_VOTE_MASS, so the floor keeps
+    # it. Mirrors the resend #46fea5 text recovery (a real accent diluted by the near-white split).
     dominant = _cluster("#111111", 0.0, {ComponentType.page_text: 99.0})
     fillers = [_cluster(f"#22{i:02x}00", 0.0, {ComponentType.page_text: 8.0}) for i in range(12)]
-    accent = _cluster("#46fea5", 0.0, {ComponentType.page_text: MIN_MASS + 0.05})
+    accent = _cluster("#46fea5", 0.0, {ComponentType.page_text: MIN_EXEMPT_VOTE_MASS + 0.05})
     palette = build_usage([dominant, *fillers, accent])
 
     text = palette.mapping[UsageRole.text]
     hexes = [e.color.hex for e in text]
-    accent_share = math.log1p(MIN_MASS + 0.05) / sum(
+    accent_share = math.log1p(MIN_EXEMPT_VOTE_MASS + 0.05) / sum(
         math.log1p(sum(c.component_mass.values())) for c in [dominant, *fillers, accent]
     )
-    assert accent_share < MIN_SHARE  # would be pruned on share alone
+    assert accent_share < MIN_PROBABILITY_SHARE  # would be pruned on share alone
     assert _color("#46fea5").hex in hexes  # ...but the mass floor keeps it
 
 
@@ -368,9 +369,9 @@ def test_color_index_per_color_usages_normalize() -> None:
     assert math.isclose(cu.usages[0].weight, 0.75, abs_tol=1e-9)
     assert cu.usages[0].property_family is PropertyFamily.background
     assert cu.usages[1].property_family is PropertyFamily.text
-    # property_family is always family_of(role).
+    # property_family is always role.property_family.
     for u in cu.usages:
-        assert u.property_family is family_of(u.role)
+        assert u.property_family is u.role.property_family
     # Components within each slot normalize to 1.
     assert cu.usages[0].components == {ComponentType.cta_bg: 1.0}
 

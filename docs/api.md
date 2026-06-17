@@ -44,8 +44,6 @@ not listed here is internal and free to change between releases.
 
 ::: colorsense.PropertyFamily
 
-::: colorsense.family_of
-
 ::: colorsense.ComponentType
 
 ::: colorsense.TokenSemanticRole

@@ -358,14 +358,14 @@ more than ΔE 0.08 from the declared color, but within 0.10. At a tight 0.08 mat
 a pixel-perfect rendered token *failed its own intent match* on one OS: the posterior
 winner flipped and a false "declared unused in render" divergence appeared, on Linux
 only. The fix is structural: since an element may join a bin up to the bg radius (0.10)
-away, the measured-vs-declared match radius (`DELTA_E_MATCH_MEASURED`) must be **at
-least** that — so it is defined as equal to `DELTA_E_MATCH_BG`, and can never silently
+away, the measured-vs-declared match radius (`MAX_MEASURED_MATCH_DELTA_E`) must be **at
+least** that — so it is defined as equal to `MAX_BG_MATCH_DELTA_E`, and can never silently
 fall below it.
 
 ## 4. The usage views
 
 `palette/usage.py` turns the clusters into two complementary views, keyed off one fixed
-code-level convention: the **role→component collapse** (`ROLE_COMPONENTS`). Each component
+code-level convention: the **role→component collapse** (`COMPONENT_TYPES_BY_USAGE_ROLE`). Each component
 type belongs to exactly one of eight developer-facing **usage roles** — `page_bg` → `page`;
 `card_bg`/`modal_bg`/`hero_bg`/`input_bg` → `surface`; `header_bg`/`nav_bg`/`footer_bg` →
 `banner`; `cta_bg` → `cta`; `button_secondary`/`badge` → `action`; the `*_text` components →
@@ -397,7 +397,7 @@ like the same gray as both text and border, correctly appears in multiple roles.
 - **Element-color roles (cta/action/text/link/border) are ranked by `log1p` of vote mass.**
   These paint negligible screenshot area, so area would be wrong twice over. It would be
   *incorrect*: the page background out-areas every button, so an area-ranked `cta` collapses
-  to the page-background hex and the real brand CTA is pruned below `MIN_SHARE` — on
+  to the page-background hex and the real brand CTA is pruned below `MIN_PROBABILITY_SHARE` — on
   github.com the `cta` role reported the dark page background and the green "Sign up" button
   vanished. And it would be *non-deterministic*: which of two near-zero-area buttons forms its
   own median-cut screenshot bin (and so gets area) flips between macOS and Linux on identical
@@ -417,14 +417,14 @@ cta/action `property_family` stays `background` for the family rollups and the c
 index below; only their *ranking signal* is vote mass.
 
 Within each role the prominence scores are normalized to probabilities, entries below
-`MIN_SHARE` (0.02) are pruned, and survivors are renormalized. If pruning would empty a
+`MIN_PROBABILITY_SHARE` (0.02) are pruned, and survivors are renormalized. If pruning would empty a
 non-empty role, the single argmax entry is kept at probability 1.0 instead — a role that
 measured *something* never reports nothing.
 
-`MIN_SHARE` is a *relative* threshold, so when a role accumulates many colors every
+`MIN_PROBABILITY_SHARE` is a *relative* threshold, so when a role accumulates many colors every
 entry's share shrinks and a genuine low-mass color can drop below 0.02 purely from
 dilution. To stop that, an element-color entry whose raw in-role vote mass clears
-`MIN_MASS` (≈ one element's worth of confident vote) is exempt from the share prune — it
+`MIN_EXEMPT_VOTE_MASS` (≈ one element's worth of confident vote) is exempt from the share prune — it
 has independent, DOM-derived evidence that it genuinely paints the role. The exemption is
 element-color-only; the area-ranked structural-surface roles rank by screenshot area and
 stay on pure share.
@@ -435,12 +435,12 @@ The same clusters, re-projected as the canonical, color-first answer to "how is 
 used?". Because the inventory now clusters per family, one color can arrive as several
 clusters (the same gray as a text cluster *and* a border cluster, or `#ffffff` as both a
 background bin and a text color), so clusters are first grouped by **exact hex** and merged
-into one atom per color — exact equality is deliberate, since it keeps family-distinct hexes
+into one color each — exact equality is deliberate, since it keeps family-distinct hexes
 like a near-white `#e5e5ea` border and the `#ffffff` page apart while collapsing only what is
-truly the same value. Each merged atom becomes a `ColorUsage`: its `usages` are one slot per
+truly the same value. Each merged color becomes a `ColorUsage`: its `usages` are one slot per
 role it participates in (the role's routed mass over the color's total routed mass — slots
 sum to ~1 — plus normalized per-component evidence and the `property_family` rollup), and its
-overall `prominence` blends the atom's normalized screenshot area with its normalized
+overall `prominence` blends the merged color's normalized screenshot area with its normalized
 `log1p` of total routed vote mass. The blend (`PROMINENCE_AREA_WEIGHT`, default 0.7 toward
 area) is a **first-cut heuristic** — area-truth primary so dominant backgrounds rank high,
 vote-mass secondary so zero-area brand accents (CTA/link colors) are not buried — and is

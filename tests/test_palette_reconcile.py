@@ -176,8 +176,8 @@ def test_rendered_status_token_color_is_not_undeclared() -> None:
 
 
 def test_near_identical_relational_tokens_report_once() -> None:
-    # Two unused foreground tokens within DELTA_E_MATCH fold into one relational group:
-    # one divergence item, rep_name from the heavier token.
+    # Two unused foreground tokens within MAX_TOKEN_MERGE_DELTA_E fold into one relational group:
+    # one divergence item, representative_name from the heavier token.
     usage = UsagePalette(mapping={UsageRole.surface: (_entry("#111111", 1.0),)})
     tokens = [
         _relational_token("--on-primary", "#fefefe", weight=1.0),
@@ -316,7 +316,7 @@ def test_alpha_out_of_range_is_clamped() -> None:
 
 
 def test_near_colors_join_across_usage_and_tokens() -> None:
-    # The ΔE nearest-color join: #fa0202 is within DELTA_E_MATCH_MEASURED of the used
+    # The ΔE nearest-color join: #fa0202 is within MAX_MEASURED_MATCH_DELTA_E of the used
     # #ff0000 (measured entry vs declared token — the loose radius applies), so the
     # token must pool INTO the usage entry (both signals on one color) instead of
     # surfacing as a separate token-only entry.
@@ -374,8 +374,8 @@ def test_token_only_color_never_enters_posterior() -> None:
 
 
 def test_near_identical_tokens_aggregate_into_one_intent_group() -> None:
-    # #2563eb and #2a66ec are within DELTA_E_MATCH: _aggregate_intent must fold them into
-    # ONE intent group (one joined entry, one divergence entry), with rep_name taken
+    # #2563eb and #2a66ec are within MAX_TOKEN_MERGE_DELTA_E: _aggregate_intent must fold them into
+    # ONE intent group (one joined entry, one divergence entry), with representative_name taken
     # from the heavier-weighted token.
     usage = UsagePalette(mapping={UsageRole.cta: (_entry("#10b981", 1.0),)})
     tokens = [
@@ -388,7 +388,7 @@ def test_near_identical_tokens_aggregate_into_one_intent_group() -> None:
     # token-only injection); the aggregated group surfaces via divergence instead.
     assert posterior.mapping[UsageRole.surface] == ()
 
-    # One group -> exactly one declared-but-unused entry; rep_name is the heavier token.
+    # One group -> exactly one declared-but-unused entry; representative_name is the heavier token.
     unused = [d for d in divergence if "unused" in d.note]
     assert len(unused) == 1
     assert unused[0].note == "declared '--b-heavy-blue' unused in render"
@@ -396,7 +396,7 @@ def test_near_identical_tokens_aggregate_into_one_intent_group() -> None:
 
 
 def test_colors_outside_delta_e_threshold_stay_separate() -> None:
-    # #2563eb vs #10b981 are far outside DELTA_E_MATCH: two intent groups, two separate
+    # #2563eb vs #10b981 are far outside MAX_TOKEN_MERGE_DELTA_E: two intent groups, two separate
     # divergence entries. The unmeasured surface category itself stays empty (the
     # empty-category gate) rather than carrying token-only entries.
     usage = UsagePalette(mapping={UsageRole.cta: (_entry("#e11d48", 1.0),)})

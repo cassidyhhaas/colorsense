@@ -19,7 +19,8 @@ re-validated against ``harvest.dom``, ``classify.components``, and every test co
 the old 4-value ``UsageCategory`` (surface/text/interactive/border) was deleted and
 replaced by the 8-value developer-facing ``UsageRole``
 (page/surface/banner/cta/action/text/link/border), plus a first-class ``PropertyFamily``
-(background/text/border) rollup axis and the code-level ``family_of`` mapping. The result
+(background/text/border) rollup axis and the code-level ``UsageRole.property_family`` mapping.
+The result
 tree gained a **color-keyed canonical index** (``ColorUsage`` carrying ``Usage`` slots and
 an overall ``prominence``) alongside the re-keyed role-keyed projection (``UsagePalette``
 of ``UsageEntry``). The legacy 60/30/10 view (``RoleResults``/``Composition`` plus its
@@ -100,7 +101,6 @@ __all__ = [
     "UsagePalette",
     "UsageRole",
     "Viewport",
-    "family_of",
 ]
 
 # ---------------------------------------------------------------------------
@@ -112,9 +112,9 @@ class PropertyFamily(StrEnum):
     """Which family of CSS properties paints the color — the rollup axis over roles.
 
     Coarser than [`UsageRole`][colorsense.UsageRole]: every role belongs to exactly one
-    family (the mapping is [`family_of`][colorsense.family_of]). ``background`` covers
-    ``background-color`` / ``background-image``, ``text`` covers ``color``, and ``border``
-    covers ``border-color``.
+    family (the mapping is [`UsageRole.property_family`][colorsense.UsageRole.property_family]).
+    ``background`` covers ``background-color`` / ``background-image``, ``text`` covers
+    ``color``, and ``border`` covers ``border-color``.
     """
 
     background = "background"
@@ -151,20 +151,23 @@ class UsageRole(StrEnum):
     link = "link"
     border = "border"
 
+    @property
+    def property_family(self) -> PropertyFamily:
+        """The [`PropertyFamily`][colorsense.PropertyFamily] this usage role rolls up to.
 
-def family_of(role: UsageRole) -> PropertyFamily:
-    """Return the [`PropertyFamily`][colorsense.PropertyFamily] a usage role rolls up to.
-
-    A fixed code-level convention (mirroring ``channel_for`` for components): ``text``/``link``
-    are painted by the element's ``color`` (the ``text``
-    family), ``border`` by its ``border-color``, and every other role
-    (``page``/``surface``/``banner``/``cta``/``action``) by a background property.
-    """
-    if role in (UsageRole.text, UsageRole.link):
-        return PropertyFamily.text
-    if role is UsageRole.border:
-        return PropertyFamily.border
-    return PropertyFamily.background
+        A fixed code-level convention, the role-side twin of
+        [`ComponentType.property_family`][colorsense.ComponentType.property_family]: ``text``
+        and ``link`` are painted by the element's ``color`` (the ``text`` family), ``border``
+        by its ``border-color``, and every other role
+        (``page``/``surface``/``banner``/``cta``/``action``) by a background property. ``link``
+        is a text role even though it names an interactive element, because a link's painted
+        color is its typography color, not its (usually transparent) background.
+        """
+        if self in (UsageRole.text, UsageRole.link):
+            return PropertyFamily.text
+        if self is UsageRole.border:
+            return PropertyFamily.border
+        return PropertyFamily.background
 
 
 class TokenSemanticRole(StrEnum):
@@ -215,29 +218,29 @@ class ComponentType(StrEnum):
     badge = "badge"
     third_party = "third_party"
 
+    @property
+    def property_family(self) -> PropertyFamily:
+        """The [`PropertyFamily`][colorsense.PropertyFamily] this component's vote mass routes to.
 
-def channel_for(component: ComponentType) -> str:
-    """Return the color channel a component's vote mass routes to.
+        The routing convention is fixed in code, the component-side twin of
+        [`UsageRole.property_family`][colorsense.UsageRole.property_family]: components whose
+        value ends with ``_text`` — plus ``link``, whose painted color is its typography color,
+        not its (usually transparent) background — are painted by the element's ``color`` (the
+        ``text`` family), ``border`` by its ``border-color``, and everything else (including
+        ``badge``, ``third_party`` and ``button_secondary``) by its ``background-color`` (the
+        ``background`` family).
 
-    The routing convention is fixed in code: components whose value ends with
-    ``_text`` — plus ``link``, whose painted color is its typography color, not
-    its (usually transparent) background — are painted by the element's
-    ``color`` (its ``text`` channel), ``border`` by its ``border-color``, and
-    everything else (including ``badge``, ``third_party`` and
-    ``button_secondary``) by its ``background-color`` (its ``bg`` channel).
-
-    This is the single source of truth for channel routing, shared by the
-    component classifier's per-channel normalization
-    (``classify/components.py``) and the inventory's per-channel attribution
-    (``palette/inventory.py``). The two partitions MUST stay identical, so both
-    call this one function — it lives here in the shared-contracts module so
-    neither importer creates a cross-layer dependency.
-    """
-    if component.value.endswith("_text") or component is ComponentType.link:
-        return "text"
-    if component is ComponentType.border:
-        return "border"
-    return "bg"
+        This is the single source of truth for component routing, shared by the component
+        classifier's per-family normalization (``classify/components.py``) and the inventory's
+        per-family attribution (``palette/inventory.py``). The two partitions MUST stay
+        identical, so both read this one property — it lives here in the shared-contracts module
+        so neither importer creates a cross-layer dependency.
+        """
+        if self.value.endswith("_text") or self is ComponentType.link:
+            return PropertyFamily.text
+        if self is ComponentType.border:
+            return PropertyFamily.border
+        return PropertyFamily.background
 
 
 def is_pill_shape(width: float, height: float, min_corner_radius: float) -> bool:
@@ -250,9 +253,9 @@ def is_pill_shape(width: float, height: float, min_corner_radius: float) -> bool
     This is the single source of truth for the stadium-shape test, shared by the harvester
     (``harvest/dom.py``, gating which gradient fills track the brand palette) and the
     component classifier (``classify/components.py``, the badge/card-exclusion rule). It
-    lives here in the shared-contracts module — like `channel_for` — so neither layer has to
-    import the other (``harvest`` and ``classify`` must not depend on each other) and the
-    two cannot drift out of sync.
+    lives here in the shared-contracts module — like the ``property_family`` routing — so
+    neither layer has to import the other (``harvest`` and ``classify`` must not depend on each
+    other) and the two cannot drift out of sync.
     """
     return height > 0.0 and min_corner_radius >= height / 2.0 and width > height
 
@@ -501,7 +504,7 @@ class Usage(BaseModel):
     A color may be used in several roles (e.g. the same gray as ``text`` *and* ``border``);
     each gets its own ``Usage``. ``role`` is the [`UsageRole`][colorsense.UsageRole] this
     slot describes and ``property_family`` is its [`PropertyFamily`][colorsense.PropertyFamily]
-    rollup (denormalized — always ``family_of(role)`` — so consumers can group by family
+    rollup (denormalized — always ``role.property_family`` — so consumers can group by family
     without recomputing). ``weight`` is this color's share of *its own* usages — the role's
     routed mass over the color's total routed mass, so a color's ``weight`` values sum to
     ~1.0. ``components`` is normalized evidence within this slot: which component types
@@ -518,7 +521,7 @@ class Usage(BaseModel):
 
 
 class ColorUsage(BaseModel):
-    """A measured color and where it is used — the color-keyed canonical inventory atom.
+    """A measured color and where it is used — one entry of the color-keyed canonical inventory.
 
     ``prominence`` is the overall ranking signal blending area-truth (primary) with routed
     vote mass (secondary), so dominant backgrounds rank high while zero-area brand accents

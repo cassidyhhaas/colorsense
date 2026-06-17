@@ -70,12 +70,13 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the offline quality panel: Supabase's black badges win `action`, Vercel's amber dot leaves the
   palette, and Disco's corner chips route correctly.
 - **Genuine low-mass colors no longer get diluted out of a crowded role.** The usage view
-  prunes entries below a *relative* share threshold (`MIN_SHARE`, 2%), so when a role
+  prunes entries below a *relative* share threshold (`MIN_PROBABILITY_SHARE`, 2%), so when a role
   accumulates many colors — for example after the near-white text fix below splits one
   near-white cluster into several — every entry's share shrinks and a real, low-mass color
   could fall below the threshold purely from dilution rather than from being any less real
   (e.g. Resend's `#46fea5` neon-green accent text). Element-color entries (text/link/CTA/
-  action/border) whose raw in-role vote mass clears a new absolute floor (`MIN_MASS`, ≈ one
+  action/border) whose raw in-role vote mass clears a new absolute floor (`MIN_EXEMPT_VOTE_MASS`,
+  ≈ one
   element's worth of confident vote) are now exempt from the share prune — an absolute
   evidence floor is immune to entry-count dilution. The area-ranked structural-surface
   roles (page/surface/banner) rank by screenshot area and are unaffected. Measured on the
@@ -93,6 +94,15 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- **BREAKING (no behavior change):** the two free functions that mapped a usage role / component
+  type to "which CSS property paints the color" are replaced by properties on the enums:
+  `family_of(role)` becomes `UsageRole.property_family` and the internal `channel_for(component)`
+  becomes `ComponentType.property_family`. The internal stringly-typed `"bg"`/`"text"`/`"border"`
+  "channel" taxonomy used as dict keys in `classify/components.py` and `palette/inventory.py` is
+  unified onto the existing public `PropertyFamily` enum (`background`/`text`/`border`), so there is
+  now a single type for this axis. The public API shrinks by one name (`colorsense.family_of` is
+  removed; the `.property_family` properties need no separate export). This is a pure
+  rename/retype — the pipeline output (eval scorecard and golden snapshots) is unchanged.
 - **Internal refactor (no behavior change):** three more hand-duplicated idioms now share named
   helpers. The confusable "paints anything" (`alpha > 0.0`) vs "fully opaque" (`alpha >= 1.0`)
   background checks are now `colorsense.color.primitives.is_painting` / `is_opaque`; the
@@ -135,6 +145,17 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   public `colorsense` API or called anywhere in the library. Removed the
   `component_classifier.component_types` config key (and its model field): it duplicated the
   `ComponentType` enum in `models.py` and was loaded but never read, so it tuned nothing.
+
+### Security
+
+- **Bumped the `examples` group's Starlette floor to `>=1.3.1`** to close
+  [GHSA-82w8-qh3p-5jfq](https://github.com/advisories/GHSA-82w8-qh3p-5jfq) (high severity): a
+  request-body DoS where `request.form()` size limits were silently ignored for
+  `application/x-www-form-urlencoded`. This also clears the low-severity
+  [GHSA-jp82-jpqv-5vv3](https://github.com/advisories/GHSA-jp82-jpqv-5vv3) (patched in 1.3.0).
+  The FastAPI floor moves to `>=0.133` — the lowest release whose Starlette pin admits 1.3.1 —
+  so the declared floors stay jointly satisfiable. Starlette is a transitive dependency used
+  only by `examples/webservice/`; the library's own runtime dependencies are unaffected.
 
 ## [0.6.0] - 2026-06-14
 

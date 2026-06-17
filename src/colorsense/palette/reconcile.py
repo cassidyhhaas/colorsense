@@ -17,9 +17,9 @@ actually rendered; a declared color with no measured match never enters the post
 that every posterior entry carries measured ``area``/``components`` evidence. A missing
 intent signal is uniform-smoothed (``+ 1/K`` over the K candidates), a bounded
 scale-aware penalty rather than a veto. Colors are matched across the two sources by
-nearest-color under two perceptual ΔE radii — the tight `DELTA_E_MATCH` for
-declared-vs-declared and the looser `DELTA_E_MATCH_MEASURED` for measured-vs-declared
-(rationale at each constant).
+nearest-color under two maximum OKLab ΔE distances — the tight `MAX_TOKEN_MERGE_DELTA_E`
+for collapsing declared tokens with each other and the looser `MAX_MEASURED_MATCH_DELTA_E`
+for matching a measured color against a declared token (rationale at each constant).
 
 The output is a posterior [`UsagePalette`][colorsense.UsagePalette] plus a divergence report listing
 declared-but-unused and used-but-undeclared discrepancies. Declared-but-unused items are
@@ -46,23 +46,24 @@ from colorsense.models import (
     UsageRole,
 )
 from colorsense.palette._pruning import prune_distribution
-from colorsense.palette.inventory import DELTA_E_MATCH_BG
+from colorsense.palette.inventory import MAX_BG_MATCH_DELTA_E
 
 __all__ = ["reconcile"]
 
 # --- Tunable constants -------------------------------------------------------
 
-#: Nearest-color join threshold in OKLab ΔE for grouping DECLARED token colors with
-#: each other. Both sides are exact computed values, so the radius stays tight.
-DELTA_E_MATCH: float = 0.08
+#: Maximum OKLab ΔE distance at which two DECLARED token colors are treated as the same
+#: color and folded into one intent group (`_group_by_color`). Both sides are exact computed
+#: values, so the ceiling stays tight.
+MAX_TOKEN_MERGE_DELTA_E: float = 0.08
 
-#: Join threshold for matching a MEASURED usage entry against a declared token color.
-#: A measured entry's representative is a screenshot-quantizer bin whenever the cluster
-#: matched one, and an element may join a bin up to the bg join radius away
-#: (`DELTA_E_MATCH_BG`) — so this radius must be at
-#: least that, or a pixel-perfect rendered token can fail its own intent match purely
-#: from (platform-dependent) quantizer blending (see docs/how-it-works.md).
-DELTA_E_MATCH_MEASURED: float = DELTA_E_MATCH_BG
+#: Maximum OKLab ΔE distance at which a MEASURED usage color is treated as the same color
+#: as a declared token. A measured entry's representative is a screenshot-quantizer bin
+#: whenever the cluster matched one, and an element may join a bin up to the bg join radius
+#: away (`MAX_BG_MATCH_DELTA_E`) — so this ceiling must be at least that, or a pixel-perfect
+#: rendered token can fail its own intent match purely from (platform-dependent) quantizer
+#: blending (see docs/how-it-works.md).
+MAX_MEASURED_MATCH_DELTA_E: float = MAX_BG_MATCH_DELTA_E
 
 #: Degenerate-input guard on the USAGE side of the geometric mean only, so a
 #: zero-probability entry contributes ``log(EPS)`` rather than ``log(0)`` (undefined).
@@ -109,8 +110,8 @@ class _IntentGroup:
         self.color: Color = color
         self.intent_raw: dict[UsageRole, float] = {}
         self.token_weight: float = 0.0
-        self.rep_name: str = ""
-        self._rep_weight: float = -math.inf
+        self.representative_name: str = ""
+        self._representative_weight: float = -math.inf
         self.high_intent: bool = False
 
     def add(self, token: ClassifiedToken) -> None:
@@ -122,9 +123,9 @@ class _IntentGroup:
         self.token_weight += token.weight
         if token.origin in HIGH_INTENT_ORIGINS:
             self.high_intent = True
-        if token.weight > self._rep_weight:
-            self._rep_weight = token.weight
-            self.rep_name = token.record.name
+        if token.weight > self._representative_weight:
+            self._representative_weight = token.weight
+            self.representative_name = token.record.name
 
     def normalized_intent(self) -> dict[UsageRole, float]:
         total = sum(self.intent_raw.values())
@@ -137,7 +138,7 @@ def _group_by_color(eligible: list[ClassifiedToken]) -> list[_IntentGroup]:
     """Fold ``eligible`` tokens into `_IntentGroup`\\ s by nearest color.
 
     Tokens are processed sorted by ``record.name`` for determinism; a token joins an
-    existing group when within `DELTA_E_MATCH` of the group's color, else starts a
+    existing group when within `MAX_TOKEN_MERGE_DELTA_E` of the group's color, else starts a
     new group anchored on its own resolved color. Callers must pre-filter to tokens
     with a resolved color.
     """
@@ -145,7 +146,7 @@ def _group_by_color(eligible: list[ClassifiedToken]) -> list[_IntentGroup]:
     for token in sorted(eligible, key=lambda t: t.record.name):
         color = token.record.resolved
         assert color is not None  # callers filter on resolved
-        match_idx = first_within(color, groups, DELTA_E_MATCH, key=lambda g: g.color)
+        match_idx = first_within(color, groups, MAX_TOKEN_MERGE_DELTA_E, key=lambda g: g.color)
         matched = groups[match_idx] if match_idx is not None else None
         if matched is None:
             matched = _IntentGroup(color)
@@ -237,7 +238,7 @@ def reconcile(
 class _PoolCandidate:
     """One measured usage entry in a role's pooling universe, with its matched
     declared-intent share (``0.0`` when no declared group is within
-    `DELTA_E_MATCH_MEASURED`)."""
+    `MAX_MEASURED_MATCH_DELTA_E`)."""
 
     measured: UsageEntry
     p_usage: float
@@ -268,15 +269,19 @@ def _pool_role(
 
     def intent_for(color: Color) -> float:
         # Pre-filter to groups carrying this role, keeping the original index so the
-        # nearest match remaps back to `intents[gi]`. Same <=/tie-to-last semantics.
-        eligible = [(gi, group) for gi, group in enumerate(groups) if role in intents[gi]]
+        # nearest match remaps back to `intents[group_index]`. Same <=/tie-to-last semantics.
+        groups_with_role = [
+            (group_index, group)
+            for group_index, group in enumerate(groups)
+            if role in intents[group_index]
+        ]
         match_idx = nearest_within(
-            color, eligible, DELTA_E_MATCH_MEASURED, key=lambda pair: pair[1].color
+            color, groups_with_role, MAX_MEASURED_MATCH_DELTA_E, key=lambda pair: pair[1].color
         )
         if match_idx is None:
             return 0.0
-        gi = eligible[match_idx][0]
-        return intents[gi][role]
+        group_index = groups_with_role[match_idx][0]
+        return intents[group_index][role]
 
     candidates = [
         _PoolCandidate(
@@ -292,16 +297,17 @@ def _pool_role(
     # factor of ``(K + 1) ** alpha`` (~1.6x at K=2, ~2.6x at K=10 for the default
     # alpha) instead of the unbounded near-veto an absolute floor produces — a 95%-
     # dominant undeclared color must stay dominant over a minor declared one.
-    smoothing = 1.0 / len(candidates)
-    unnorm = [
-        (c.p_usage + EPS) ** (1.0 - alpha) * (c.p_intent + smoothing) ** alpha for c in candidates
+    uniform_smoothing = 1.0 / len(candidates)
+    unnormalized_scores = [
+        (c.p_usage + EPS) ** (1.0 - alpha) * (c.p_intent + uniform_smoothing) ** alpha
+        for c in candidates
     ]
 
     # Normalize, prune, renormalize survivors via the shared step; if pruning empties
     # the role, the deterministic argmax (ties broken by smallest hex) is kept.
     kept = prune_distribution(
         candidates,
-        unnorm,
+        unnormalized_scores,
         min_share=MIN_POSTERIOR_PROB,
         tie_key=lambda c: c.measured.color.hex,
     )
@@ -340,14 +346,14 @@ def _build_divergence(
     )
 
     def matches_any_usage(color: Color) -> bool:
-        return any_within(color, usage_colors, DELTA_E_MATCH_MEASURED, key=lambda c: c)
+        return any_within(color, usage_colors, MAX_MEASURED_MATCH_DELTA_E, key=lambda c: c)
 
     items: list[DivergenceItem] = []
 
     # DECLARED-BUT-UNUSED: token color with high-intent classification (see
     # HIGH_INTENT_ORIGINS), intent mass, and no rendered usage match.
-    for gi, group in enumerate(groups):
-        intent = intents[gi]
+    for group_index, group in enumerate(groups):
+        intent = intents[group_index]
         if not intent:
             continue
         if not group.high_intent:
@@ -361,7 +367,7 @@ def _build_divergence(
             DivergenceItem(
                 role=argmax_role,
                 color=group.color,
-                note=f"declared '{group.rep_name}' unused in render",
+                note=f"declared '{group.representative_name}' unused in render",
             )
         )
 
@@ -378,7 +384,7 @@ def _build_divergence(
             DivergenceItem(
                 role=UsageRole.text,
                 color=group.color,
-                note=f"declared '{group.rep_name}' unused in render",
+                note=f"declared '{group.representative_name}' unused in render",
             )
         )
 
@@ -390,7 +396,7 @@ def _build_divergence(
     token_colors = [t.record.resolved for t in tokens if t.record.resolved is not None]
 
     def matches_any_token(color: Color) -> bool:
-        return any_within(color, token_colors, DELTA_E_MATCH_MEASURED, key=lambda c: c)
+        return any_within(color, token_colors, MAX_MEASURED_MATCH_DELTA_E, key=lambda c: c)
 
     seen: set[tuple[UsageRole, str]] = set()
     for role, entries in usage.mapping.items():
