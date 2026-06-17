@@ -14,10 +14,10 @@ from colorsense.models import (
 )
 from colorsense.palette.usage import (
     _AREA_RANKED_ROLES,
-    COMPONENT_ROLE,
+    COMPONENT_TYPES_BY_USAGE_ROLE,
     MIN_EXEMPT_VOTE_MASS,
     MIN_PROBABILITY_SHARE,
-    ROLE_COMPONENTS,
+    USAGE_ROLE_BY_COMPONENT_TYPE,
     build_color_index,
     build_usage,
 )
@@ -46,26 +46,27 @@ def _cluster(
 
 
 # ---------------------------------------------------------------------------
-# ROLE_COMPONENTS / partition
+# COMPONENT_TYPES_BY_USAGE_ROLE / partition
 # ---------------------------------------------------------------------------
 
 
 def test_role_components_partitions_every_routed_component_once() -> None:
-    # COMPONENT_ROLE is the exact inverse of ROLE_COMPONENTS, one role per routed component.
-    flat = [c for comps in ROLE_COMPONENTS.values() for c in comps]
+    # USAGE_ROLE_BY_COMPONENT_TYPE is the exact inverse of COMPONENT_TYPES_BY_USAGE_ROLE:
+    # one role per routed component.
+    flat = [c for comps in COMPONENT_TYPES_BY_USAGE_ROLE.values() for c in comps]
     assert len(flat) == len(set(flat))  # no component routed twice
-    assert set(COMPONENT_ROLE) == set(flat)
-    for role, comps in ROLE_COMPONENTS.items():
+    assert set(USAGE_ROLE_BY_COMPONENT_TYPE) == set(flat)
+    for role, comps in COMPONENT_TYPES_BY_USAGE_ROLE.items():
         for comp in comps:
-            assert COMPONENT_ROLE[comp] is role
+            assert USAGE_ROLE_BY_COMPONENT_TYPE[comp] is role
 
 
 def test_cta_text_and_third_party_are_unrouted() -> None:
     # Both are deliberately absent from every role and from the inverse map.
-    assert ComponentType.cta_text not in COMPONENT_ROLE
-    assert ComponentType.third_party not in COMPONENT_ROLE
+    assert ComponentType.cta_text not in USAGE_ROLE_BY_COMPONENT_TYPE
+    assert ComponentType.third_party not in USAGE_ROLE_BY_COMPONENT_TYPE
     # Everything else IS routed.
-    assert set(COMPONENT_ROLE) == set(ComponentType) - {
+    assert set(USAGE_ROLE_BY_COMPONENT_TYPE) == set(ComponentType) - {
         ComponentType.cta_text,
         ComponentType.third_party,
     }

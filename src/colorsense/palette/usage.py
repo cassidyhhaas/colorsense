@@ -24,7 +24,7 @@ Design notes
 * The two public entry points (`build_usage`, `build_color_index`) take *only* the cluster
   list (no [`Config`][colorsense.Config]); every threshold is a documented, module-level
   **tunable** constant.
-* `ROLE_COMPONENTS` — the usage-role → component-type collapse — is a fixed code-level
+* `COMPONENT_TYPES_BY_USAGE_ROLE` — the usage-role → component-type collapse — is a fixed code-level
   convention, exactly like the inventory's component → property-family routing
   (``ComponentType.property_family``): it describes what the taxonomy *means*, not a tunable
   weight,
@@ -33,7 +33,7 @@ Design notes
   button-styled element's text color is part of the CTA, not an independent palette role,
   so it carries no usage (the classifier routes button-styled anchors' labels there); and
   ``third_party`` flows to ``AnalysisResult.third_party_colors`` instead. The inverse
-  (`COMPONENT_ROLE`) is built once and asserted to partition every routed component to
+  (`USAGE_ROLE_BY_COMPONENT_TYPE`) is built once and asserted to partition every routed component to
   exactly one role.
 * Role-keyed prominence is scored differently for *surface* roles vs *element* roles,
   deliberately (see `_AREA_RANKED_ROLES`; worked examples in docs/how-it-works.md):
@@ -77,7 +77,7 @@ from colorsense.models import (
 )
 from colorsense.palette._pruning import prune_distribution
 
-__all__ = ["ROLE_COMPONENTS", "build_color_index", "build_usage"]
+__all__ = ["COMPONENT_TYPES_BY_USAGE_ROLE", "build_color_index", "build_usage"]
 
 CT = ComponentType
 
@@ -125,7 +125,7 @@ PROMINENCE_AREA_WEIGHT: float = 0.7
 # Usage-role -> component-type collapse. A fixed code-level convention (see the module
 # docstring). ``cta_text`` and ``third_party`` map to NO role and are excluded from both
 # usage views; third-party widget colors surface via ``AnalysisResult.third_party_colors``.
-ROLE_COMPONENTS: dict[UsageRole, tuple[ComponentType, ...]] = {
+COMPONENT_TYPES_BY_USAGE_ROLE: dict[UsageRole, tuple[ComponentType, ...]] = {
     UsageRole.page: (CT.page_bg,),
     UsageRole.surface: (CT.card_bg, CT.modal_bg, CT.hero_bg, CT.input_bg),
     UsageRole.banner: (CT.header_bg, CT.nav_bg, CT.footer_bg),
@@ -144,26 +144,26 @@ ROLE_COMPONENTS: dict[UsageRole, tuple[ComponentType, ...]] = {
 }
 
 
-def _build_component_role() -> dict[ComponentType, UsageRole]:
-    """Invert `ROLE_COMPONENTS`, asserting it partitions every routed component once.
+def _build_usage_role_by_component_type() -> dict[ComponentType, UsageRole]:
+    """Invert `COMPONENT_TYPES_BY_USAGE_ROLE`, asserting it partitions every routed component once.
 
-    A component appearing under two roles (or `ROLE_COMPONENTS` drifting from the
+    A component appearing under two roles (or `COMPONENT_TYPES_BY_USAGE_ROLE` drifting from the
     taxonomy) would be a silent routing bug; the assertion turns it into a load-time
     failure. ``cta_text`` and ``third_party`` are intentionally unrouted.
     """
     inverse: dict[ComponentType, UsageRole] = {}
-    for role, components in ROLE_COMPONENTS.items():
-        for component in components:
-            assert component not in inverse, (
-                f"{component} routed to both {inverse[component]} and {role}"
+    for role, component_types in COMPONENT_TYPES_BY_USAGE_ROLE.items():
+        for component_type in component_types:
+            assert component_type not in inverse, (
+                f"{component_type} routed to both {inverse[component_type]} and {role}"
             )
-            inverse[component] = role
+            inverse[component_type] = role
     return inverse
 
 
-# Component-type -> usage-role routing (the inverse of `ROLE_COMPONENTS`), built and
+# Component-type -> usage-role routing (the inverse of `COMPONENT_TYPES_BY_USAGE_ROLE`), built and
 # partition-checked once at import.
-COMPONENT_ROLE: dict[ComponentType, UsageRole] = _build_component_role()
+USAGE_ROLE_BY_COMPONENT_TYPE: dict[ComponentType, UsageRole] = _build_usage_role_by_component_type()
 
 # Roles whose role-keyed prominence is the cluster's screenshot ``area_weight`` rather than
 # its vote mass. These name the structural *surfaces* of a layout — the page canvas, raised
@@ -200,7 +200,7 @@ def _split_masses_by_role(
     for comp, mass in component_mass.items():
         if mass <= 0.0:
             continue
-        role = COMPONENT_ROLE.get(comp)
+        role = USAGE_ROLE_BY_COMPONENT_TYPE.get(comp)
         if role is None:
             continue
         split.setdefault(role, {})[comp] = mass
@@ -277,8 +277,9 @@ def build_usage(clusters: list[ColorCluster]) -> UsagePalette:
     """Build the **measured** role-keyed usage projection from the color inventory.
 
     For each usage role, the participating clusters (those with nonzero raw vote mass routed
-    to the role via `ROLE_COMPONENTS`) are scored by prominence — screenshot area for the
-    structural-surface roles (``page``/``surface``/``banner``), ``log1p`` of in-role vote mass
+    to the role via `COMPONENT_TYPES_BY_USAGE_ROLE`) are scored by prominence — screenshot
+    area for the structural-surface roles (``page``/``surface``/``banner``), ``log1p`` of
+    in-role vote mass
     for every other (element-color) role (see `_AREA_RANKED_ROLES`) — normalized to
     probabilities, pruned below `MIN_PROBABILITY_SHARE` (an element-color entry whose raw vote
     mass clears `MIN_EXEMPT_VOTE_MASS` is exempt — see that constant), and ranked by

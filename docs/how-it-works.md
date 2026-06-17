@@ -365,7 +365,7 @@ fall below it.
 ## 4. The usage views
 
 `palette/usage.py` turns the clusters into two complementary views, keyed off one fixed
-code-level convention: the **role→component collapse** (`ROLE_COMPONENTS`). Each component
+code-level convention: the **role→component collapse** (`COMPONENT_TYPES_BY_USAGE_ROLE`). Each component
 type belongs to exactly one of eight developer-facing **usage roles** — `page_bg` → `page`;
 `card_bg`/`modal_bg`/`hero_bg`/`input_bg` → `surface`; `header_bg`/`nav_bg`/`footer_bg` →
 `banner`; `cta_bg` → `cta`; `button_secondary`/`badge` → `action`; the `*_text` components →

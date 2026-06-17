@@ -31,7 +31,7 @@ from colorsense.models import (
     Viewport,
     is_pill_shape,
 )
-from colorsense.palette.usage import COMPONENT_ROLE
+from colorsense.palette.usage import USAGE_ROLE_BY_COMPONENT_TYPE
 
 
 def _color(hex_: str = "#3366cc", lum: float = 0.5) -> Color:
@@ -163,8 +163,8 @@ def test_component_and_role_property_family_agree() -> None:
     # a UsageRole routes to one in the SAME PropertyFamily, so the component-side and role-side
     # rollups never disagree about which CSS property paints a color. (``cta_text`` and
     # ``third_party`` are deliberately unrouted — they key no usage role — so they are absent
-    # from COMPONENT_ROLE and have no role-side family to agree with.)
-    for component, role in COMPONENT_ROLE.items():
+    # from USAGE_ROLE_BY_COMPONENT_TYPE and have no role-side family to agree with.)
+    for component, role in USAGE_ROLE_BY_COMPONENT_TYPE.items():
         assert component.property_family is role.property_family
 
 
