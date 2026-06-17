@@ -18,7 +18,11 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   instead. A near-black guard now keeps two near-black background colors (lightness ≤ 0.15) apart
   when they are CIEDE2000-distinct (> 3.0), but **only when a CTA/action component is part of the
   vote** — page/surface/banner clustering keeps the pure OKLab radius, whose coarseness is the
-  load-bearing denoiser for the dense near-black surface-variant region. (The mirror-image
+  load-bearing denoiser for the dense near-black surface-variant region. The scoping is
+  *per-component*: when the classifier leaves one near-black element carrying both `page_bg` and
+  `cta_bg` mass (a dark clickable panel), the element's vote is split so only the CTA/action share
+  is diverted and the page/surface share still merges into its surface bin — the guard never pulls
+  a page color off its bin. (The mirror-image
   near-*white* version was prototyped and rejected: the near-white surface cloud fragments into
   noise; near-white remains a text/border-only concern.) Measured on the offline quality panel:
   disconetwork's `cta` recovers `#030711` and drops `#050505` as noise; no other site changes.

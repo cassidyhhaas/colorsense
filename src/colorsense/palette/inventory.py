@@ -21,7 +21,9 @@ objects:
   zero-area cluster. The bg channel can attribute to more than one color: a gradient CTA
   (see `_bg_fill_colors`) paints every opaque stop, and the element's bg mass is split
   evenly across them and scaled by each stop's alpha, so a purple→blue button makes both
-  purple and blue candidates without out-voting a solid one.
+  purple and blue candidates without out-voting a solid one. A bg vote that mixes CTA/action
+and page/surface mass is split further so each share routes to its own nearest entry — see
+the near-black CTA/action background guard below.
 
 Family-segregated clustering
 ----------------------------
@@ -146,9 +148,11 @@ _GUARDED_FAMILIES: frozenset[PropertyFamily] = frozenset(
 # Unlike the text/border guard this CANNOT be applied to the whole background pool — OKLab's
 # coarseness there is a load-bearing denoiser for the large near-extreme page/surface bins
 # (a global swap regressed the panel, +25 noise). So this guard is scoped THREE ways: (1) only
-# the near-black extreme, (2) only background mass from CTA/action components, and (3) only at the
-# denoising CIEDE2000 radius. The symmetric near-WHITE variant was prototyped and REJECTED on the
-# panel (winners -1, noise +4): near-white "buttons" are faint translucent tints (e.g. resend's
+# the near-black extreme, (2) only the CTA/action *share* of a bg vote — a mixed vote is split so
+# its page/surface/banner share stays on the unguarded join (see `_CTA_ACTION_BG_COMPONENTS`), and
+# (3) only at the denoising CIEDE2000 radius. The symmetric near-WHITE variant was prototyped and
+# REJECTED on the panel (winners -1, noise +4): near-white "buttons" are faint translucent tints
+# (e.g. resend's
 # `#d6ebfd` at alpha 0.11) that, once split off white, fragment into several distinct near-white
 # entries that themselves become noise and even dethrone correct near-white CTA winners — so only
 # solid near-black CTA backgrounds get the guard. The radius matches the text/border guard's 3.0
@@ -157,16 +161,19 @@ _GUARDED_FAMILIES: frozenset[PropertyFamily] = frozenset(
 _NEAR_BLACK_LIGHTNESS: float = 0.15
 _CTA_BG_GUARD_MAX_DE2000: float = 3.0
 
-# Background-channel components whose mass routes to the `cta`/`action` usage roles. The guard
-# engages whenever ANY of these is *present* in an element's bg vote (attribution) or an entry's
-# component mix (clustering) — a deliberately inclusive gate so a distinct dark CTA color is never
-# missed. Consequence: an element that the softmax classifier scores as mostly page/surface but
-# partly CTA (e.g. `{page_bg: 0.9, cta_bg: 0.1}`) is also guarded, so its whole near-black bg vote
-# is kept off a CIEDE2000-distinct surface bin rather than only the CTA share. That is an accepted
-# edge — such mixed near-black elements are rare, their element votes carry zero screenshot area
-# (so they cannot displace an area-ranked page/surface winner), and the alternative (a dominance
-# threshold) would silently drop genuine dark CTAs whose classifier mass is split. Pure page/
-# surface/banner attribution — no CTA/action component at all — keeps the unguarded OKLab radius.
+# Background-channel components whose mass routes to the `cta`/`action` usage roles. At attribution
+# the guard does not divert an element's *whole* bg vote: it splits the vote and diverts only the
+# share carried by these components, leaving any page/surface/banner share on the unguarded OKLab
+# join (see the attribution loop in `build_inventory`). This matters because the bg-channel softmax
+# (`classify/components._finalize_distribution`) can leave a near-black element carrying BOTH kinds
+# of mass — a dark, full-width *clickable* panel reads as page/surface (area/hero signals) and as a
+# button (clickable), so e.g. `{page_bg: 0.9, cta_bg: 0.1}` survives pruning. Diverting only the
+# 0.1 CTA share keeps the guard's promise that page/surface attribution is untouched, while still
+# surfacing the distinct dark CTA. A dominance threshold (guard only if CTA mass leads) was the
+# rejected alternative: it would silently drop genuine dark CTAs whose classifier mass is split.
+# The CTA gate is presence-based so any nonzero CTA/action share is recovered. At the cluster step
+# the gate is per-entry presence (`_entry_has_cta_action_mass`): an entry carrying any CTA/action
+# mass is kept off a CIEDE2000-distinct near-black surface bin; pure page/surface entries are not.
 _CTA_ACTION_BG_COMPONENTS: frozenset[ComponentType] = frozenset(
     {ComponentType.cta_bg, ComponentType.badge, ComponentType.button_secondary}
 )
@@ -514,41 +521,71 @@ def build_inventory(harvest: Harvest, classified: list[ClassifiedElement]) -> li
             # divider that actually structures the page.
             # The text/border pools apply the near-white guard so OKLab cannot collapse two
             # perceptually-distinct near-white text colors onto one entry (see
-            # `_forbids_near_white_merge`); the background pool keeps the unguarded shared helper.
+            # `_forbids_near_white_merge`). The bg pool splits its vote (below) so the near-black
+            # CTA guard diverts ONLY CTA/action mass; everything else keeps the shared helper.
             guarded_family = _FAMILY_BY_CHANNEL[channel] in _GUARDED_FAMILIES
-            # A bg vote carrying ANY CTA/action component uses the near-black guard so a small dark
-            # button background is not absorbed into a CIEDE2000-distinct near-black screenshot bin
-            # (disco `#030711` vs the `#050505` footer bin). A vote with no CTA/action component at
-            # all (pure page/surface/banner) keeps the unguarded OKLab join radius. See
-            # `_CTA_ACTION_BG_COMPONENTS` for why the gate is presence-based rather than dominance.
+            # A bg vote that carries ANY CTA/action component is split in two: the CTA/action share
+            # routes through the near-black guard (so a small dark button background is not absorbed
+            # into a CIEDE2000-distinct near-black screenshot bin — disco `#030711` vs the `#050505`
+            # footer bin), while the page/surface/banner share keeps the unguarded OKLab join. That
+            # split is what keeps the guard from touching page/surface attribution when a near-black
+            # element carries both kinds of mass (a dark clickable panel). See
+            # `_CTA_ACTION_BG_COMPONENTS` for why the CTA gate is presence-based, not dominance.
             cta_action_bg = channel == "bg" and any(
                 component in _CTA_ACTION_BG_COMPONENTS for component in channel_distribution
             )
+            radius = _MATCH_BY_CHANNEL[channel]
             fill_count = len(fills)
             for color in fills:
                 weight = (color.alpha if channel in ("bg", "border") else 1.0) / fill_count
 
+                # Resolve routing as (component-mass subset, target entry index) pairs. Every
+                # lookup runs against the SAME pre-update pool, so the unguarded page/surface
+                # share can't accidentally snap onto the fresh entry the guarded CTA share is
+                # about to create — it sees only the entries that existed before this vote.
                 if guarded_family:
-                    nearest_index = _nearest_text_border_entry(
-                        color, pool, _MATCH_BY_CHANNEL[channel]
-                    )
+                    routes = [
+                        (channel_distribution, _nearest_text_border_entry(color, pool, radius))
+                    ]
                 elif cta_action_bg:
-                    nearest_index = _nearest_bg_entry_guarded(
-                        color, pool, _MATCH_BY_CHANNEL[channel]
-                    )
+                    cta_mass = {
+                        c: m
+                        for c, m in channel_distribution.items()
+                        if c in _CTA_ACTION_BG_COMPONENTS
+                    }
+                    other_mass = {
+                        c: m
+                        for c, m in channel_distribution.items()
+                        if c not in _CTA_ACTION_BG_COMPONENTS
+                    }
+                    routes = [(cta_mass, _nearest_bg_entry_guarded(color, pool, radius))]
+                    if other_mass:
+                        routes.append(
+                            (
+                                other_mass,
+                                nearest_within(color, pool, radius, key=lambda e: e.color),
+                            )
+                        )
                 else:
-                    nearest_index = nearest_within(
-                        color, pool, _MATCH_BY_CHANNEL[channel], key=lambda entry: entry.color
-                    )
+                    routes = [
+                        (
+                            channel_distribution,
+                            nearest_within(color, pool, radius, key=lambda e: e.color),
+                        )
+                    ]
 
-                if nearest_index is None:
-                    new_entry = _Entry(color, 0.0)
-                    for component, mass in channel_distribution.items():
-                        new_entry.component_mix[component] += mass * weight
-                    pool.append(new_entry)
-                else:
-                    target = pool[nearest_index]
-                    for component, mass in channel_distribution.items():
+                # Materialize. Routes that fall through to a new entry share one (same `color`),
+                # so a split vote whose shares both miss every existing entry stays one entry.
+                shared_new: _Entry | None = None
+                for sub_mass, nearest_index in routes:
+                    if nearest_index is None:
+                        if shared_new is None:
+                            shared_new = _Entry(color, 0.0)
+                            pool.append(shared_new)
+                        target = shared_new
+                    else:
+                        target = pool[nearest_index]
+                    for component, mass in sub_mass.items():
                         target.component_mix[component] += mass * weight
 
     # STEP 2: cluster each family pool independently, then assemble the flat union in

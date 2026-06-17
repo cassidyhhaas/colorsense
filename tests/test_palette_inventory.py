@@ -877,27 +877,29 @@ def test_near_black_page_bg_still_merges_into_surface_bin() -> None:
     assert ComponentType.page_bg in bg_clusters[0].component_mass
 
 
-def test_near_black_mixed_cta_and_page_mass_is_guarded() -> None:
-    # Accepted edge (see `_CTA_ACTION_BG_COMPONENTS`): the gate is presence-based, so an element the
-    # softmax scores as mostly page_bg but partly cta_bg still routes its WHOLE near-black bg vote
-    # through the guard — it splits off the distinct surface bin rather than merging the page share.
-    # Pinned deliberately: surfacing a distinct dark CTA is preferred over a dominance threshold
-    # that would drop genuine dark CTAs with split classifier mass; the element vote carries no area
-    # so it cannot displace the area-ranked surface bin in page/surface.
+def test_near_black_mixed_cta_and_page_mass_splits_by_component() -> None:
+    # A near-black element the softmax scores as mostly page_bg but partly cta_bg (a dark clickable
+    # panel) has its bg vote SPLIT: the cta_bg share routes through the guard and splits off as its
+    # own entry, while the page_bg share keeps the unguarded OKLab join and merges into the distinct
+    # near-black surface bin. The guard must not divert the page/surface share off the surface
+    # bin — the correctness promise of `_CTA_ACTION_BG_COMPONENTS` (per-component, not whole-vote).
     harvest = _harvest([ScreenshotBin(color=_color(_NB_SURFACE), area_fraction=0.4)])
     classified = [
         _classified(_color(_NB_CTA_BG), {ComponentType.page_bg: 0.9, ComponentType.cta_bg: 0.1})
     ]
 
     clusters = build_inventory(harvest, classified)
-    # The CTA color splits off as its own entry, carrying both components of the mixed vote.
+    # The CTA color splits off as its own entry carrying ONLY the cta_bg share — never page_bg.
     cta_clusters = [c for c in clusters if c.color.hex == _NB_CTA_BG]
     assert len(cta_clusters) == 1
     assert ComponentType.cta_bg in cta_clusters[0].component_mass
-    assert ComponentType.page_bg in cta_clusters[0].component_mass
-    # The area-ranked surface bin keeps its area and is untouched as the page/surface winner.
+    assert ComponentType.page_bg not in cta_clusters[0].component_mass
+    # The page_bg share stays on the unguarded join and lands on the area-ranked surface bin, which
+    # keeps its area AND now carries the page_bg mass — page/surface attribution is left alone.
     surface = next(c for c in clusters if c.color.hex == _NB_SURFACE)
     assert surface.area_weight == pytest.approx(0.4, abs=1e-9)
+    assert ComponentType.page_bg in surface.component_mass
+    assert ComponentType.cta_bg not in surface.component_mass
 
 
 def test_cta_bg_guard_survives_union_find_transitivity() -> None:

@@ -337,7 +337,12 @@ CTA/action component is part of the vote**. That second scope is essential: unli
 the near-black background region is densely packed with CIEDE2000-distinct page/surface variants
 where OKLab's coarseness is the load-bearing denoiser, so guarding the *whole* pool regresses the
 panel. Confining it to CTA/action mass leaves page/surface/banner clustering on the pure OKLab
-radius. The symmetric near-*white* version of this background guard was prototyped and rejected for
+radius. The scoping is *per-component*, not per-element: the bg-channel softmax can leave a single
+near-black element (a dark, full-width clickable panel) carrying both `page_bg` and `cta_bg` mass,
+so at the join step the element's vote is **split** — the CTA/action share routes through the guard
+while the page/surface/banner share keeps the unguarded radius and merges normally. Diverting the
+whole vote would let incidental CTA mass pull a page color off its surface bin. The symmetric
+near-*white* version of this background guard was prototyped and rejected for
 the same reason (the near-white surface cloud fragments into noise); near-white stays a text/border
 concern only.
 
