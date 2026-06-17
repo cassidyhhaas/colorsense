@@ -147,8 +147,10 @@ shadow/border/background, vote `card_bg` — the card detector, which skips pill
 small circles so repeated chips and dots aren't read as tiny cards), and third-party origin
 signals. One fallback runs before the families: on sites whose `<html>`/`<body>`/`<main>`
 all paint no opaque background (a common utility-CSS pattern), the largest viewport-spanning
-opaque element near the top of the page is taken as the page canvas and votes `page_bg`, so
-the page color still surfaces in the `page` role. Then
+opaque element near the top of the page *whose color matches the independently-derived page
+color* is taken as the page canvas and votes `page_bg`, so the page color still surfaces in
+the `page` role (the color match keeps a brand-colored hero from being mistaken for the
+canvas). Then
 multiplicative suppressors apply (`aria-hidden` and hidden elements are zeroed;
 brand-component votes on third-party widgets are damped to 5%), and the surviving positive
 votes become the element's probability distribution **one color channel at a time**. An

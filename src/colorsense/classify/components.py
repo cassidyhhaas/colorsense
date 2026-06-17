@@ -39,6 +39,7 @@ from colorsense.config import (
     Config,
     ContrastRelabelConfig,
     GeometryThresholds,
+    PageCanvasFallbackConfig,
     VoteRule,
     WhenRule,
 )
@@ -198,18 +199,25 @@ def _page_canvas_index(
     elements: list[HarvestedElement],
     thresholds: GeometryThresholds,
     viewport: Viewport,
+    page_canvas: Color | None,
+    fallback: PageCanvasFallbackConfig,
 ) -> int | None:
     """Index of the fallback page-canvas element, or ``None`` if no fallback applies.
 
     Returns an index ONLY when the canonical canvas (``html``/``body``/``main``) paints no
     opaque background — otherwise the canonical canvas is the page surface and the fallback
     must not fire. When it does apply, the canvas is the largest-area element that spans the
-    viewport width (``full_width``) near the top of the page (``top < top_band``) and paints
-    an opaque background: the full-viewport ``<div>`` carrying the page color on
-    transparent-canonical-canvas sites. ``elements`` is in deterministic document order, so
-    the ``max``-area tie-break (first-seen on equal area) is stable.
+    viewport width (``full_width``) near the top of the page (``top < top_band``), paints an
+    opaque background, AND whose color matches the independently-derived page-canvas color
+    within ``color_match_delta_e`` (CIEDE2000). The color match is the safety gate: without
+    it the bare "largest full-width top-band opaque element" can be a brand-colored hero or
+    banner larger than the real canvas wrapper, and the fallback would mislabel that hero as
+    ``page`` and erase its surface votes. Requiring the picked element to actually paint the
+    page color makes the fallback pick the canvas wrapper, never a differently-colored hero.
+    ``elements`` is in deterministic document order, so the ``max``-area tie-break (first-seen
+    on equal area) is stable.
     """
-    if _canonical_canvas_is_opaque(elements):
+    if _canonical_canvas_is_opaque(elements) or page_canvas is None:
         return None
 
     vp_w = float(viewport.width)
@@ -220,7 +228,10 @@ def _page_canvas_index(
     best_index: int | None = None
     best_area = -1.0
     for index, element in enumerate(elements):
-        if not is_opaque(element.bg):
+        bg = element.bg
+        if bg is None or not is_opaque(bg):
+            continue
+        if ciede2000(bg, page_canvas) > fallback.color_match_delta_e:
             continue
         rect = element.rect
         full_width = (rect.width / vp_w) >= thresholds.full_width
@@ -636,7 +647,9 @@ def classify_components(
     page_canvas = _derive_page_canvas_color(elements)
     relabel_config = classifier_config.contrast_relabel
     canvas_fallback = classifier_config.page_canvas_fallback
-    page_canvas_index = _page_canvas_index(elements, thresholds, active_viewport)
+    page_canvas_index = _page_canvas_index(
+        elements, thresholds, active_viewport, page_canvas, canvas_fallback
+    )
 
     results: list[ClassifiedElement] = []
     for index, element in enumerate(elements):

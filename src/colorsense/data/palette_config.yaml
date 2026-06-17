@@ -408,12 +408,17 @@ component_classifier:
   # which the geometry `hero_bg` (3.0) and repetition `card_bg` (3.5) votes bury in the
   # bg-channel softmax, so the page color never reaches the `page` role. The classifier
   # picks the largest viewport-spanning opaque-bg element near the top of the page (the
-  # full_width / top_band geometry thresholds) as the canvas, injects `page_bg`, and clears
-  # the competing hero/card votes from that one element. Opaque-body sites never trigger
-  # this. `page_bg_vote` matches the `body -> page_bg` semantic vote (5.0) so the canvas
-  # wins its bg channel exactly as a real opaque <body> would.
+  # full_width / top_band geometry thresholds) WHOSE COLOR matches the derived page-canvas
+  # color within `color_match_delta_e` (CIEDE2000) as the canvas, injects `page_bg`, and
+  # clears the competing hero/card votes from that one element. Opaque-body sites never
+  # trigger this. `page_bg_vote` matches the `body -> page_bg` semantic vote (5.0) so the
+  # canvas wins its bg channel exactly as a real opaque <body> would. `color_match_delta_e`
+  # is the safety gate: without it the largest full-width top-band opaque element can be a
+  # brand-colored hero/banner, and the fallback would mislabel that hero as `page`; 2.0 is
+  # tight enough to reject a distinct hero while tolerating sub-pixel color rounding.
   page_canvas_fallback:
     page_bg_vote: 5.0
+    color_match_delta_e: 2.0
     suppress: [hero_bg, hero_text, card_bg, card_text]
 
   # --- Feature family 6: origin / third-party. -------------------------------

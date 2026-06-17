@@ -406,6 +406,11 @@ class PageCanvasFallbackConfig(BaseModel):
     # ``body -> page_bg`` semantic vote so the canvas wins its bg channel exactly as a
     # real opaque <body> would.
     page_bg_vote: float = Field(ge=0.0)
+    # Maximum CIEDE2000 distance between a candidate element's color and the independently
+    # derived page-canvas color for it to qualify. The safety gate: it forces the fallback
+    # to pick the element actually painting the page color, never a brand-colored hero/banner
+    # that merely happens to be the largest full-width top-band opaque element.
+    color_match_delta_e: float = Field(ge=0.0)
     # Components removed from the canvas element's votes before finalization: the
     # full-width/tall canvas otherwise reads as a hero, and a shared layout class token
     # makes it a repetition "card". Both must clear for page_bg to win.

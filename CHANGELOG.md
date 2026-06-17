@@ -16,10 +16,13 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `hero_bg` vote and the repetition `card_bg` vote buried in the per-channel softmax — so the real
   page color never reached the `page` role (it scored empty, and a quantizer phantom could win
   instead). When (and only when) the canonical canvas paints no opaque background, the classifier
-  now treats the largest viewport-spanning opaque-background element near the top of the page as the
-  canvas: it injects a `page_bg` prior and clears the competing hero/card votes on that one element.
-  Opaque-`<body>` sites are untouched. Measured on the offline quality panel: shadcn and Tailwind
-  recover a correct `page` winner.
+  now treats the largest viewport-spanning opaque-background element near the top of the page
+  *whose color matches the independently-derived page color* as the canvas: it injects a `page_bg`
+  prior and clears the competing hero/card votes on that one element. The color match is the safety
+  gate — it forces the fallback to pick the element actually painting the page color, never a
+  brand-colored hero or banner that merely happens to be the largest. Opaque-`<body>` sites are
+  untouched. Measured on the offline quality panel: shadcn and Tailwind recover a correct `page`
+  winner.
 - **Small circular chips no longer leak their accent into `surface`, and recurring clickable ones
   are recognized as badges.** The pill/badge shape test deliberately excludes perfect circles
   (it requires width > height), so a small `rounded-full` element fell through both the badge rule
