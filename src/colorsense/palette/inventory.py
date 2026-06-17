@@ -135,6 +135,76 @@ _GUARDED_FAMILIES: frozenset[PropertyFamily] = frozenset(
     {PropertyFamily.text, PropertyFamily.border}
 )
 
+# --- Near-black CTA/action background guard ---------------------------------------------
+# The same OKLab non-uniformity that buries near-white *text* (the guard above) also buries small
+# dark CTA/secondary-button backgrounds into the big near-black *screenshot bins* of the background
+# pool. Measured case: disco's two dark CTA anchors paint `#030711`, which sits OKLab 0.029 from the
+# `#050505` footer bin (inside both the 0.10 join radius and the 0.05 cluster radius) but CIEDE2000
+# 4.33 away — plainly distinct. Their `cta_bg` mass is absorbed into the footer bin, so `#030711`
+# never surfaces in `cta` and `#050505` shows up there as noise instead.
+#
+# Unlike the text/border guard this CANNOT be applied to the whole background pool — OKLab's
+# coarseness there is a load-bearing denoiser for the large near-extreme page/surface bins
+# (a global swap regressed the panel, +25 noise). So this guard is scoped THREE ways: (1) only
+# the near-black extreme, (2) only background mass from CTA/action components, and (3) only at the
+# denoising CIEDE2000 radius. The symmetric near-WHITE variant was prototyped and REJECTED on the
+# panel (winners -1, noise +4): near-white "buttons" are faint translucent tints (e.g. resend's
+# `#d6ebfd` at alpha 0.11) that, once split off white, fragment into several distinct near-white
+# entries that themselves become noise and even dethrone correct near-white CTA winners — so only
+# solid near-black CTA backgrounds get the guard. The radius matches the text/border guard's 3.0
+# ΔE2000 *denoising* threshold: it splits `#030711`/`#050505` (4.33) while keeping genuine
+# near-black anti-alias variants merged (`#000000`/`#010101` is 0.16, `#08090b`/`#050505` is 1.05).
+_NEAR_BLACK_LIGHTNESS: float = 0.15
+_CTA_BG_GUARD_MAX_DE2000: float = 3.0
+
+# Background-channel components whose mass routes to the `cta`/`action` usage roles. The guard
+# engages whenever ANY of these is *present* in an element's bg vote (attribution) or an entry's
+# component mix (clustering) — a deliberately inclusive gate so a distinct dark CTA color is never
+# missed. Consequence: an element that the softmax classifier scores as mostly page/surface but
+# partly CTA (e.g. `{page_bg: 0.9, cta_bg: 0.1}`) is also guarded, so its whole near-black bg vote
+# is kept off a CIEDE2000-distinct surface bin rather than only the CTA share. That is an accepted
+# edge — such mixed near-black elements are rare, their element votes carry zero screenshot area
+# (so they cannot displace an area-ranked page/surface winner), and the alternative (a dominance
+# threshold) would silently drop genuine dark CTAs whose classifier mass is split. Pure page/
+# surface/banner attribution — no CTA/action component at all — keeps the unguarded OKLab radius.
+_CTA_ACTION_BG_COMPONENTS: frozenset[ComponentType] = frozenset(
+    {ComponentType.cta_bg, ComponentType.badge, ComponentType.button_secondary}
+)
+
+
+def _forbids_cta_bg_merge(a: Color, b: Color) -> bool:
+    """Whether the near-black CTA/action background guard forbids merging ``a`` and ``b``.
+
+    True iff both colors are near-black (lightness <= `_NEAR_BLACK_LIGHTNESS`) yet farther apart
+    than `_CTA_BG_GUARD_MAX_DE2000` in CIEDE2000 — i.e. OKLab would wrongly collapse a dark
+    CTA/secondary-button background into the big near-black screenshot bin next to it. The
+    CIEDE2000 call runs only after the cheap lightness gate, so only on the near-black subset.
+    """
+    return (
+        a.lightness <= _NEAR_BLACK_LIGHTNESS
+        and b.lightness <= _NEAR_BLACK_LIGHTNESS
+        and ciede2000(a, b) > _CTA_BG_GUARD_MAX_DE2000
+    )
+
+
+def _nearest_bg_entry_guarded(color: Color, pool: list[_Entry], radius: float) -> int | None:
+    """`nearest_within` for the background pool honoring the near-black CTA/action guard.
+
+    Mirrors `_nearest_text_border_entry`: argmin over OKLab `delta_e` within ``radius`` (``<=``),
+    skipping any entry the guard forbids, so CTA/action mass falls through to the nearest permitted
+    entry or to ``None`` (a fresh entry). Applied only when the attributed background mass is
+    CTA/action-sourced; ordinary background attribution keeps the unguarded shared helper.
+    """
+    nearest_index: int | None = None
+    nearest_distance = radius
+    for idx, entry in enumerate(pool):
+        distance = delta_e(color, entry.color)
+        if distance <= nearest_distance and not _forbids_cta_bg_merge(color, entry.color):
+            nearest_distance = distance
+            nearest_index = idx
+    return nearest_index
+
+
 # Per-channel join radius: bg loose, text/border tight (see the constants above).
 _MATCH_BY_CHANNEL: dict[str, float] = {
     "bg": DELTA_E_MATCH_BG,
@@ -248,6 +318,33 @@ def _in_family_mass(entry: _Entry) -> float:
     return sum(entry.component_mix.values())
 
 
+def _entry_has_cta_action_mass(entry: _Entry) -> bool:
+    """Whether a background-pool entry carries any CTA/action component mass."""
+    return any(component in _CTA_ACTION_BG_COMPONENTS for component in entry.component_mix)
+
+
+def _union_forbidden_cta_bg(parent: list[int], entries: list[_Entry], i: int, j: int) -> bool:
+    """Whether merging ``i``/``j``'s clusters would co-locate a guard-forbidden CTA/action bg pair.
+
+    Background-pool counterpart of `_union_forbidden`: checks every cross-pair between the two
+    sets being merged against `_forbids_cta_bg_merge`, but only forbids when at least one member
+    of the offending pair carries CTA/action mass — so ordinary page/surface/banner clustering is
+    never blocked (the OKLab denoiser stays intact there). Transitivity-safe by the same induction
+    as the near-white guard: every union is gated, so no cluster ever co-locates a forbidden pair.
+    """
+    root_i, root_j = _find(parent, i), _find(parent, j)
+    if root_i == root_j:
+        return False
+    left = [k for k in range(len(entries)) if _find(parent, k) == root_i]
+    right = [k for k in range(len(entries)) if _find(parent, k) == root_j]
+    return any(
+        _forbids_cta_bg_merge(entries[p].color, entries[q].color)
+        and (_entry_has_cta_action_mass(entries[p]) or _entry_has_cta_action_mass(entries[q]))
+        for p in left
+        for q in right
+    )
+
+
 def _cluster_pool(entries: list[_Entry], family: PropertyFamily) -> list[ColorCluster]:
     """Union-find cluster one family's entry pool into `ColorCluster`s.
 
@@ -261,6 +358,7 @@ def _cluster_pool(entries: list[_Entry], family: PropertyFamily) -> list[ColorCl
         return []
 
     guarded = family in _GUARDED_FAMILIES
+    bg_guarded = family is PropertyFamily.background
     parent = list(range(entry_count))
     for i in range(entry_count):
         for j in range(i + 1, entry_count):
@@ -274,6 +372,12 @@ def _cluster_pool(entries: list[_Entry], family: PropertyFamily) -> list[ColorCl
             # families: `_forbids_near_white_merge` is never true there, so clustering is
             # byte-identical to the plain union-find.)
             if guarded and _union_forbidden(parent, entries, i, j):
+                continue
+            # Background pool: keep a CTA/action background off a CIEDE2000-distinct near-black
+            # surface bin (e.g. disco's `#030711` CTA vs the `#050505` footer bin, OKLab 0.029 but
+            # ΔE2000 4.33). Scoped to CTA/action-bearing pairs so the page/surface denoiser is
+            # untouched; transitivity-safe like the near-white guard above.
+            if bg_guarded and _union_forbidden_cta_bg(parent, entries, i, j):
                 continue
             _union(parent, i, j)
 
@@ -412,12 +516,24 @@ def build_inventory(harvest: Harvest, classified: list[ClassifiedElement]) -> li
             # perceptually-distinct near-white text colors onto one entry (see
             # `_forbids_near_white_merge`); the background pool keeps the unguarded shared helper.
             guarded_family = _FAMILY_BY_CHANNEL[channel] in _GUARDED_FAMILIES
+            # A bg vote carrying ANY CTA/action component uses the near-black guard so a small dark
+            # button background is not absorbed into a CIEDE2000-distinct near-black screenshot bin
+            # (disco `#030711` vs the `#050505` footer bin). A vote with no CTA/action component at
+            # all (pure page/surface/banner) keeps the unguarded OKLab join radius. See
+            # `_CTA_ACTION_BG_COMPONENTS` for why the gate is presence-based rather than dominance.
+            cta_action_bg = channel == "bg" and any(
+                component in _CTA_ACTION_BG_COMPONENTS for component in channel_distribution
+            )
             fill_count = len(fills)
             for color in fills:
                 weight = (color.alpha if channel in ("bg", "border") else 1.0) / fill_count
 
                 if guarded_family:
                     nearest_index = _nearest_text_border_entry(
+                        color, pool, _MATCH_BY_CHANNEL[channel]
+                    )
+                elif cta_action_bg:
+                    nearest_index = _nearest_bg_entry_guarded(
                         color, pool, _MATCH_BY_CHANNEL[channel]
                     )
                 else:

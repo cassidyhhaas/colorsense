@@ -9,6 +9,20 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **Dark CTA buttons are no longer buried in the near-black page/footer color.** A small dark
+  CTA/secondary-button background could sit OKLab-near a large near-black screenshot bin yet be
+  perceptually distinct from it, so its vote was absorbed into the bin and the button color never
+  surfaced in the `cta`/`action` roles. On disconetwork the dark CTA anchors paint `#030711`, which
+  is OKLab 0.029 from the `#050505` footer bin (inside the join radius) but CIEDE2000 4.33 away
+  (plainly different): `#030711` was missing from `cta` and `#050505` showed up there as noise
+  instead. A near-black guard now keeps two near-black background colors (lightness ≤ 0.15) apart
+  when they are CIEDE2000-distinct (> 3.0), but **only when a CTA/action component is part of the
+  vote** — page/surface/banner clustering keeps the pure OKLab radius, whose coarseness is the
+  load-bearing denoiser for the dense near-black surface-variant region. (The mirror-image
+  near-*white* version was prototyped and rejected: the near-white surface cloud fragments into
+  noise; near-white remains a text/border-only concern.) Measured on the offline quality panel:
+  disconetwork's `cta` recovers `#030711` and drops `#050505` as noise; no other site changes.
+
 - **Near-transparent hairline borders no longer out-vote the divider that structures the page.**
   The `border` usage role could be won by a near-invisible color: on vercel.com 48 icon-container
   outlines painted at `alpha 0.08` accumulated more border vote mass than the single opaque

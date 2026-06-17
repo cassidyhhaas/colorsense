@@ -320,7 +320,26 @@ both at the join above and at the cluster step — only if they are also within 
 variants (~1–3 ΔE2000 from their canonical color) still collapse, while genuinely-distinct
 tokens like `#ffffff`/`#f0f6fc` stay apart. The **background** pool keeps the pure OKLab radius —
 there its coarseness usefully denoises quantized screenshot bins, and that is the regime OKLab
-is being relied on for. (The near-black analogue is left to the family-pool split above.)
+is being relied on for.
+
+#### The near-black CTA guard
+
+The same OKLab non-uniformity bites the **background** pool at the *dark* extreme — but only for
+one kind of color, so the fix is far narrower. A small dark CTA/secondary-button background can sit
+OKLab-near a large near-black page or footer screenshot bin yet be CIEDE2000-distinct from it, so
+its vote is absorbed into the bin and the button color never surfaces in `cta`/`action`. The
+canonical case is disconetwork's dark CTA anchors painting `#030711`, which is OKLab 0.029 from the
+`#050505` footer bin (inside both radii) but CIEDE2000 4.33 away: the CTA mass lands on the footer,
+so `#030711` is missing from `cta` and `#050505` shows up there as noise instead. So two
+*near-black* (lightness ≤ 0.15) background colors that are CIEDE2000-distinct (> 3.0,
+`_CTA_BG_GUARD_MAX_DE2000`) are kept apart — at the join and the cluster step — **but only when a
+CTA/action component is part of the vote**. That second scope is essential: unlike near-white text,
+the near-black background region is densely packed with CIEDE2000-distinct page/surface variants
+where OKLab's coarseness is the load-bearing denoiser, so guarding the *whole* pool regresses the
+panel. Confining it to CTA/action mass leaves page/surface/banner clustering on the pure OKLab
+radius. The symmetric near-*white* version of this background guard was prototyped and rejected for
+the same reason (the near-white surface cloud fragments into noise); near-white stays a text/border
+concern only.
 
 ### The cross-OS quantizer incident
 

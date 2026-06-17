@@ -20,6 +20,8 @@ from colorsense.models import (
     Viewport,
 )
 from colorsense.palette.inventory import (
+    _CTA_BG_GUARD_MAX_DE2000,
+    _NEAR_BLACK_LIGHTNESS,
     DELTA_E_CLUSTER,
     DELTA_E_MATCH_BG,
     DELTA_E_MATCH_TEXT_BORDER,
@@ -27,6 +29,8 @@ from colorsense.palette.inventory import (
     NEAR_WHITE_MERGE_MAX_DE2000,
     _cluster_pool,
     _Entry,
+    _entry_has_cta_action_mass,
+    _forbids_cta_bg_merge,
     _forbids_near_white_merge,
     build_inventory,
 )
@@ -789,3 +793,145 @@ def test_background_pool_still_merges_near_whites() -> None:
     assert len(clusters) == 1
     assert clusters[0].member_count == 2
     assert clusters[0].color.hex == _WHITE  # max-area member wins
+
+
+# --- Near-black CTA/action background guard ---------------------------------------------
+# disco's dark CTA anchors paint `#030711`, OKLab-near the `#050505` footer screenshot bin but
+# CIEDE2000-distinct. Without the guard the CTA bg mass is absorbed into the footer bin.
+_NB_CTA_BG = "#030711"
+_NB_SURFACE = "#050505"
+
+
+def test_cta_bg_guard_predicate_distinguishes_the_disco_pair() -> None:
+    cta = _color(_NB_CTA_BG)
+    surface = _color(_NB_SURFACE)
+
+    # OKLab would merge them (within the cluster radius); CIEDE2000 says clearly distinct.
+    assert delta_e(cta, surface) <= DELTA_E_CLUSTER
+    assert ciede2000(cta, surface) > _CTA_BG_GUARD_MAX_DE2000
+    assert cta.lightness <= _NEAR_BLACK_LIGHTNESS
+    assert surface.lightness <= _NEAR_BLACK_LIGHTNESS
+
+    assert _forbids_cta_bg_merge(cta, surface)
+    assert _forbids_cta_bg_merge(surface, cta)  # symmetric
+    assert not _forbids_cta_bg_merge(cta, cta)  # never forbids itself
+
+
+def test_cta_bg_guard_is_near_black_only_not_near_white() -> None:
+    # Deliberate asymmetry vs the near-white text guard: the near-white surface-variant cloud is
+    # where OKLab's denoising is load-bearing, so the CTA bg guard never engages near white even
+    # for a CIEDE2000-distinct pair (measured: a symmetric variant regresses the panel).
+    white = _color(_WHITE)
+    primer = _color(_PRIMER_NEAR_WHITE)
+    assert ciede2000(white, primer) > _CTA_BG_GUARD_MAX_DE2000  # distinct...
+    assert not _forbids_cta_bg_merge(white, primer)  # ...yet the near-black guard ignores it
+
+    # A near-black and a mid-gray: not both near-black, so the guard never engages.
+    assert not _forbids_cta_bg_merge(_color(_NB_CTA_BG), _color("#9198a1"))
+
+
+def test_cta_bg_guard_allows_near_black_anti_alias_variants_to_merge() -> None:
+    # The radius is a denoising radius: genuine near-black surface variants still merge.
+    for a, b in (("#000000", "#010101"), ("#08090b", _NB_SURFACE)):
+        first, second = _color(a), _color(b)
+        assert ciede2000(first, second) <= _CTA_BG_GUARD_MAX_DE2000
+        assert not _forbids_cta_bg_merge(first, second)
+
+
+def test_entry_has_cta_action_mass() -> None:
+    cta = _Entry(_color(_NB_CTA_BG), 0.0)
+    cta.component_mix[ComponentType.cta_bg] = 1.0
+    surface = _Entry(_color(_NB_SURFACE), 0.1)
+    surface.component_mix[ComponentType.footer_bg] = 1.0
+    assert _entry_has_cta_action_mass(cta)
+    assert not _entry_has_cta_action_mass(surface)
+
+
+def test_cta_bg_splits_from_near_black_surface_bin() -> None:
+    # The disco scenario end-to-end (attribution + cluster guard): a clickable dark CTA whose bg
+    # is `#030711` must surface as its own background cluster carrying cta_bg mass, not be absorbed
+    # into the `#050505` footer bin that OKLab would merge it into.
+    harvest = _harvest([ScreenshotBin(color=_color(_NB_SURFACE), area_fraction=0.4)])
+    classified = [_classified(_color(_NB_CTA_BG), {ComponentType.cta_bg: 1.0})]
+
+    clusters = build_inventory(harvest, classified)
+    cta_clusters = [c for c in clusters if ComponentType.cta_bg in c.component_mass]
+    assert len(cta_clusters) == 1
+    assert cta_clusters[0].color.hex == _NB_CTA_BG
+    # The surface bin keeps its area and does NOT pick up the cta_bg mass.
+    surface = [c for c in clusters if c.color.hex == _NB_SURFACE]
+    assert surface and ComponentType.cta_bg not in surface[0].component_mass
+
+
+def test_near_black_page_bg_still_merges_into_surface_bin() -> None:
+    # Scoping proof: the guard is CTA/action-only. The SAME `#030711`/`#050505` pair that splits
+    # above merges when the element's mass is page_bg (not cta/action) — page/surface attribution
+    # keeps the pure OKLab radius so the denoiser stays intact.
+    harvest = _harvest([ScreenshotBin(color=_color(_NB_SURFACE), area_fraction=0.4)])
+    classified = [_classified(_color(_NB_CTA_BG), {ComponentType.page_bg: 1.0})]
+
+    clusters = build_inventory(harvest, classified)
+    bg_clusters = [c for c in clusters if c.area_weight > 0.0 or c.component_mass]
+    assert len(bg_clusters) == 1  # one merged background cluster
+    assert bg_clusters[0].color.hex == _NB_SURFACE  # max-area member wins
+    assert ComponentType.page_bg in bg_clusters[0].component_mass
+
+
+def test_near_black_mixed_cta_and_page_mass_is_guarded() -> None:
+    # Accepted edge (see `_CTA_ACTION_BG_COMPONENTS`): the gate is presence-based, so an element the
+    # softmax scores as mostly page_bg but partly cta_bg still routes its WHOLE near-black bg vote
+    # through the guard — it splits off the distinct surface bin rather than merging the page share.
+    # Pinned deliberately: surfacing a distinct dark CTA is preferred over a dominance threshold
+    # that would drop genuine dark CTAs with split classifier mass; the element vote carries no area
+    # so it cannot displace the area-ranked surface bin in page/surface.
+    harvest = _harvest([ScreenshotBin(color=_color(_NB_SURFACE), area_fraction=0.4)])
+    classified = [
+        _classified(_color(_NB_CTA_BG), {ComponentType.page_bg: 0.9, ComponentType.cta_bg: 0.1})
+    ]
+
+    clusters = build_inventory(harvest, classified)
+    # The CTA color splits off as its own entry, carrying both components of the mixed vote.
+    cta_clusters = [c for c in clusters if c.color.hex == _NB_CTA_BG]
+    assert len(cta_clusters) == 1
+    assert ComponentType.cta_bg in cta_clusters[0].component_mass
+    assert ComponentType.page_bg in cta_clusters[0].component_mass
+    # The area-ranked surface bin keeps its area and is untouched as the page/surface winner.
+    surface = next(c for c in clusters if c.color.hex == _NB_SURFACE)
+    assert surface.area_weight == pytest.approx(0.4, abs=1e-9)
+
+
+def test_cta_bg_guard_survives_union_find_transitivity() -> None:
+    # Transitivity safety (mirrors the near-white test): A (a CTA bg) and C are guard-forbidden;
+    # bridge B is mergeable with each. A must not chain to C through B. The guard only blocks
+    # because a member of the offending pair carries CTA/action mass.
+    a, b, c = _color("#000000"), _color("#000002"), _color("#000008")
+    assert _forbids_cta_bg_merge(a, c)
+    assert not _forbids_cta_bg_merge(a, b)
+    assert not _forbids_cta_bg_merge(b, c)
+    assert delta_e(a, b) <= DELTA_E_CLUSTER and delta_e(b, c) <= DELTA_E_CLUSTER
+
+    # Equal (zero) areas so the representative tiebreak falls to the smallest hex, isolating the
+    # transitivity behaviour from area-based representative selection.
+    entry_a = _Entry(a, 0.0)
+    entry_a.component_mix[ComponentType.cta_bg] = 1.0  # the CTA that must keep its identity
+    entries = [entry_a, _Entry(b, 0.0), _Entry(c, 0.0)]
+    clusters = _cluster_pool(entries, PropertyFamily.background)
+
+    reps = {cluster.color.hex for cluster in clusters}
+    assert len(clusters) == 2  # A and C never co-cluster, even through the bridge
+    assert "#000000" in reps and "#000008" in reps
+
+
+def test_background_pool_merges_distinct_near_blacks_without_cta_mass() -> None:
+    # Without any CTA/action mass the background pool keeps the pure OKLab radius: the same
+    # forbidden-by-distance near-black pair still merges (the guard never engages).
+    harvest = _harvest(
+        [
+            ScreenshotBin(color=_color(_NB_SURFACE), area_fraction=0.6),
+            ScreenshotBin(color=_color(_NB_CTA_BG), area_fraction=0.4),
+        ]
+    )
+    clusters = build_inventory(harvest, [])
+    assert len(clusters) == 1
+    assert clusters[0].member_count == 2
+    assert clusters[0].color.hex == _NB_SURFACE  # max-area member wins
