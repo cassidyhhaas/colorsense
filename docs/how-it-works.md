@@ -138,12 +138,19 @@ Each harvested element is scored into a probability distribution over component 
 (`page_bg`, `header_bg`, `card_bg`, `cta_bg`, `link`, `border`, `page_text`, …,
 `third_party`). The scoring is additive voting across eight feature families — semantic
 tags and ARIA roles, geometry (a full-width element near the top of the viewport votes
-`header_bg`; a fully-rounded, short, text-bearing pill that paints a fill votes `badge`),
-class/id token
+`header_bg`; a fully-rounded, short, text-bearing pill that paints a fill votes `badge`, as
+does a small clickable circular chip that recurs as a structurally-similar group — an
+icon-only corner badge), class/id token
 substrings (`"navbar"` votes `nav_bg`), interactivity, border presence, text presence,
 repetition (three or more siblings sharing a tag and class token, each with a
-shadow/border/background, vote `card_bg` — the card detector, which skips pill shapes so
-repeated chips aren't read as tiny cards), and third-party origin signals. Then
+shadow/border/background, vote `card_bg` — the card detector, which skips pill shapes *and*
+small circles so repeated chips and dots aren't read as tiny cards), and third-party origin
+signals. One fallback runs before the families: on sites whose `<html>`/`<body>`/`<main>`
+all paint no opaque background (a common utility-CSS pattern), the largest viewport-spanning
+opaque element near the top of the page *whose color matches the independently-derived page
+color* is taken as the page canvas and votes `page_bg`, so the page color still surfaces in
+the `page` role (the color match keeps a brand-colored hero from being mistaken for the
+canvas). Then
 multiplicative suppressors apply (`aria-hidden` and hidden elements are zeroed;
 brand-component votes on third-party widgets are damped to 5%), and the surviving positive
 votes become the element's probability distribution **one color channel at a time**. An

@@ -9,6 +9,33 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **The page canvas now surfaces on sites whose `<html>`/`<body>`/`<main>` are transparent.**
+  Modern utility-CSS sites (e.g. shadcn, Tailwind's own site) leave the document root with
+  `background: transparent` and paint the page color on a single full-viewport `<div>` instead.
+  That div's only `page_bg` signal was a couple of weak class-token votes, which the geometry
+  `hero_bg` vote and the repetition `card_bg` vote buried in the per-channel softmax — so the real
+  page color never reached the `page` role (it scored empty, and a quantizer phantom could win
+  instead). When (and only when) the canonical canvas paints no opaque background, the classifier
+  now treats the largest viewport-spanning opaque-background element near the top of the page
+  *whose color matches the independently-derived page color* as the canvas: it injects a `page_bg`
+  prior and clears the competing hero/card votes on that one element. The color match is the safety
+  gate — it forces the fallback to pick the element actually painting the page color, never a
+  brand-colored hero or banner that merely happens to be the largest. Opaque-`<body>` sites are
+  untouched. Measured on the offline quality panel: shadcn and Tailwind recover a correct `page`
+  winner.
+- **Small circular chips no longer leak their accent into `surface`, and recurring clickable ones
+  are recognized as badges.** The pill/badge shape test deliberately excludes perfect circles
+  (it requires width > height), so a small `rounded-full` element fell through both the badge rule
+  and the repetition card-detector's pill exclusion, and got swept into `card_bg` — a decorative
+  status dot leaking into the `surface` palette (e.g. Vercel's `#ff990a` amber dot), and a grid of
+  black corner badge-chips landing in `surface` instead of `action` (e.g. Supabase, Disco). A new
+  `is_circle_shape` predicate (the square counterpart to `is_pill_shape`, with a 1px tolerance) now
+  drives two rules: a small circle is never a repetition "card" (so a decorative dot leaks nowhere),
+  and a small circle that is clickable, paints a fill, and **recurs as a structurally-similar group**
+  is promoted to `badge` (→ `action`). The recurrence gate is the discriminator: a lone clickable
+  status dot keeps winning `link` from its text channel rather than being mis-promoted. Measured on
+  the offline quality panel: Supabase's black badges win `action`, Vercel's amber dot leaves the
+  palette, and Disco's corner chips route correctly.
 - **Genuine low-mass colors no longer get diluted out of a crowded role.** The usage view
   prunes entries below a *relative* share threshold (`MIN_SHARE`, 2%), so when a role
   accumulates many colors — for example after the near-white text fix below splits one
