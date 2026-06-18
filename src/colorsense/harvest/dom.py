@@ -54,8 +54,7 @@ _MAX_GRADIENT_STOPS: int = 8
 def _is_interactive_pill(
     *, clickable: bool, min_corner_radius: float, width: float, height: float
 ) -> bool:
-    """Whether the element is a clickable pill (a CTA), the only place a gradient fill is
-    treated as palette-bearing.
+    """Whether the element is a clickable pill (a CTA), the sole palette-bearing gradient fill.
 
     Only an interactive pill's gradient tracks the brand palette: a site's CTA/pill colors
     are consistently on-palette, but gradients on *card* backgrounds are decorative flavor

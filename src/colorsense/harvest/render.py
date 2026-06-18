@@ -302,7 +302,7 @@ async def _refuse_web_socket(ws_route: WebSocketRoute) -> None:
 
 
 class SharedBrowser:
-    """Lazily-launched headless Chromium shared by multiple `RenderSession`\\ s.
+    r"""Lazily-launched headless Chromium shared by multiple `RenderSession`\ s.
 
     Async context manager owning one Playwright + `Browser`
     pair. Nothing is launched until the first `get` call, so a caller whose renders
@@ -331,6 +331,7 @@ class SharedBrowser:
     """
 
     def __init__(self, *, browser_args: Sequence[str] = ()) -> None:
+        """Validate ``browser_args`` and set up lazy-launch state (nothing is launched here)."""
         self._browser_args = normalize_browser_args(browser_args)
         self._playwright: Playwright | None = None
         self._browser: Browser | None = None
@@ -340,6 +341,7 @@ class SharedBrowser:
         self._lock = asyncio.Lock()
 
     async def __aenter__(self) -> Self:
+        """Enter the context manager; the browser launches lazily on first `get`, not here."""
         return self
 
     async def __aexit__(
@@ -348,6 +350,7 @@ class SharedBrowser:
         exc: BaseException | None,
         tb: TracebackType | None,
     ) -> None:
+        """Close the browser and stop Playwright exactly once, suppressing teardown errors."""
         # Serialize with get(): an in-flight first-use launch holds the lock across its
         # awaits, so teardown waits for it and then closes the browser it produced —
         # without the lock, a launch racing teardown could assign a fresh browser after
@@ -439,6 +442,7 @@ class RenderSession:
         browser: Browser | None = None,
         browser_args: Sequence[str] = (),
     ) -> None:
+        """Store render parameters; reject ``browser_args`` combined with an external browser."""
         self._browser_args = normalize_browser_args(browser_args)
         if browser is not None and self._browser_args:
             raise ValueError(
@@ -460,6 +464,7 @@ class RenderSession:
     # -- context manager --------------------------------------------------
 
     async def __aenter__(self) -> Self:
+        """Launch/attach the browser and open the routed page; clean up partial state on failure."""
         # A failure anywhere below (Chromium not installed, sandbox refusal, bad
         # browser_args, context/route/page errors) propagates out of __aenter__, and
         # context-manager semantics then never run __aexit__ — so without the cleanup
@@ -506,6 +511,7 @@ class RenderSession:
         exc: BaseException | None,
         tb: TracebackType | None,
     ) -> None:
+        """Tear down everything this session owns, swallowing teardown errors."""
         # Always tear down, swallowing teardown errors so the original exception (if any)
         # propagates cleanly. An external browser is NOT closed — only the resources this
         # session owns (always its context; the browser/Playwright pair only when launched
@@ -644,7 +650,7 @@ class RenderSession:
         return await self._detect_rects(_MEDIA_RECTS_JS, _MAX_MEDIA_RECTS)
 
     async def _detect_rects(self, js: str, *args: object) -> list[Rect]:
-        """Evaluate a rect-returning JS payload and parse it into `Rect`\\ s, best-effort.
+        r"""Evaluate a rect-returning JS payload and parse it into `Rect`\ s, best-effort.
 
         Shared by consent and media detection: both run a bounded in-page pass returning a
         list of ``{x, y, w, h}`` dicts (CSS px). Any failure — a wedged-renderer timeout, a
