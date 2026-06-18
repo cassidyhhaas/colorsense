@@ -135,7 +135,7 @@ class _IntentGroup:
 
 
 def _group_by_color(eligible: list[ClassifiedToken]) -> list[_IntentGroup]:
-    """Fold ``eligible`` tokens into `_IntentGroup`\\ s by nearest color.
+    r"""Fold ``eligible`` tokens into `_IntentGroup`\ s by nearest color.
 
     Tokens are processed sorted by ``record.name`` for determinism; a token joins an
     existing group when within `MAX_TOKEN_MERGE_DELTA_E` of the group's color, else starts a
@@ -236,9 +236,11 @@ def reconcile(
 
 @dataclass
 class _PoolCandidate:
-    """One measured usage entry in a role's pooling universe, with its matched
-    declared-intent share (``0.0`` when no declared group is within
-    `MAX_MEASURED_MATCH_DELTA_E`)."""
+    """One measured usage entry in a role's pooling universe.
+
+    Carries its matched declared-intent share (``0.0`` when no declared group is within
+    `MAX_MEASURED_MATCH_DELTA_E`).
+    """
 
     measured: UsageEntry
     p_usage: float
