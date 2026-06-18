@@ -9,6 +9,11 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- **Renamed the internal `Rect` value type to `BoundingBox`** and its field on
+  `HarvestedElement` from `rect` to `bounding_box`, for self-documenting clarity ahead of the
+  major version bump. `RenderSession.consent_rects`/`media_rects` likewise become
+  `consent_boxes`/`media_boxes`. All three names are internal (excluded from `__all__`), so the
+  public `AnalysisResult` tree and JSON output are unchanged.
 - **BREAKING (enums): all `StrEnum` members renamed to PEP 8 `UPPER_CASE`.** Members of
   `PropertyFamily`, `UsageRole`, `TokenSemanticRole`, `ComponentType`, `Theme`, `TokenOrigin`,
   and `MatchType` now use screaming-snake-case identifiers (e.g. `UsageRole.cta` →

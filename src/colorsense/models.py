@@ -53,7 +53,7 @@ internal-only and ``ComponentType`` made public — re-validated against ``pipel
 ``palette.usage``, ``palette.roles``, ``palette.reconcile``, and the ``harvest``
 package.)
 
-Value objects (``Color``, ``Rect``, ``Viewport``) are immutable. The **public result tree**
+Value objects (``Color``, ``BoundingBox``, ``Viewport``) are immutable. The **public result tree**
 reachable from [`AnalysisResult`][colorsense.AnalysisResult] is also immutable: every output model
 is ``frozen=True`` and its sequence fields are ``tuple`` (not ``list``), so neither attribute
 reassignment nor in-place ``.append()`` works. ``dict`` fields stay regular dicts — ``frozen``
@@ -66,7 +66,7 @@ The **internal-only** assembly models (``Harvest``, ``HarvestedElement``,
 scratch structures the pipeline mutates while building the result and never escape to the
 caller. The frozen classification scratch types (``TokenRecord``, ``ClassifiedToken``,
 ``TokenOrigin``) are likewise internal: consumers see declared tokens only through the
-public [`DesignToken`][colorsense.DesignToken]. Along with the internal value type ``Rect``,
+public [`DesignToken`][colorsense.DesignToken]. Along with the internal value type ``BoundingBox``,
 they are deliberately excluded from ``__all__``. ``ComponentType`` is **public**: it keys the
 fine-grained component evidence in the result tree (both
 [`Usage`][colorsense.Usage]``.components`` on the color-keyed index and
@@ -244,10 +244,10 @@ class ComponentType(StrEnum):
 
 
 def is_pill_shape(width: float, height: float, min_corner_radius: float) -> bool:
-    """Whether a rect is a fully-rounded, elongated pill/stadium shape.
+    """Whether a box is a fully-rounded, elongated pill/stadium shape.
 
     True iff all four corners are fully rounded (``min_corner_radius >= height/2``) AND the
-    rect is wider than tall (``width > height``, which excludes circles where
+    box is wider than tall (``width > height``, which excludes circles where
     ``width == height``). Size-agnostic — it tests shape only, never absolute dimensions.
 
     This is the single source of truth for the stadium-shape test, shared by the harvester
@@ -261,10 +261,10 @@ def is_pill_shape(width: float, height: float, min_corner_radius: float) -> bool
 
 
 def is_circle_shape(width: float, height: float, min_corner_radius: float) -> bool:
-    """Whether a rect is a fully-rounded **circle/dot** (``rounded-full`` with ``width == height``).
+    """Whether a box is a fully-rounded **circle/dot** (``rounded-full`` with ``width == height``).
 
     The square counterpart to `is_pill_shape`: all four corners fully rounded
-    (``min_corner_radius >= height/2``) AND the rect is (within a 1px tolerance) square.
+    (``min_corner_radius >= height/2``) AND the box is (within a 1px tolerance) square.
     `is_pill_shape` deliberately *excludes* circles (it demands ``width > height``); this is
     the predicate for that excluded case. Size-agnostic — it tests shape only. The badge
     rule and the card-detector exclusion layer the absolute size/clickable/recurrence gates
@@ -309,7 +309,7 @@ class Color(BaseModel):
     alpha: float = 1.0
 
 
-class Rect(BaseModel):
+class BoundingBox(BaseModel):
     """Axis-aligned bounding box in CSS pixels."""
 
     model_config = ConfigDict(frozen=True)
@@ -391,7 +391,7 @@ class HarvestedElement(BaseModel):
     role: str | None
     id: str | None
     class_tokens: list[str] = Field(default_factory=list)
-    rect: Rect
+    bounding_box: BoundingBox
     position: str
     bg: Color | None
     text: Color | None

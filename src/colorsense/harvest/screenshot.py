@@ -22,7 +22,7 @@ from playwright.async_api import Page
 
 from colorsense.color.primitives import parse_css_color
 from colorsense.harvest.render import EVAL_TIMEOUT_S
-from colorsense.models import Color, Rect, ScreenshotBin
+from colorsense.models import BoundingBox, Color, ScreenshotBin
 
 # Capture full-page screenshots as high-quality JPEG rather than PNG. The image is only
 # ever downscaled to ``_DOWNSCALE_MAX_EDGE`` and quantized into ``_PALETTE_COLORS`` buckets,
@@ -111,17 +111,17 @@ def _rgb_to_color(r: int, g: int, b: int) -> Color | None:
 
 async def harvest_screenshot(
     page: Page,
-    consent_rects: list[Rect],
+    consent_boxes: list[BoundingBox],
     device_scale_factor: float,
-    media_rects: list[Rect] | None = None,
+    media_boxes: list[BoundingBox] | None = None,
 ) -> list[ScreenshotBin]:
     """Capture, mask, and quantize a full-page screenshot into color bins.
 
-    ``consent_rects`` and ``media_rects`` are CSS-pixel rects (from `RenderSession`); both
+    ``consent_boxes`` and ``media_boxes`` are CSS-pixel boxes (from `RenderSession`); both
     are scaled by ``device_scale_factor`` and zeroed out of the same keep-mask before
-    quantizing. Consent rects suppress cookie/overlay banners; media rects suppress raster
+    quantizing. Consent boxes suppress cookie/overlay banners; media boxes suppress raster
     photographic content (images/video/canvas/``url()`` backgrounds) so a site's design
-    colors are not drowned by its photography. ``media_rects`` defaults to ``None`` (treated
+    colors are not drowned by its photography. ``media_boxes`` defaults to ``None`` (treated
     as empty) so existing callers and tests pass through unchanged.
 
     Raises `_OversizedCaptureError` if the captured image's declared dimensions
@@ -175,17 +175,17 @@ async def harvest_screenshot(
     height, width = array.shape[0], array.shape[1]
 
     # Build a boolean keep-mask; consent banners and raster media are both excluded from
-    # sampling entirely. The two rect kinds are masked identically (CSS px -> device px,
-    # clamped to bounds) — only their provenance differs — so a single O(rects) loop over
-    # the concatenation handles both. The loop stays vectorized per rect (a numpy slice
-    # assignment); ``media_rects`` is already capped at the harvest layer
-    # (``_MAX_MEDIA_RECTS``), so the total work is bounded regardless of page contents.
+    # sampling entirely. The two box kinds are masked identically (CSS px -> device px,
+    # clamped to bounds) — only their provenance differs — so a single O(boxes) loop over
+    # the concatenation handles both. The loop stays vectorized per box (a numpy slice
+    # assignment); ``media_boxes`` is already capped at the harvest layer
+    # (``_MAX_MEDIA_BOXES``), so the total work is bounded regardless of page contents.
     keep = np.ones((height, width), dtype=bool)
-    for rect in [*consent_rects, *(media_rects or [])]:
-        x0 = max(0, int(rect.x * device_scale_factor))
-        y0 = max(0, int(rect.y * device_scale_factor))
-        x1 = min(width, int((rect.x + rect.width) * device_scale_factor))
-        y1 = min(height, int((rect.y + rect.height) * device_scale_factor))
+    for box in [*consent_boxes, *(media_boxes or [])]:
+        x0 = max(0, int(box.x * device_scale_factor))
+        y0 = max(0, int(box.y * device_scale_factor))
+        x1 = min(width, int((box.x + box.width) * device_scale_factor))
+        y1 = min(height, int((box.y + box.height) * device_scale_factor))
         if x1 > x0 and y1 > y0:
             keep[y0:y1, x0:x1] = False
 

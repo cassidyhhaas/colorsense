@@ -26,9 +26,9 @@ from colorsense.config import Config, load_default_config
 from colorsense.harvest import RequestFilter, SharedBrowser, harvest_page
 from colorsense.harvest.render import RenderSession
 from colorsense.models import (
+    BoundingBox,
     Harvest,
     HarvestedElement,
-    Rect,
     ScreenshotBin,
     Theme,
     Viewport,
@@ -404,7 +404,7 @@ def _mini_harvest(url: str, theme: Theme, viewport: Viewport) -> Harvest:
         role=None,
         id=None,
         class_tokens=[],
-        rect=Rect(x=0.0, y=0.0, width=1280.0, height=800.0),
+        bounding_box=BoundingBox(x=0.0, y=0.0, width=1280.0, height=800.0),
         position="static",
         bg=white,
         text=text,

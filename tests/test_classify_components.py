@@ -17,11 +17,11 @@ from colorsense.classify.components import (
 from colorsense.color.primitives import parse_css_color
 from colorsense.config import VoteRule, WhenRule, load_default_config
 from colorsense.models import (
+    BoundingBox,
     Color,
     ComponentType,
     HarvestedElement,
     PropertyFamily,
-    Rect,
     Viewport,
 )
 
@@ -41,7 +41,7 @@ def _element(
     role: str | None = None,
     element_id: str | None = None,
     class_tokens: list[str] | None = None,
-    rect: Rect | None = None,
+    bounding_box: BoundingBox | None = None,
     position: str = "static",
     bg: Color | None = None,
     text: Color | None = None,
@@ -69,7 +69,9 @@ def _element(
         role=role,
         id=element_id,
         class_tokens=class_tokens if class_tokens is not None else [],
-        rect=rect if rect is not None else Rect(x=0.0, y=0.0, width=100.0, height=100.0),
+        bounding_box=bounding_box
+        if bounding_box is not None
+        else BoundingBox(x=0.0, y=0.0, width=100.0, height=100.0),
         position=position,
         bg=bg,
         text=text,
@@ -101,7 +103,7 @@ def test_header_top_bar_is_argmax_header_bg() -> None:
     """A full-width short top-bar <header> classifies dominantly as header_bg."""
     header = _element(
         tag="header",
-        rect=Rect(x=0.0, y=0.0, width=1280.0, height=80.0),
+        bounding_box=BoundingBox(x=0.0, y=0.0, width=1280.0, height=80.0),
     )
     [result] = classify_components([header], CONFIG, VIEWPORT)
     assert result.component_dist
@@ -116,7 +118,7 @@ def test_four_card_siblings_get_card_bg_via_repetition() -> None:
             class_tokens=["card"],
             border=_color("#cccccc"),
             bg=_color("#ffffff"),
-            rect=Rect(x=float(i * 200), y=300.0, width=180.0, height=180.0),
+            bounding_box=BoundingBox(x=float(i * 200), y=300.0, width=180.0, height=180.0),
         )
         for i in range(4)
     ]
@@ -139,7 +141,7 @@ def test_repeated_plain_siblings_get_no_repetition_votes() -> None:
         _element(
             tag="li",
             class_tokens=["item"],
-            rect=Rect(x=0.0, y=float(100 + i * 30), width=300.0, height=24.0),
+            bounding_box=BoundingBox(x=0.0, y=float(100 + i * 30), width=300.0, height=24.0),
         )
         for i in range(4)
     ]
@@ -155,7 +157,7 @@ def test_repeated_box_shadow_siblings_get_repetition_votes() -> None:
             tag="li",
             class_tokens=["item"],
             has_box_shadow=True,
-            rect=Rect(x=0.0, y=float(100 + i * 30), width=300.0, height=24.0),
+            bounding_box=BoundingBox(x=0.0, y=float(100 + i * 30), width=300.0, height=24.0),
         )
         for i in range(4)
     ]
@@ -182,7 +184,7 @@ def test_pill_chip_is_badge_not_card() -> None:
             has_box_shadow=True,  # the ring
             has_text=True,
             min_corner_radius=9999.0,  # rounded-full, all four corners
-            rect=Rect(x=float(i * 140), y=400.0, width=130.0, height=28.0),
+            bounding_box=BoundingBox(x=float(i * 140), y=400.0, width=130.0, height=28.0),
         )
         for i in range(4)
     ]
@@ -207,7 +209,7 @@ def test_one_corner_rounded_is_not_a_pill_or_badge() -> None:
         bg=_color("#f59e0b"),
         has_text=True,
         min_corner_radius=0.0,  # only one corner is rounded
-        rect=Rect(x=10.0, y=300.0, width=120.0, height=28.0),
+        bounding_box=BoundingBox(x=10.0, y=300.0, width=120.0, height=28.0),
     )
     [result] = classify_components([tab], CONFIG, VIEWPORT)
     assert ComponentType.BADGE not in result.component_dist
@@ -224,7 +226,7 @@ def test_empty_pill_without_text_is_not_a_badge() -> None:
         bg=_color("#7c3bed"),
         has_text=False,
         min_corner_radius=9999.0,
-        rect=Rect(x=0.0, y=200.0, width=64.0, height=24.0),
+        bounding_box=BoundingBox(x=0.0, y=200.0, width=64.0, height=24.0),
     )
     [result] = classify_components([track], CONFIG, VIEWPORT)
     assert ComponentType.BADGE not in result.component_dist
@@ -247,7 +249,9 @@ def test_tall_pill_is_not_a_badge_but_excluded_from_cards() -> None:
             border=_color("#1f8ded"),
             has_text=True,
             min_corner_radius=9999.0,  # fully rounded...
-            rect=Rect(x=float(i * 200), y=300.0, width=180.0, height=44.0),  # ...but tall
+            bounding_box=BoundingBox(
+                x=float(i * 200), y=300.0, width=180.0, height=44.0
+            ),  # ...but tall
         )
         for i in range(4)
     ]
@@ -270,14 +274,14 @@ def test_badge_height_gate_is_inclusive_at_the_boundary() -> None:
         bg=_color("#10b77f"),
         has_text=True,
         min_corner_radius=9999.0,
-        rect=Rect(x=0.0, y=300.0, width=130.0, height=cap),
+        bounding_box=BoundingBox(x=0.0, y=300.0, width=130.0, height=cap),
     )
     over = _element(
         tag="span",
         bg=_color("#10b77f"),
         has_text=True,
         min_corner_radius=9999.0,
-        rect=Rect(x=0.0, y=300.0, width=130.0, height=cap + 1.0),
+        bounding_box=BoundingBox(x=0.0, y=300.0, width=130.0, height=cap + 1.0),
     )
     [at_result] = classify_components([at], CONFIG, VIEWPORT)
     [over_result] = classify_components([over], CONFIG, VIEWPORT)
@@ -298,7 +302,7 @@ def test_low_radius_repeated_surfaces_stay_cards() -> None:
             bg=_color("#ffffff"),
             border=_color("#cccccc"),
             min_corner_radius=8.0,  # rounded corners, nowhere near half the height
-            rect=Rect(x=float(i * 200), y=300.0, width=180.0, height=120.0),
+            bounding_box=BoundingBox(x=float(i * 200), y=300.0, width=180.0, height=120.0),
         )
         for i in range(4)
     ]
@@ -318,7 +322,7 @@ def test_circular_avatar_is_not_a_badge() -> None:
         tag="div",
         bg=_color("#1f8ded"),
         min_corner_radius=28.0,  # 50% of 56
-        rect=Rect(x=10.0, y=10.0, width=56.0, height=56.0),
+        bounding_box=BoundingBox(x=10.0, y=10.0, width=56.0, height=56.0),
     )
     [result] = classify_components([avatar], CONFIG, VIEWPORT)
     assert ComponentType.BADGE not in result.component_dist
@@ -340,7 +344,7 @@ def test_pill_shaped_cta_stays_interactive() -> None:
         clickable=True,
         has_text=True,
         min_corner_radius=9999.0,
-        rect=Rect(x=100.0, y=100.0, width=160.0, height=32.0),
+        bounding_box=BoundingBox(x=100.0, y=100.0, width=160.0, height=32.0),
     )
     [result] = classify_components([cta], CONFIG, VIEWPORT)
     assert _argmax(result.component_dist) is ComponentType.CTA_TEXT
@@ -395,7 +399,7 @@ def _canvas_element() -> HarvestedElement:
     return _element(
         tag="body",
         bg=_LIGHT_CANVAS,
-        rect=Rect(x=0.0, y=0.0, width=1280.0, height=4000.0),
+        bounding_box=BoundingBox(x=0.0, y=0.0, width=1280.0, height=4000.0),
     )
 
 
@@ -472,8 +476,12 @@ def test_text_legible_on_canvas_keeps_link() -> None:
 
 def test_derive_page_canvas_prefers_body_over_largest_surface() -> None:
     """`_derive_page_canvas` returns the <body> opaque bg even if a larger element exists."""
-    body = _element(tag="body", bg=_LIGHT_CANVAS, rect=Rect(x=0, y=0, width=100, height=100))
-    bigger = _element(tag="div", bg=_DARK_FILL, rect=Rect(x=0, y=0, width=2000, height=2000))
+    body = _element(
+        tag="body", bg=_LIGHT_CANVAS, bounding_box=BoundingBox(x=0, y=0, width=100, height=100)
+    )
+    bigger = _element(
+        tag="div", bg=_DARK_FILL, bounding_box=BoundingBox(x=0, y=0, width=2000, height=2000)
+    )
     assert _derive_page_canvas_color([bigger, body]) == _LIGHT_CANVAS
     # No opaque background anywhere -> None (relabel cannot fire).
     transparent = _element(tag="div", bg=None)
@@ -510,7 +518,7 @@ def test_container_wrapper_has_no_confident_brand_component() -> None:
     container = _element(
         tag="div",
         class_tokens=["container"],
-        rect=Rect(x=0.0, y=200.0, width=1200.0, height=600.0),
+        bounding_box=BoundingBox(x=0.0, y=200.0, width=1200.0, height=600.0),
     )
     [result] = classify_components([container], CONFIG, VIEWPORT)
     # Only the near-zero page_bg noise vote contributes; no brand component
@@ -526,7 +534,9 @@ def test_container_wrapper_has_no_confident_brand_component() -> None:
 
 def test_distributions_sum_to_one_and_aria_hidden_is_empty() -> None:
     """Non-empty distributions sum to ~1.0; aria_hidden yields an empty dist."""
-    header = _element(tag="header", rect=Rect(x=0.0, y=0.0, width=1280.0, height=80.0))
+    header = _element(
+        tag="header", bounding_box=BoundingBox(x=0.0, y=0.0, width=1280.0, height=80.0)
+    )
     anchor = _element(tag="a", clickable=True)
     hidden = _element(tag="header", aria_hidden=True)
 
@@ -549,7 +559,7 @@ def test_distributions_sum_to_one_and_aria_hidden_is_empty() -> None:
 
 def test_hero_rule_full_width_tall_top_block() -> None:
     """A full-width tall block in the top band gets hero_bg via geometry alone."""
-    hero = _element(rect=Rect(x=0.0, y=0.0, width=1280.0, height=400.0))
+    hero = _element(bounding_box=BoundingBox(x=0.0, y=0.0, width=1280.0, height=400.0))
     [result] = classify_components([hero], CONFIG, VIEWPORT)
     assert result.component_dist
     assert _argmax(result.component_dist) is ComponentType.HERO_BG
@@ -557,14 +567,14 @@ def test_hero_rule_full_width_tall_top_block() -> None:
 
 def test_hero_rule_negative_just_under_min_height() -> None:
     """One px under hero_min_h (280px at 800px viewport) the hero rule must not fire."""
-    not_hero = _element(rect=Rect(x=0.0, y=0.0, width=1280.0, height=279.0))
+    not_hero = _element(bounding_box=BoundingBox(x=0.0, y=0.0, width=1280.0, height=279.0))
     [result] = classify_components([not_hero], CONFIG, VIEWPORT)
     assert ComponentType.HERO_BG not in result.component_dist
 
 
 def test_footer_rule_full_width_bottom_band() -> None:
     """A full-width block at/below the bottom band (y>=680) gets footer_bg."""
-    footer = _element(rect=Rect(x=0.0, y=680.0, width=1280.0, height=120.0))
+    footer = _element(bounding_box=BoundingBox(x=0.0, y=680.0, width=1280.0, height=120.0))
     [result] = classify_components([footer], CONFIG, VIEWPORT)
     assert result.component_dist
     assert _argmax(result.component_dist) is ComponentType.FOOTER_BG
@@ -572,7 +582,7 @@ def test_footer_rule_full_width_bottom_band() -> None:
 
 def test_footer_rule_negative_just_above_bottom_band() -> None:
     """One px above the bottom band the footer rule must not fire."""
-    not_footer = _element(rect=Rect(x=0.0, y=679.0, width=1280.0, height=120.0))
+    not_footer = _element(bounding_box=BoundingBox(x=0.0, y=679.0, width=1280.0, height=120.0))
     [result] = classify_components([not_footer], CONFIG, VIEWPORT)
     assert ComponentType.FOOTER_BG not in result.component_dist
 
@@ -580,7 +590,9 @@ def test_footer_rule_negative_just_above_bottom_band() -> None:
 def test_fixed_sticky_rule_near_top() -> None:
     """A fixed/sticky element above sticky_top_px (80) gets nav_bg via geometry."""
     for position in ("fixed", "sticky"):
-        bar = _element(position=position, rect=Rect(x=0.0, y=79.0, width=200.0, height=50.0))
+        bar = _element(
+            position=position, bounding_box=BoundingBox(x=0.0, y=79.0, width=200.0, height=50.0)
+        )
         [result] = classify_components([bar], CONFIG, VIEWPORT)
         assert result.component_dist, position
         assert _argmax(result.component_dist) is ComponentType.NAV_BG, position
@@ -588,7 +600,9 @@ def test_fixed_sticky_rule_near_top() -> None:
 
 def test_fixed_sticky_rule_negative_at_threshold() -> None:
     """At exactly sticky_top_px (y=80, not <80) the fixed/sticky rule must not fire."""
-    bar = _element(position="fixed", rect=Rect(x=0.0, y=80.0, width=200.0, height=50.0))
+    bar = _element(
+        position="fixed", bounding_box=BoundingBox(x=0.0, y=80.0, width=200.0, height=50.0)
+    )
     [result] = classify_components([bar], CONFIG, VIEWPORT)
     assert ComponentType.NAV_BG not in result.component_dist
 
@@ -599,7 +613,9 @@ def test_small_clickable_rule_votes_link() -> None:
     The small-area rule adds link votes on top of the generic clickable votes,
     flipping the argmax from cta_bg to link.
     """
-    chip = _element(clickable=True, rect=Rect(x=100.0, y=300.0, width=160.0, height=128.0))
+    chip = _element(
+        clickable=True, bounding_box=BoundingBox(x=100.0, y=300.0, width=160.0, height=128.0)
+    )
     [result] = classify_components([chip], CONFIG, VIEWPORT)
     assert result.component_dist
     assert _argmax(result.component_dist) is ComponentType.LINK
@@ -607,7 +623,9 @@ def test_small_clickable_rule_votes_link() -> None:
 
 def test_small_clickable_rule_negative_just_over_area() -> None:
     """Just over small_area (160*129>20480) only the clickable votes remain (cta_bg wins)."""
-    block = _element(clickable=True, rect=Rect(x=100.0, y=300.0, width=160.0, height=129.0))
+    block = _element(
+        clickable=True, bounding_box=BoundingBox(x=100.0, y=300.0, width=160.0, height=129.0)
+    )
     [result] = classify_components([block], CONFIG, VIEWPORT)
     assert result.component_dist
     assert _argmax(result.component_dist) is ComponentType.CTA_BG
@@ -660,7 +678,7 @@ def test_invisible_element_yields_empty_distribution() -> None:
     """
     invisible = _element(
         tag="header",
-        rect=Rect(x=0.0, y=0.0, width=1280.0, height=80.0),
+        bounding_box=BoundingBox(x=0.0, y=0.0, width=1280.0, height=80.0),
         visible=False,
     )
     [result] = classify_components([invisible], CONFIG, VIEWPORT)
@@ -693,7 +711,7 @@ def test_input_submit_semantic_rule() -> None:
         tag="input",
         input_type="submit",
         clickable=True,
-        rect=Rect(x=100.0, y=300.0, width=400.0, height=60.0),
+        bounding_box=BoundingBox(x=100.0, y=300.0, width=400.0, height=60.0),
     )
     [result] = classify_components([submit], CONFIG, VIEWPORT)
     assert _argmax(result.component_dist) is ComponentType.CTA_BG
@@ -711,7 +729,7 @@ def test_non_button_input_gets_no_cta_votes(input_type: str | None) -> None:
     box = _element(
         tag="input",
         input_type=input_type,
-        rect=Rect(x=100.0, y=300.0, width=300.0, height=60.0),
+        bounding_box=BoundingBox(x=100.0, y=300.0, width=300.0, height=60.0),
     )
     [result] = classify_components([box], CONFIG, VIEWPORT)
     assert result.component_dist == {ComponentType.INPUT_BG: 1.0}
@@ -726,12 +744,12 @@ def test_clickable_text_input_gets_no_input_submit_button_vote() -> None:
     semantic 3.5 + interactivity 2.0 cta_bg votes restored, cta_bg would dominate the bg
     channel instead — so the guard is that ``cta_bg`` is absent and ``input_bg`` dominant.
     """
-    # Rect kept above small_area so the small-clickable geometry rule stays out of frame.
+    # BoundingBox kept above small_area so the small-clickable geometry rule stays out of frame.
     box = _element(
         tag="input",
         input_type="text",
         clickable=True,
-        rect=Rect(x=100.0, y=300.0, width=400.0, height=60.0),
+        bounding_box=BoundingBox(x=100.0, y=300.0, width=400.0, height=60.0),
     )
     [result] = classify_components([box], CONFIG, VIEWPORT)
     assert _argmax(result.component_dist) is ComponentType.INPUT_BG
@@ -797,7 +815,7 @@ def test_input_submit_button_interactivity_outvotes_nav_class() -> None:
         tag="button",
         clickable=True,
         class_tokens=["navbar"],
-        rect=Rect(x=100.0, y=300.0, width=400.0, height=60.0),
+        bounding_box=BoundingBox(x=100.0, y=300.0, width=400.0, height=60.0),
     )
     [result] = classify_components([button], CONFIG, VIEWPORT)
     assert result.component_dist
@@ -814,7 +832,7 @@ def test_class_token_rules_match_element_id() -> None:
     bar = _element(
         tag="div",
         element_id="main-navbar",
-        rect=Rect(x=100.0, y=300.0, width=400.0, height=60.0),
+        bounding_box=BoundingBox(x=100.0, y=300.0, width=400.0, height=60.0),
     )
     [result] = classify_components([bar], CONFIG, VIEWPORT)
     assert result.component_dist
@@ -966,7 +984,9 @@ def test_text_presence_does_not_displace_semantic_card_bg() -> None:
 
 def test_no_viewport_uses_default() -> None:
     """Calling without a viewport still computes geometry-driven results."""
-    header = _element(tag="header", rect=Rect(x=0.0, y=0.0, width=1280.0, height=80.0))
+    header = _element(
+        tag="header", bounding_box=BoundingBox(x=0.0, y=0.0, width=1280.0, height=80.0)
+    )
     [result] = classify_components([header], CONFIG)
     assert result.component_dist
     assert _argmax(result.component_dist) is ComponentType.HEADER_BG
@@ -1021,7 +1041,9 @@ def test_single_family_element_is_byte_identical_to_global_softmax() -> None:
     are each compared against an independently-computed single-pool softmax of their raw votes.
     """
     # A plain header: geometry + semantic votes are all background-family components.
-    header = _element(tag="header", rect=Rect(x=0.0, y=0.0, width=1280.0, height=80.0))
+    header = _element(
+        tag="header", bounding_box=BoundingBox(x=0.0, y=0.0, width=1280.0, height=80.0)
+    )
     [header_res] = classify_components([header], CONFIG, VIEWPORT)
     assert all(c.property_family is PropertyFamily.BACKGROUND for c in header_res.component_dist)
     assert header_res.component_dist == {ComponentType.HEADER_BG: 1.0}
@@ -1090,7 +1112,7 @@ def test_gradient_pill_attributes_bg_channel_without_the_removed_hack() -> None:
         clickable=True,
         has_text=True,
         min_corner_radius=9999.0,
-        rect=Rect(x=100.0, y=100.0, width=160.0, height=32.0),
+        bounding_box=BoundingBox(x=100.0, y=100.0, width=160.0, height=32.0),
         bg_gradient_stops=(_color("#7c3bed"),),
     )
     [result] = classify_components([pill], CONFIG, VIEWPORT)

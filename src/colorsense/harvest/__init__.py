@@ -196,9 +196,9 @@ async def harvest_page(
             elements = await probe_hover_states(page, elements, selectors)
             screenshot_bins = await harvest_screenshot(
                 page,
-                session.consent_rects,
+                session.consent_boxes,
                 viewport.device_scale_factor,
-                session.media_rects,
+                session.media_boxes,
             )
     except (
         PlaywrightError,

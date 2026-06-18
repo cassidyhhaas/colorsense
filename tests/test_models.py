@@ -7,6 +7,7 @@ from pydantic import ValidationError
 
 from colorsense.models import (
     AnalysisResult,
+    BoundingBox,
     ClassifiedToken,
     Color,
     ColorCluster,
@@ -16,7 +17,6 @@ from colorsense.models import (
     DivergenceItem,
     HarvestedElement,
     PropertyFamily,
-    Rect,
     RunMetadata,
     ScreenshotBin,
     Theme,
@@ -177,7 +177,7 @@ def test_is_pill_shape() -> None:
     assert is_pill_shape(width=120.0, height=0.0, min_corner_radius=20.0) is False
     # Only partly rounded (radius below height/2) -> not a pill (a card/tab).
     assert is_pill_shape(width=120.0, height=40.0, min_corner_radius=19.9) is False
-    # Tall rect (width < height), fully rounded -> not a pill (not elongated horizontally).
+    # Tall box (width < height), fully rounded -> not a pill (not elongated horizontally).
     assert is_pill_shape(width=40.0, height=120.0, min_corner_radius=60.0) is False
 
 
@@ -189,10 +189,10 @@ def test_value_objects_are_frozen() -> None:
         color.lightness = 0.9  # type: ignore[misc]
     assert color.lightness == 0.5  # value unchanged
 
-    rect = Rect(x=1.0, y=2.0, width=3.0, height=4.0)
+    box = BoundingBox(x=1.0, y=2.0, width=3.0, height=4.0)
     with pytest.raises(ValidationError):
-        rect.width = 99.0  # type: ignore[misc]
-    assert rect.width == 3.0
+        box.width = 99.0  # type: ignore[misc]
+    assert box.width == 3.0
 
     viewport = Viewport(width=1280, height=800, device_scale_factor=1.0)
     with pytest.raises(ValidationError):
@@ -294,7 +294,7 @@ def test_harvest_models_construct() -> None:
         role=None,
         id="cta",
         class_tokens=["btn", "btn-primary"],
-        rect=Rect(x=10, y=20, width=120, height=40),
+        bounding_box=BoundingBox(x=10, y=20, width=120, height=40),
         position="static",
         bg=_color("#3366cc"),
         text=_color("#ffffff", 0.99),

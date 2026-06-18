@@ -8,13 +8,13 @@ import pytest
 
 from colorsense.color.primitives import ciede2000, delta_e, parse_css_color
 from colorsense.models import (
+    BoundingBox,
     ClassifiedElement,
     Color,
     ComponentType,
     Harvest,
     HarvestedElement,
     PropertyFamily,
-    Rect,
     ScreenshotBin,
     Theme,
     Viewport,
@@ -65,7 +65,7 @@ def _element(
         tag="div",
         role=None,
         id=None,
-        rect=Rect(x=0.0, y=0.0, width=10.0, height=10.0),
+        bounding_box=BoundingBox(x=0.0, y=0.0, width=10.0, height=10.0),
         position="static",
         bg=bg,
         text=text,
