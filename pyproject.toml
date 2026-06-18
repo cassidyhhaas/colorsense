@@ -83,6 +83,13 @@ select = ["E", "F", "W", "I", "N", "D", "UP", "B", "SIM", "RUF"]
 [tool.ruff.lint.pydocstyle]
 convention = "google"
 
+[tool.ruff.lint.per-file-ignores]
+# Tests and the eval harness are not part of the shipped library. Test names are
+# self-documenting and the eval/ scripts are dev tooling, so the pydocstyle (D)
+# rules — which exist for the public API surface — don't earn their churn there.
+"tests/**" = ["D"]
+"eval/**" = ["D"]
+
 [tool.mypy]
 python_version = "3.12"
 # Default check targets: the library plus the examples suite (CI and pre-commit run plain
