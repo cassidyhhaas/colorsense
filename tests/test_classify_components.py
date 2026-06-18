@@ -9,8 +9,8 @@ import pytest
 from colorsense.classify.components import (
     _derive_page_canvas_color,
     _finalize_distribution,
-    _matches_interactivity,
-    _matches_semantic_tag,
+    _interactivity_rule_applies,
+    _semantic_tag_rule_applies,
     _softmax_prune_renormalize,
     classify_components,
 )
@@ -778,8 +778,8 @@ _INTERACTIVITY_RULE = WhenRule(when="input[submit|button]", votes={"cta_bg": 2.0
 def test_buttonlike_input_type_membership(input_type: str | None, buttonlike: bool) -> None:
     """Each type's membership decision holds for both input predicates."""
     el = _element(tag="input", input_type=input_type, clickable=True)
-    assert _matches_semantic_tag(_SEMANTIC_RULE, el) is buttonlike
-    assert _matches_interactivity(_INTERACTIVITY_RULE, el) is buttonlike
+    assert _semantic_tag_rule_applies(_SEMANTIC_RULE, el) is buttonlike
+    assert _interactivity_rule_applies(_INTERACTIVITY_RULE, el) is buttonlike
 
 
 def test_input_submit_predicates_require_input_tag() -> None:
@@ -788,12 +788,12 @@ def test_input_submit_predicates_require_input_tag() -> None:
     <button> still satisfies the interactivity predicate via its own clickable gate.
     """
     div = _element(tag="div", input_type=None, clickable=True)
-    assert _matches_semantic_tag(_SEMANTIC_RULE, div) is False
-    assert _matches_interactivity(_INTERACTIVITY_RULE, div) is False
+    assert _semantic_tag_rule_applies(_SEMANTIC_RULE, div) is False
+    assert _interactivity_rule_applies(_INTERACTIVITY_RULE, div) is False
     button = _element(tag="button", clickable=True)
-    assert _matches_interactivity(_INTERACTIVITY_RULE, button) is True
+    assert _interactivity_rule_applies(_INTERACTIVITY_RULE, button) is True
     unclickable_button = _element(tag="button", clickable=False)
-    assert _matches_interactivity(_INTERACTIVITY_RULE, unclickable_button) is False
+    assert _interactivity_rule_applies(_INTERACTIVITY_RULE, unclickable_button) is False
 
 
 def test_hover_color_change_votes_cta() -> None:
