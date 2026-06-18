@@ -73,6 +73,7 @@ class AnalysisTimeoutError(TimeoutError):
     """
 
     def __init__(self, url: str, max_total_seconds: float) -> None:
+        """Build the error from the offending URL and the configured budget."""
         super().__init__(
             f"analysis of {url!r} exceeded its overall deadline of {max_total_seconds:g}s"
         )
