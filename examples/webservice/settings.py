@@ -19,7 +19,7 @@ import shlex
 
 
 def allowed_hosts_from_env() -> frozenset[str] | None:
-    """Optional exact-hostname allowlist, comma-separated; ``None`` = no allowlist."""
+    """Read the optional comma-separated exact-hostname allowlist; ``None`` = no allowlist."""
     raw = os.environ.get("COLORSENSE_ALLOWED_HOSTS", "")
     hosts = frozenset(host.strip().lower() for host in raw.split(",") if host.strip())
     return hosts or None

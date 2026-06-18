@@ -77,7 +77,20 @@ target-version = "py312"
 line-length = 100
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+select = ["E", "F", "W", "I", "N", "D", "UP", "B", "SIM", "RUF"]
+# D = pydocstyle (PEP 257); N = naming; E/W = pycodestyle (PEP 8)
+
+[tool.ruff.lint.pydocstyle]
+# numpy, not google: this is a data-science library and NumPy-style sections give
+# clearer rendering of complex Parameters/Returns blocks. mkdocs uses numpy too.
+convention = "numpy"
+
+[tool.ruff.lint.per-file-ignores]
+# Tests and the eval harness are not part of the shipped library. Test names are
+# self-documenting and the eval/ scripts are dev tooling, so the pydocstyle (D)
+# rules — which exist for the public API surface — don't earn their churn there.
+"tests/**" = ["D"]
+"eval/**" = ["D"]
 
 [tool.mypy]
 python_version = "3.12"

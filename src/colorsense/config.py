@@ -181,7 +181,7 @@ class ScaleDetectionConfig(BaseModel):
 
     @model_validator(mode="after")
     def _validate_number_pattern(self) -> ScaleDetectionConfig:
-        """The pattern must compile and capture the scale number as group 1.
+        """Require the pattern to compile and capture the scale number as group 1.
 
         ``detect_scale`` reads ``match.group(1)``; without this check a groupless pattern
         validates fine and raises ``IndexError`` only when a numbered token first appears.

@@ -73,6 +73,7 @@ class AnalysisTimeoutError(TimeoutError):
     """
 
     def __init__(self, url: str, max_total_seconds: float) -> None:
+        """Build the error from the offending URL and the configured budget."""
         super().__init__(
             f"analysis of {url!r} exceeded its overall deadline of {max_total_seconds:g}s"
         )
@@ -206,7 +207,7 @@ async def _analyze(
     browser_args: tuple[str, ...],
     include_tokens: bool,
 ) -> AnalysisResult:
-    """The deadline-free body of [`analyze`][colorsense.analyze] (which owns ``max_total_seconds``).
+    """Run the deadline-free body of [`analyze`][colorsense.analyze] (owns ``max_total_seconds``).
 
     On cancellation (including an ``analyze`` deadline expiring mid-render), the
     ``async with SharedBrowser()`` below unwinds: the ``TaskGroup`` cancels in-flight

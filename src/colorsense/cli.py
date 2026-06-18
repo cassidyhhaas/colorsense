@@ -1,5 +1,4 @@
-"""``colorsense`` command line — a convenience entry point over
-[`colorsense.analyze`][colorsense.analyze].
+"""``colorsense`` command line — a convenience entry point over the typed API.
 
 The typed API ([`colorsense.analyze`][colorsense.analyze]) is the contract. The human-readable
 output of this command is **not stable** and may change between releases; ``--json`` emits the
@@ -77,8 +76,11 @@ def _parse_viewport(value: str, scale: float) -> Viewport:
 
 
 def _print_palette(result: AnalysisResult) -> None:
-    """Human summary per theme: the color-keyed index, the role-keyed usage view,
-    divergence, and (when requested) the declared tokens."""
+    """Print a human summary per theme.
+
+    Covers the color-keyed index, the role-keyed usage view, divergence, and
+    (when requested) the declared tokens.
+    """
     typer.echo(result.url)
     for theme, palette in result.themes.items():
         typer.echo(f"  [{theme}]")

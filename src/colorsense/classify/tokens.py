@@ -43,11 +43,10 @@ __all__ = ["classify_tokens"]
 
 
 class _TokenRoleClassification(BaseModel):
-    """Internal: The result of classifying one token's semantic role, scoring
-    weight, and the classification path (`origin`) that produced them.
+    """Internal: one token's classified semantic role, scoring weight, and origin path.
 
-    These fields flow into a `ClassifiedToken` once alias inheritance
-    and role distributions are resolved.
+    These fields flow into a `ClassifiedToken` once alias inheritance and role
+    distributions are resolved.
     """
 
     semantic_role: TokenSemanticRole

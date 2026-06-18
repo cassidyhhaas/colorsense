@@ -112,7 +112,9 @@ class Harvester(Protocol):
         user_agent: str | None = None,
         request_filter: RequestFilter | None = None,
         browser: SharedBrowser | None = None,
-    ) -> Awaitable[Harvest]: ...
+    ) -> Awaitable[Harvest]:
+        """Render ``url`` under ``theme`` and return its `Harvest` (see the class docstring)."""
+        ...
 
 
 RobotsLoader = Callable[[str, str, RequestFilter | None], Awaitable[str | None]]
@@ -133,14 +135,15 @@ class RobotsDisallowedError(RuntimeError):
     """Raised when ``robots.txt`` disallows a URL and the active policy respects it."""
 
     def __init__(self, url: str) -> None:
+        """Build the error from the disallowed URL."""
         super().__init__(f"robots.txt disallows fetching {url!r}")
         self.url = url
 
 
 class UnsupportedSchemeError(ValueError):
-    """Raised by [`PolitenessPolicy.fetch`][colorsense.PolitenessPolicy.fetch] for URLs whose scheme
-    it refuses to render.
+    """Raised when a URL's scheme is not one the policy will render.
 
+    Raised by [`PolitenessPolicy.fetch`][colorsense.PolitenessPolicy.fetch].
     Only ``http``/``https`` URLs are fetchable by default. ``file://`` (a local-file-read
     primitive) is an explicit opt-in via ``PolitenessPolicy(allow_file_urls=True)``; every
     other scheme (``ftp``, ``data``, ``javascript``, scheme-less, ...) is always rejected.
@@ -148,6 +151,7 @@ class UnsupportedSchemeError(ValueError):
     """
 
     def __init__(self, url: str, *, hint: str | None = None) -> None:
+        """Build the error from the offending URL and an optional hint."""
         message = f"unsupported URL scheme for fetching {url!r}"
         if hint:
             message = f"{message} ({hint})"
@@ -253,7 +257,7 @@ async def _default_robots_loader(
 
 
 def _cache_key(url: str, theme: Theme, viewport: Viewport) -> tuple[str, str, int, int, float]:
-    """A render is identified by URL + theme + viewport geometry."""
+    """Identify a render by URL + theme + viewport geometry."""
     return (url, str(theme), viewport.width, viewport.height, viewport.device_scale_factor)
 
 
@@ -357,6 +361,7 @@ class PolitenessPolicy:
         clock: Clock = time.monotonic,
         sleeper: Sleeper = asyncio.sleep,
     ) -> None:
+        """Configure the policy; see the class docstring for the parameter semantics."""
         self.user_agent = user_agent
         self.robots_agent = robots_agent
         self.respect_robots = respect_robots
@@ -412,9 +417,9 @@ class PolitenessPolicy:
     # -- scheme gate ---------------------------------------------------------
 
     def _validate_scheme(self, url: str) -> None:
-        """Raise [`UnsupportedSchemeError`][colorsense.UnsupportedSchemeError] unless
-        ``url``'s scheme is fetchable.
+        """Reject ``url`` unless its scheme is one the policy can fetch.
 
+        Raises [`UnsupportedSchemeError`][colorsense.UnsupportedSchemeError]:
         ``http``/``https`` are always allowed (the robots/throttle gates apply downstream);
         ``file`` only when this policy opted in via ``allow_file_urls=True``; everything
         else (``ftp``, ``data``, ``javascript``, scheme-less, ...) is always rejected.
@@ -561,7 +566,7 @@ class PolitenessPolicy:
     # -- render concurrency --------------------------------------------------
 
     def _render_slots(self) -> asyncio.Semaphore | None:
-        """The render-bounding semaphore, or ``None`` when unbounded.
+        """Return the render-bounding semaphore, or ``None`` when unbounded.
 
         Created lazily inside the running loop, and re-created if the policy is later used
         from a *different* loop (e.g. sequential ``asyncio.run`` calls sharing one policy):

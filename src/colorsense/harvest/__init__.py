@@ -66,6 +66,7 @@ class RenderError(Exception):
     """
 
     def __init__(self, url: str, message: str | None = None) -> None:
+        """Build the error from the offending URL and an optional detail message."""
         detail = message or "render/navigation failed"
         super().__init__(f"{detail} for {url!r}")
         self.url = url

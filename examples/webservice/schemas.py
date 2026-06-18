@@ -8,8 +8,11 @@ from colorsense import AnalysisResult
 
 
 class AnalyzeRequest(BaseModel):
-    """POST body: the page to analyze. Validation happens in the endpoint, not the model,
-    so rejections produce a 400 with a reason rather than a generic 422."""
+    """POST body: the page to analyze.
+
+    Validation happens in the endpoint, not the model, so rejections produce a 400
+    with a reason rather than a generic 422.
+    """
 
     # Bounding untrusted input: cap the URL length (2083 is well above any legitimate
     # URL) so a multi-megabyte string never reaches urlsplit/resolution.
@@ -25,8 +28,10 @@ class EntryOut(BaseModel):
 
 
 class UsageOut(BaseModel):
-    """One usage slot of a color in the color-keyed index: the role, its property family,
-    and this color's share of its own usages."""
+    """One usage slot of a color in the color-keyed index.
+
+    Carries the role, its property family, and this color's share of its own usages.
+    """
 
     role: str
     property_family: str
@@ -34,8 +39,10 @@ class UsageOut(BaseModel):
 
 
 class ColorOut(BaseModel):
-    """One color in the canonical color-keyed index: its hex, overall prominence, and the
-    usage roles it appears in (most-used first)."""
+    """One color in the canonical color-keyed index.
+
+    Carries its hex, overall prominence, and the usage roles it appears in (most-used first).
+    """
 
     hex: str
     prominence: float

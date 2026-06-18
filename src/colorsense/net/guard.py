@@ -110,8 +110,9 @@ def _is_public_address(ip: IPAddress) -> bool:
 
 
 class _PrivateNetworkBlocker:
-    """The predicate [`block_private_networks`][colorsense.block_private_networks] returns;
-    see the factory docstring — including the single-event-loop-at-a-time contract its
+    """The predicate [`block_private_networks`][colorsense.block_private_networks] returns.
+
+    See the factory docstring — including the single-event-loop-at-a-time contract its
     single-flight futures impose (enforcement mechanics in `_check_loop_affinity`).
     """
 
@@ -277,7 +278,7 @@ class _PrivateNetworkBlocker:
             self._inflight.pop(host, None)
 
     def _lookup_pool(self) -> ThreadPoolExecutor:
-        """The predicate-owned DNS lookup pool, created lazily on the first cache miss.
+        """Return the predicate-owned DNS lookup pool, created lazily on the first cache miss.
 
         See the ``__init__`` comment for why this is a dedicated bounded pool rather
         than the loop's default ``to_thread`` executor, and for its lifecycle.
@@ -311,7 +312,7 @@ def block_private_networks(
     clock: Clock = time.monotonic,
     resolve_timeout: float = DEFAULT_GUARD_RESOLVE_TIMEOUT_SECONDS,
 ) -> Callable[[str], Awaitable[bool]]:
-    """Build a ``request_filter`` predicate that rejects non-public destinations.
+    r"""Build a ``request_filter`` predicate that rejects non-public destinations.
 
     The returned **async** predicate (``await guard(url) -> bool``; ``True`` permits,
     ``False`` aborts; only usable under a running event loop, as the ``request_filter``
@@ -356,7 +357,7 @@ def block_private_networks(
     pool — the timeout bounds the caller's wait, not the thread's occupancy.
 
     **Single-event-loop-at-a-time contract:** the coalescing machinery uses loop-bound
-    ``asyncio.Future``\\ s, so each returned predicate must only be used from one event
+    ``asyncio.Future``\ s, so each returned predicate must only be used from one event
     loop at a time. Reusing one predicate *sequentially* across loops (e.g. back-to-back
     ``asyncio.run`` calls) is supported — when idle it re-binds to the new loop and keeps
     its verdict cache (the lookup pool itself is loop-independent and carries over
