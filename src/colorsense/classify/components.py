@@ -199,7 +199,7 @@ def _canonical_canvas_is_opaque(elements: list[HarvestedElement]) -> bool:
     return False
 
 
-def _page_canvas_index(
+def _find_page_canvas_index(
     elements: list[HarvestedElement],
     thresholds: GeometryThresholds,
     viewport: Viewport,
@@ -305,7 +305,7 @@ def _is_cta_label(
     )
 
 
-def _matches_semantic_tag(rule: VoteRule, element: HarvestedElement) -> bool:
+def _semantic_tag_rule_applies(rule: VoteRule, element: HarvestedElement) -> bool:
     """Return whether a semantic-tag rule matches the element's tag/role/input type.
 
     ``input[submit]`` matches only inputs whose harvested ``type`` attribute is
@@ -321,7 +321,7 @@ def _matches_semantic_tag(rule: VoteRule, element: HarvestedElement) -> bool:
     return element.tag == match
 
 
-def _matches_interactivity(rule: WhenRule, element: HarvestedElement) -> bool:
+def _interactivity_rule_applies(rule: WhenRule, element: HarvestedElement) -> bool:
     """Return whether an interactivity ``when`` predicate holds for the element."""
     when = rule.when
     if when == "clickable":
@@ -345,7 +345,7 @@ def _matches_interactivity(rule: WhenRule, element: HarvestedElement) -> bool:
     return False
 
 
-def _matches_geometry(
+def _geometry_rule_applies(
     when: str,
     element: HarvestedElement,
     thresholds: GeometryThresholds,
@@ -383,7 +383,7 @@ def _matches_geometry(
     return False
 
 
-def _matches_class_token(rule: VoteRule, element: HarvestedElement) -> bool:
+def _class_token_rule_applies(rule: VoteRule, element: HarvestedElement) -> bool:
     """Fuzzy substring match of a rule against class tokens or id (lowercased)."""
     needle = rule.match.lower()
     for token in element.class_tokens:
@@ -397,7 +397,7 @@ def _is_third_party(element: HarvestedElement) -> bool:
     return element.is_iframe or element.cross_origin or element.vendor_match or element.shadow_host
 
 
-def _repetition_member_indices(
+def _find_repetition_member_indices(
     elements: list[HarvestedElement],
     config: Config,
 ) -> set[int]:
@@ -452,7 +452,7 @@ def _repetition_member_indices(
     return members
 
 
-def _circle_badge_member_indices(
+def _find_circle_badge_member_indices(
     elements: list[HarvestedElement],
     config: Config,
 ) -> set[int]:
@@ -463,7 +463,7 @@ def _circle_badge_member_indices(
     such a chip to ``badge`` only when it (1) is a small circle (`_is_small_circle`), (2) is
     clickable, (3) paints a fill, and (4) belongs to a ``(tag, shared-class-token)`` group of
     at least ``min_siblings`` members all meeting (1)-(3). The grouping mirrors
-    `_repetition_member_indices` — the same list-level stand-in for DOM sibling similarity.
+    `_find_repetition_member_indices` — the same list-level stand-in for DOM sibling similarity.
 
     The recurrence gate is the load-bearing discriminator: supabase's 54 identical black
     corner badges form a qualifying group (→ ``action``), while a LONE clickable status dot
@@ -493,12 +493,18 @@ def _circle_badge_member_indices(
     return members
 
 
-def _apply_suppressors(
+def _dampen_votes(
     vote_totals: dict[ComponentType, float],
     element: HarvestedElement,
     config: Config,
 ) -> None:
-    """Apply multiplicative suppressors to the accumulated votes in place."""
+    """Scale the accumulated votes down in place by each triggered factor.
+
+    Each configured factor is multiplicative and at most 1.0, so it only ever
+    reduces a vote: a factor of 0 zeros every vote (an ``aria_hidden`` or
+    hidden/zero-area element drops out entirely), while a fractional factor damps
+    the configured brand components on a third-party element.
+    """
     suppressors = config.component_classifier.suppressors
     box = element.bounding_box
 
@@ -560,7 +566,7 @@ def _softmax_prune_renormalize(
     return {component: probability / survivor_total for component, probability in survivors.items()}
 
 
-def _recombination_weights(
+def _compute_recombination_weights(
     by_family: dict[PropertyFamily, dict[ComponentType, float]],
 ) -> dict[PropertyFamily, float]:
     """Property-family weights (summing to 1.0 across painted families) for recombination.
@@ -615,7 +621,7 @@ def _finalize_distribution(
     for component, vote in positive.items():
         by_family.setdefault(component.property_family, {})[component] = vote
 
-    weights = _recombination_weights(by_family)
+    weights = _compute_recombination_weights(by_family)
 
     distribution: dict[ComponentType, float] = {}
     for family, votes in by_family.items():
@@ -646,12 +652,12 @@ def classify_components(
     classifier_config = config.component_classifier
     thresholds = classifier_config.geometry.thresholds
 
-    repetition_members = _repetition_member_indices(elements, config)
-    circle_badge_members = _circle_badge_member_indices(elements, config)
+    repetition_member_indices = _find_repetition_member_indices(elements, config)
+    circle_badge_member_indices = _find_circle_badge_member_indices(elements, config)
     page_canvas = _derive_page_canvas_color(elements)
     relabel_config = classifier_config.contrast_relabel
     canvas_fallback = classifier_config.page_canvas_fallback
-    page_canvas_index = _page_canvas_index(
+    page_canvas_index = _find_page_canvas_index(
         elements, thresholds, active_viewport, page_canvas, canvas_fallback
     )
 
@@ -661,22 +667,22 @@ def classify_components(
 
         # 1. Semantic tags / ARIA roles.
         for rule in classifier_config.semantic_tags:
-            if _matches_semantic_tag(rule, element):
+            if _semantic_tag_rule_applies(rule, element):
                 _add_votes(vote_totals, rule.votes)
 
         # 2. Geometry / position.
         for geo_rule in classifier_config.geometry.rules:
-            if _matches_geometry(geo_rule.when, element, thresholds, active_viewport):
+            if _geometry_rule_applies(geo_rule.when, element, thresholds, active_viewport):
                 _add_votes(vote_totals, geo_rule.votes)
 
         # 3. Class / id token substring match.
         for rule in classifier_config.class_tokens:
-            if _matches_class_token(rule, element):
+            if _class_token_rule_applies(rule, element):
                 _add_votes(vote_totals, rule.votes)
 
         # 4. Interactivity.
         for when_rule in classifier_config.interactivity:
-            if _matches_interactivity(when_rule, element):
+            if _interactivity_rule_applies(when_rule, element):
                 _add_votes(vote_totals, when_rule.votes)
 
         # 4b. Border presence: the harvester width-gates ``border``, so non-None
@@ -691,14 +697,14 @@ def classify_components(
             _add_votes(vote_totals, classifier_config.text_presence.votes)
 
         # 5. Repetition (the card detector).
-        if index in repetition_members:
+        if index in repetition_member_indices:
             _add_votes(vote_totals, classifier_config.repetition.votes)
 
         # 5b. Circle-badge group: a small clickable circular chip that recurs as a group is
         # a badge (-> action), not a card. The detector already enforces clickable + small
         # circle + fill + recurrence, so a lone status dot and a decorative dot never land
-        # here (see `_circle_badge_member_indices`).
-        if index in circle_badge_members:
+        # here (see `_find_circle_badge_member_indices`).
+        if index in circle_badge_member_indices:
             _add_votes(vote_totals, classifier_config.circle_badge.votes)
 
         # 6. Origin / third-party.
@@ -734,7 +740,7 @@ def classify_components(
         # and a repetition card (shared layout token), burying its weak page_bg signal.
         # Inject a page_bg prior on that one element and clear the competing hero/card
         # votes so the page color reaches the `page` role. Gated entirely on
-        # `page_canvas_index` being None for opaque-body sites (see `_page_canvas_index`).
+        # `page_canvas_index` being None for opaque-body sites (see `_find_page_canvas_index`).
         if index == page_canvas_index:
             for raw in canvas_fallback.suppress:
                 try:
@@ -746,10 +752,12 @@ def classify_components(
                 vote_totals.get(ComponentType.PAGE_BG, 0.0) + canvas_fallback.page_bg_vote
             )
 
-        # Suppressors, then softmax/prune/renormalize.
-        _apply_suppressors(vote_totals, element, config)
-        component_dist = _finalize_distribution(vote_totals, config)
+        # Dampen votes, then softmax/prune/renormalize.
+        _dampen_votes(vote_totals, element, config)
+        component_distribution = _finalize_distribution(vote_totals, config)
 
-        results.append(ClassifiedElement(element=element, component_dist=component_dist))
+        results.append(
+            ClassifiedElement(element=element, component_distribution=component_distribution)
+        )
 
     return results

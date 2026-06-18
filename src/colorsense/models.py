@@ -474,7 +474,7 @@ class ClassifiedElement(BaseModel):
     """A harvested element with a probability distribution over component types."""
 
     element: HarvestedElement
-    component_dist: dict[ComponentType, float] = Field(default_factory=dict)
+    component_distribution: dict[ComponentType, float] = Field(default_factory=dict)
 
 
 # ---------------------------------------------------------------------------

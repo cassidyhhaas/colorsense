@@ -142,11 +142,11 @@ async def test_min_corner_radius_harvested_and_pill_chips_classify_as_badge(
     classified = classify_components(harvest.elements, config, VIEWPORT)
     by_element = {id(c.element): c for c in classified}
     for chip in chips:
-        dist = by_element[id(chip)].component_dist
+        dist = by_element[id(chip)].component_distribution
         assert max(dist, key=lambda comp: dist[comp]) is ComponentType.BADGE
         assert ComponentType.CARD_BG not in dist
 
-    tab_dist = by_element[id(tab)].component_dist
+    tab_dist = by_element[id(tab)].component_distribution
     assert ComponentType.BADGE not in tab_dist
 
 

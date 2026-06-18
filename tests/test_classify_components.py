@@ -9,8 +9,8 @@ import pytest
 from colorsense.classify.components import (
     _derive_page_canvas_color,
     _finalize_distribution,
-    _matches_interactivity,
-    _matches_semantic_tag,
+    _interactivity_rule_applies,
+    _semantic_tag_rule_applies,
     _softmax_prune_renormalize,
     classify_components,
 )
@@ -106,8 +106,8 @@ def test_header_top_bar_is_argmax_header_bg() -> None:
         bounding_box=BoundingBox(x=0.0, y=0.0, width=1280.0, height=80.0),
     )
     [result] = classify_components([header], CONFIG, VIEWPORT)
-    assert result.component_dist
-    assert _argmax(result.component_dist) is ComponentType.HEADER_BG
+    assert result.component_distribution
+    assert _argmax(result.component_distribution) is ComponentType.HEADER_BG
 
 
 def test_four_card_siblings_get_card_bg_via_repetition() -> None:
@@ -125,9 +125,9 @@ def test_four_card_siblings_get_card_bg_via_repetition() -> None:
     results = classify_components(cards, CONFIG, VIEWPORT)
     assert len(results) == 4
     for result in results:
-        assert ComponentType.CARD_BG in result.component_dist
+        assert ComponentType.CARD_BG in result.component_distribution
         # card_bg should be dominant / high (class token + repetition).
-        assert result.component_dist[ComponentType.CARD_BG] >= 0.5
+        assert result.component_distribution[ComponentType.CARD_BG] >= 0.5
 
 
 def test_repeated_plain_siblings_get_no_repetition_votes() -> None:
@@ -147,7 +147,7 @@ def test_repeated_plain_siblings_get_no_repetition_votes() -> None:
     ]
     results = classify_components(items, CONFIG, VIEWPORT)
     for result in results:
-        assert ComponentType.CARD_BG not in result.component_dist
+        assert ComponentType.CARD_BG not in result.component_distribution
 
 
 def test_repeated_box_shadow_siblings_get_repetition_votes() -> None:
@@ -163,7 +163,7 @@ def test_repeated_box_shadow_siblings_get_repetition_votes() -> None:
     ]
     results = classify_components(items, CONFIG, VIEWPORT)
     for result in results:
-        assert ComponentType.CARD_BG in result.component_dist
+        assert ComponentType.CARD_BG in result.component_distribution
 
 
 def test_pill_chip_is_badge_not_card() -> None:
@@ -190,9 +190,9 @@ def test_pill_chip_is_badge_not_card() -> None:
     ]
     results = classify_components(chips, CONFIG, VIEWPORT)
     for result in results:
-        assert _argmax(result.component_dist) is ComponentType.BADGE
+        assert _argmax(result.component_distribution) is ComponentType.BADGE
         # The card detector must NOT fire on these repeated pills.
-        assert ComponentType.CARD_BG not in result.component_dist
+        assert ComponentType.CARD_BG not in result.component_distribution
 
 
 def test_one_corner_rounded_is_not_a_pill_or_badge() -> None:
@@ -212,7 +212,7 @@ def test_one_corner_rounded_is_not_a_pill_or_badge() -> None:
         bounding_box=BoundingBox(x=10.0, y=300.0, width=120.0, height=28.0),
     )
     [result] = classify_components([tab], CONFIG, VIEWPORT)
-    assert ComponentType.BADGE not in result.component_dist
+    assert ComponentType.BADGE not in result.component_distribution
 
 
 def test_empty_pill_without_text_is_not_a_badge() -> None:
@@ -229,7 +229,7 @@ def test_empty_pill_without_text_is_not_a_badge() -> None:
         bounding_box=BoundingBox(x=0.0, y=200.0, width=64.0, height=24.0),
     )
     [result] = classify_components([track], CONFIG, VIEWPORT)
-    assert ComponentType.BADGE not in result.component_dist
+    assert ComponentType.BADGE not in result.component_distribution
 
 
 def test_tall_pill_is_not_a_badge_but_excluded_from_cards() -> None:
@@ -257,8 +257,8 @@ def test_tall_pill_is_not_a_badge_but_excluded_from_cards() -> None:
     ]
     results = classify_components(stats, CONFIG, VIEWPORT)
     for result in results:
-        assert ComponentType.BADGE not in result.component_dist
-        assert ComponentType.CARD_BG not in result.component_dist
+        assert ComponentType.BADGE not in result.component_distribution
+        assert ComponentType.CARD_BG not in result.component_distribution
 
 
 def test_badge_height_gate_is_inclusive_at_the_boundary() -> None:
@@ -285,8 +285,8 @@ def test_badge_height_gate_is_inclusive_at_the_boundary() -> None:
     )
     [at_result] = classify_components([at], CONFIG, VIEWPORT)
     [over_result] = classify_components([over], CONFIG, VIEWPORT)
-    assert _argmax(at_result.component_dist) is ComponentType.BADGE
-    assert ComponentType.BADGE not in over_result.component_dist
+    assert _argmax(at_result.component_distribution) is ComponentType.BADGE
+    assert ComponentType.BADGE not in over_result.component_distribution
 
 
 def test_low_radius_repeated_surfaces_stay_cards() -> None:
@@ -308,8 +308,8 @@ def test_low_radius_repeated_surfaces_stay_cards() -> None:
     ]
     results = classify_components(cards, CONFIG, VIEWPORT)
     for result in results:
-        assert ComponentType.CARD_BG in result.component_dist
-        assert ComponentType.BADGE not in result.component_dist
+        assert ComponentType.CARD_BG in result.component_distribution
+        assert ComponentType.BADGE not in result.component_distribution
 
 
 def test_circular_avatar_is_not_a_badge() -> None:
@@ -325,7 +325,7 @@ def test_circular_avatar_is_not_a_badge() -> None:
         bounding_box=BoundingBox(x=10.0, y=10.0, width=56.0, height=56.0),
     )
     [result] = classify_components([avatar], CONFIG, VIEWPORT)
-    assert ComponentType.BADGE not in result.component_dist
+    assert ComponentType.BADGE not in result.component_distribution
 
 
 def test_pill_shaped_cta_stays_interactive() -> None:
@@ -347,7 +347,7 @@ def test_pill_shaped_cta_stays_interactive() -> None:
         bounding_box=BoundingBox(x=100.0, y=100.0, width=160.0, height=32.0),
     )
     [result] = classify_components([cta], CONFIG, VIEWPORT)
-    assert _argmax(result.component_dist) is ComponentType.CTA_TEXT
+    assert _argmax(result.component_distribution) is ComponentType.CTA_TEXT
 
 
 def test_unfilled_anchor_is_link_filled_anchor_label_is_cta_text() -> None:
@@ -360,13 +360,13 @@ def test_unfilled_anchor_is_link_filled_anchor_label_is_cta_text() -> None:
     """
     bare = _element(tag="a", clickable=True, has_text=True)
     [bare_result] = classify_components([bare], CONFIG, VIEWPORT)
-    assert ComponentType.LINK in bare_result.component_dist
-    assert ComponentType.CTA_TEXT not in bare_result.component_dist
+    assert ComponentType.LINK in bare_result.component_distribution
+    assert ComponentType.CTA_TEXT not in bare_result.component_distribution
 
     filled = _element(tag="a", bg=_color("#7c3bed"), clickable=True, has_text=True)
     [filled_result] = classify_components([filled], CONFIG, VIEWPORT)
-    assert ComponentType.CTA_TEXT in filled_result.component_dist
-    assert ComponentType.LINK not in filled_result.component_dist
+    assert ComponentType.CTA_TEXT in filled_result.component_distribution
+    assert ComponentType.LINK not in filled_result.component_distribution
 
     # A gradient-pill CTA: computed bg is transparent, the fill lives in bg_gradient_stops —
     # still a button surface, so its label is cta_text, not link.
@@ -378,8 +378,8 @@ def test_unfilled_anchor_is_link_filled_anchor_label_is_cta_text() -> None:
         has_text=True,
     )
     [gradient_result] = classify_components([gradient], CONFIG, VIEWPORT)
-    assert ComponentType.CTA_TEXT in gradient_result.component_dist
-    assert ComponentType.LINK not in gradient_result.component_dist
+    assert ComponentType.CTA_TEXT in gradient_result.component_distribution
+    assert ComponentType.LINK not in gradient_result.component_distribution
 
 
 # --- CTA-label contrast relabel (A2 follow-on: the theme/contrast-relative signal) -------
@@ -418,8 +418,8 @@ def test_cta_label_on_own_fill_relabels_link_to_cta_text() -> None:
         effective_bg_from_clickable=True,
     )
     result = classify_components([label, _canvas_element()], CONFIG, VIEWPORT)[0]
-    assert ComponentType.CTA_TEXT in result.component_dist
-    assert ComponentType.LINK not in result.component_dist
+    assert ComponentType.CTA_TEXT in result.component_distribution
+    assert ComponentType.LINK not in result.component_distribution
 
 
 def test_genuine_inline_link_on_canvas_keeps_link() -> None:
@@ -432,8 +432,8 @@ def test_genuine_inline_link_on_canvas_keeps_link() -> None:
         effective_bg_from_clickable=False,
     )
     result = classify_components([link, _canvas_element()], CONFIG, VIEWPORT)[0]
-    assert ComponentType.LINK in result.component_dist
-    assert ComponentType.CTA_TEXT not in result.component_dist
+    assert ComponentType.LINK in result.component_distribution
+    assert ComponentType.CTA_TEXT not in result.component_distribution
 
 
 def test_brand_link_on_tinted_clickable_card_keeps_link() -> None:
@@ -451,8 +451,8 @@ def test_brand_link_on_tinted_clickable_card_keeps_link() -> None:
         effective_bg_from_clickable=True,
     )
     result = classify_components([brand_link, _canvas_element()], CONFIG, VIEWPORT)[0]
-    assert ComponentType.LINK in result.component_dist
-    assert ComponentType.CTA_TEXT not in result.component_dist
+    assert ComponentType.LINK in result.component_distribution
+    assert ComponentType.CTA_TEXT not in result.component_distribution
 
 
 def test_text_legible_on_canvas_keeps_link() -> None:
@@ -470,8 +470,8 @@ def test_text_legible_on_canvas_keeps_link() -> None:
         effective_bg_from_clickable=True,
     )
     result = classify_components([dark_on_light, _canvas_element()], CONFIG, VIEWPORT)[0]
-    assert ComponentType.LINK in result.component_dist
-    assert ComponentType.CTA_TEXT not in result.component_dist
+    assert ComponentType.LINK in result.component_distribution
+    assert ComponentType.CTA_TEXT not in result.component_distribution
 
 
 def test_derive_page_canvas_prefers_body_over_largest_surface() -> None:
@@ -492,8 +492,8 @@ def test_anchor_is_dominant_link() -> None:
     """An <a> element classifies dominantly as link."""
     anchor = _element(tag="a", clickable=True)
     [result] = classify_components([anchor], CONFIG, VIEWPORT)
-    assert result.component_dist
-    assert _argmax(result.component_dist) is ComponentType.LINK
+    assert result.component_distribution
+    assert _argmax(result.component_distribution) is ComponentType.LINK
 
 
 def test_iframe_is_third_party_and_suppresses_brand_components() -> None:
@@ -506,10 +506,10 @@ def test_iframe_is_third_party_and_suppresses_brand_components() -> None:
         is_iframe=True,
     )
     [result] = classify_components([iframe], CONFIG, VIEWPORT)
-    assert result.component_dist
-    assert _argmax(result.component_dist) is ComponentType.THIRD_PARTY
-    card_bg = result.component_dist.get(ComponentType.CARD_BG, 0.0)
-    third_party = result.component_dist[ComponentType.THIRD_PARTY]
+    assert result.component_distribution
+    assert _argmax(result.component_distribution) is ComponentType.THIRD_PARTY
+    card_bg = result.component_distribution.get(ComponentType.CARD_BG, 0.0)
+    third_party = result.component_distribution[ComponentType.THIRD_PARTY]
     assert card_bg < third_party
 
 
@@ -529,7 +529,7 @@ def test_container_wrapper_has_no_confident_brand_component() -> None:
         if raw != "page_bg"
     }
     for comp in brand_components:
-        assert result.component_dist.get(comp, 0.0) < 0.5
+        assert result.component_distribution.get(comp, 0.0) < 0.5
 
 
 def test_distributions_sum_to_one_and_aria_hidden_is_empty() -> None:
@@ -544,10 +544,10 @@ def test_distributions_sum_to_one_and_aria_hidden_is_empty() -> None:
     header_res, anchor_res, hidden_res = results
 
     for res in (header_res, anchor_res):
-        assert res.component_dist
-        assert abs(sum(res.component_dist.values()) - 1.0) < 1e-6
+        assert res.component_distribution
+        assert abs(sum(res.component_distribution.values()) - 1.0) < 1e-6
 
-    assert hidden_res.component_dist == {}
+    assert hidden_res.component_distribution == {}
 
 
 # ---------------------------------------------------------------------------
@@ -561,30 +561,30 @@ def test_hero_rule_full_width_tall_top_block() -> None:
     """A full-width tall block in the top band gets hero_bg via geometry alone."""
     hero = _element(bounding_box=BoundingBox(x=0.0, y=0.0, width=1280.0, height=400.0))
     [result] = classify_components([hero], CONFIG, VIEWPORT)
-    assert result.component_dist
-    assert _argmax(result.component_dist) is ComponentType.HERO_BG
+    assert result.component_distribution
+    assert _argmax(result.component_distribution) is ComponentType.HERO_BG
 
 
 def test_hero_rule_negative_just_under_min_height() -> None:
     """One px under hero_min_h (280px at 800px viewport) the hero rule must not fire."""
     not_hero = _element(bounding_box=BoundingBox(x=0.0, y=0.0, width=1280.0, height=279.0))
     [result] = classify_components([not_hero], CONFIG, VIEWPORT)
-    assert ComponentType.HERO_BG not in result.component_dist
+    assert ComponentType.HERO_BG not in result.component_distribution
 
 
 def test_footer_rule_full_width_bottom_band() -> None:
     """A full-width block at/below the bottom band (y>=680) gets footer_bg."""
     footer = _element(bounding_box=BoundingBox(x=0.0, y=680.0, width=1280.0, height=120.0))
     [result] = classify_components([footer], CONFIG, VIEWPORT)
-    assert result.component_dist
-    assert _argmax(result.component_dist) is ComponentType.FOOTER_BG
+    assert result.component_distribution
+    assert _argmax(result.component_distribution) is ComponentType.FOOTER_BG
 
 
 def test_footer_rule_negative_just_above_bottom_band() -> None:
     """One px above the bottom band the footer rule must not fire."""
     not_footer = _element(bounding_box=BoundingBox(x=0.0, y=679.0, width=1280.0, height=120.0))
     [result] = classify_components([not_footer], CONFIG, VIEWPORT)
-    assert ComponentType.FOOTER_BG not in result.component_dist
+    assert ComponentType.FOOTER_BG not in result.component_distribution
 
 
 def test_fixed_sticky_rule_near_top() -> None:
@@ -594,8 +594,8 @@ def test_fixed_sticky_rule_near_top() -> None:
             position=position, bounding_box=BoundingBox(x=0.0, y=79.0, width=200.0, height=50.0)
         )
         [result] = classify_components([bar], CONFIG, VIEWPORT)
-        assert result.component_dist, position
-        assert _argmax(result.component_dist) is ComponentType.NAV_BG, position
+        assert result.component_distribution, position
+        assert _argmax(result.component_distribution) is ComponentType.NAV_BG, position
 
 
 def test_fixed_sticky_rule_negative_at_threshold() -> None:
@@ -604,7 +604,7 @@ def test_fixed_sticky_rule_negative_at_threshold() -> None:
         position="fixed", bounding_box=BoundingBox(x=0.0, y=80.0, width=200.0, height=50.0)
     )
     [result] = classify_components([bar], CONFIG, VIEWPORT)
-    assert ComponentType.NAV_BG not in result.component_dist
+    assert ComponentType.NAV_BG not in result.component_distribution
 
 
 def test_small_clickable_rule_votes_link() -> None:
@@ -617,8 +617,8 @@ def test_small_clickable_rule_votes_link() -> None:
         clickable=True, bounding_box=BoundingBox(x=100.0, y=300.0, width=160.0, height=128.0)
     )
     [result] = classify_components([chip], CONFIG, VIEWPORT)
-    assert result.component_dist
-    assert _argmax(result.component_dist) is ComponentType.LINK
+    assert result.component_distribution
+    assert _argmax(result.component_distribution) is ComponentType.LINK
 
 
 def test_small_clickable_rule_negative_just_over_area() -> None:
@@ -627,8 +627,8 @@ def test_small_clickable_rule_negative_just_over_area() -> None:
         clickable=True, bounding_box=BoundingBox(x=100.0, y=300.0, width=160.0, height=129.0)
     )
     [result] = classify_components([block], CONFIG, VIEWPORT)
-    assert result.component_dist
-    assert _argmax(result.component_dist) is ComponentType.CTA_BG
+    assert result.component_distribution
+    assert _argmax(result.component_distribution) is ComponentType.CTA_BG
 
 
 # ---------------------------------------------------------------------------
@@ -641,7 +641,7 @@ def test_third_party_flags_each_vote_third_party(flag: str) -> None:
     """cross_origin / shadow_host / vendor_match each contribute third_party votes."""
     element = _element(**{flag: True})  # type: ignore[arg-type]
     [result] = classify_components([element], CONFIG, VIEWPORT)
-    assert result.component_dist == {ComponentType.THIRD_PARTY: 1.0}
+    assert result.component_distribution == {ComponentType.THIRD_PARTY: 1.0}
 
 
 @pytest.mark.parametrize("flag", ["cross_origin", "shadow_host", "vendor_match"])
@@ -659,10 +659,10 @@ def test_third_party_flags_each_suppress_brand_components(flag: str) -> None:
         **{flag: True},  # type: ignore[arg-type]
     )
     [result] = classify_components([element], CONFIG, VIEWPORT)
-    assert result.component_dist, flag
-    assert _argmax(result.component_dist) is ComponentType.THIRD_PARTY, flag
-    card_bg = result.component_dist.get(ComponentType.CARD_BG, 0.0)
-    assert card_bg < result.component_dist[ComponentType.THIRD_PARTY], flag
+    assert result.component_distribution, flag
+    assert _argmax(result.component_distribution) is ComponentType.THIRD_PARTY, flag
+    card_bg = result.component_distribution.get(ComponentType.CARD_BG, 0.0)
+    assert card_bg < result.component_distribution[ComponentType.THIRD_PARTY], flag
 
 
 # ---------------------------------------------------------------------------
@@ -682,7 +682,7 @@ def test_invisible_element_yields_empty_distribution() -> None:
         visible=False,
     )
     [result] = classify_components([invisible], CONFIG, VIEWPORT)
-    assert result.component_dist == {}
+    assert result.component_distribution == {}
 
 
 # ---------------------------------------------------------------------------
@@ -694,8 +694,8 @@ def test_role_banner_is_header_bg() -> None:
     """role=banner matches the role= semantic rule (header_bg-dominant)."""
     banner = _element(tag="div", role="banner")
     [result] = classify_components([banner], CONFIG, VIEWPORT)
-    assert result.component_dist
-    assert _argmax(result.component_dist) is ComponentType.HEADER_BG
+    assert result.component_distribution
+    assert _argmax(result.component_distribution) is ComponentType.HEADER_BG
 
 
 def test_input_submit_semantic_rule() -> None:
@@ -714,8 +714,8 @@ def test_input_submit_semantic_rule() -> None:
         bounding_box=BoundingBox(x=100.0, y=300.0, width=400.0, height=60.0),
     )
     [result] = classify_components([submit], CONFIG, VIEWPORT)
-    assert _argmax(result.component_dist) is ComponentType.CTA_BG
-    assert ComponentType.INPUT_BG not in result.component_dist
+    assert _argmax(result.component_distribution) is ComponentType.CTA_BG
+    assert ComponentType.INPUT_BG not in result.component_distribution
 
 
 @pytest.mark.parametrize("input_type", ["text", "search", "email", "checkbox", None])
@@ -732,7 +732,7 @@ def test_non_button_input_gets_no_cta_votes(input_type: str | None) -> None:
         bounding_box=BoundingBox(x=100.0, y=300.0, width=300.0, height=60.0),
     )
     [result] = classify_components([box], CONFIG, VIEWPORT)
-    assert result.component_dist == {ComponentType.INPUT_BG: 1.0}
+    assert result.component_distribution == {ComponentType.INPUT_BG: 1.0}
 
 
 def test_clickable_text_input_gets_no_input_submit_button_vote() -> None:
@@ -752,8 +752,8 @@ def test_clickable_text_input_gets_no_input_submit_button_vote() -> None:
         bounding_box=BoundingBox(x=100.0, y=300.0, width=400.0, height=60.0),
     )
     [result] = classify_components([box], CONFIG, VIEWPORT)
-    assert _argmax(result.component_dist) is ComponentType.INPUT_BG
-    assert ComponentType.CTA_BG not in result.component_dist
+    assert _argmax(result.component_distribution) is ComponentType.INPUT_BG
+    assert ComponentType.CTA_BG not in result.component_distribution
 
 
 # Pin the button-like membership for BOTH input predicates: the shared frozenset is
@@ -778,8 +778,8 @@ _INTERACTIVITY_RULE = WhenRule(when="input[submit|button]", votes={"cta_bg": 2.0
 def test_buttonlike_input_type_membership(input_type: str | None, buttonlike: bool) -> None:
     """Each type's membership decision holds for both input predicates."""
     el = _element(tag="input", input_type=input_type, clickable=True)
-    assert _matches_semantic_tag(_SEMANTIC_RULE, el) is buttonlike
-    assert _matches_interactivity(_INTERACTIVITY_RULE, el) is buttonlike
+    assert _semantic_tag_rule_applies(_SEMANTIC_RULE, el) is buttonlike
+    assert _interactivity_rule_applies(_INTERACTIVITY_RULE, el) is buttonlike
 
 
 def test_input_submit_predicates_require_input_tag() -> None:
@@ -788,19 +788,19 @@ def test_input_submit_predicates_require_input_tag() -> None:
     <button> still satisfies the interactivity predicate via its own clickable gate.
     """
     div = _element(tag="div", input_type=None, clickable=True)
-    assert _matches_semantic_tag(_SEMANTIC_RULE, div) is False
-    assert _matches_interactivity(_INTERACTIVITY_RULE, div) is False
+    assert _semantic_tag_rule_applies(_SEMANTIC_RULE, div) is False
+    assert _interactivity_rule_applies(_INTERACTIVITY_RULE, div) is False
     button = _element(tag="button", clickable=True)
-    assert _matches_interactivity(_INTERACTIVITY_RULE, button) is True
+    assert _interactivity_rule_applies(_INTERACTIVITY_RULE, button) is True
     unclickable_button = _element(tag="button", clickable=False)
-    assert _matches_interactivity(_INTERACTIVITY_RULE, unclickable_button) is False
+    assert _interactivity_rule_applies(_INTERACTIVITY_RULE, unclickable_button) is False
 
 
 def test_hover_color_change_votes_cta() -> None:
     """has_hover_color_change alone contributes cta_bg votes."""
     hover = _element(has_hover_color_change=True)
     [result] = classify_components([hover], CONFIG, VIEWPORT)
-    assert result.component_dist == {ComponentType.CTA_BG: 1.0}
+    assert result.component_distribution == {ComponentType.CTA_BG: 1.0}
 
 
 def test_input_submit_button_interactivity_outvotes_nav_class() -> None:
@@ -818,8 +818,8 @@ def test_input_submit_button_interactivity_outvotes_nav_class() -> None:
         bounding_box=BoundingBox(x=100.0, y=300.0, width=400.0, height=60.0),
     )
     [result] = classify_components([button], CONFIG, VIEWPORT)
-    assert result.component_dist
-    assert _argmax(result.component_dist) is ComponentType.CTA_BG
+    assert result.component_distribution
+    assert _argmax(result.component_distribution) is ComponentType.CTA_BG
 
 
 # ---------------------------------------------------------------------------
@@ -835,8 +835,8 @@ def test_class_token_rules_match_element_id() -> None:
         bounding_box=BoundingBox(x=100.0, y=300.0, width=400.0, height=60.0),
     )
     [result] = classify_components([bar], CONFIG, VIEWPORT)
-    assert result.component_dist
-    assert _argmax(result.component_dist) is ComponentType.NAV_BG
+    assert result.component_distribution
+    assert _argmax(result.component_distribution) is ComponentType.NAV_BG
 
 
 # ---------------------------------------------------------------------------
@@ -881,15 +881,15 @@ def test_border_presence_votes_border_on_bordered_card() -> None:
     """
     card = _element(tag="div", class_tokens=["card"], border=_color("#d1d9e0"))
     [result] = classify_components([card], CONFIG, VIEWPORT)
-    assert _argmax(result.component_dist) is ComponentType.CARD_BG
+    assert _argmax(result.component_distribution) is ComponentType.CARD_BG
     # YAML calibration: card_bg 3.0 vs border 2.5 -> border prob ~0.27, survives.
-    assert result.component_dist.get(ComponentType.BORDER, 0.0) > 0.05
+    assert result.component_distribution.get(ComponentType.BORDER, 0.0) > 0.05
 
 
 def test_borderless_element_gets_no_border_vote() -> None:
     card = _element(tag="div", class_tokens=["card"], border=None)
     [result] = classify_components([card], CONFIG, VIEWPORT)
-    assert ComponentType.BORDER not in result.component_dist
+    assert ComponentType.BORDER not in result.component_distribution
 
 
 def test_bordered_text_input_keeps_border_component() -> None:
@@ -898,10 +898,10 @@ def test_bordered_text_input_keeps_border_component() -> None:
     input[submit] fix, no cta_bg at all)."""
     box = _element(tag="input", input_type="text", border=_color("#d1d9e0"))
     [result] = classify_components([box], CONFIG, VIEWPORT)
-    assert _argmax(result.component_dist) is ComponentType.INPUT_BG
+    assert _argmax(result.component_distribution) is ComponentType.INPUT_BG
     # YAML calibration: input_bg 3.0 vs border 2.5 -> border prob ~0.27, survives.
-    assert result.component_dist.get(ComponentType.BORDER, 0.0) > 0.05
-    assert ComponentType.CTA_BG not in result.component_dist
+    assert result.component_distribution.get(ComponentType.BORDER, 0.0) > 0.05
+    assert ComponentType.CTA_BG not in result.component_distribution
 
 
 def test_bordered_submit_input_stays_cta_dominated() -> None:
@@ -914,8 +914,8 @@ def test_bordered_submit_input_stays_cta_dominated() -> None:
     """
     submit = _element(tag="input", input_type="submit", clickable=True, border=_color("#d1d9e0"))
     [result] = classify_components([submit], CONFIG, VIEWPORT)
-    assert _argmax(result.component_dist) is ComponentType.CTA_BG
-    assert result.component_dist.get(ComponentType.BORDER, 0.0) > 0.05
+    assert _argmax(result.component_distribution) is ComponentType.CTA_BG
+    assert result.component_distribution.get(ComponentType.BORDER, 0.0) > 0.05
 
 
 def test_bordered_cta_stays_cta_dominated() -> None:
@@ -933,8 +933,8 @@ def test_bordered_cta_stays_cta_dominated() -> None:
         border=_color("#1f883d"),
     )
     [result] = classify_components([cta], CONFIG, VIEWPORT)
-    assert _argmax(result.component_dist) is ComponentType.CTA_BG
-    assert result.component_dist.get(ComponentType.BORDER, 0.0) > 0.05
+    assert _argmax(result.component_distribution) is ComponentType.CTA_BG
+    assert result.component_distribution.get(ComponentType.BORDER, 0.0) > 0.05
 
 
 def test_repeated_transparent_bg_text_spans_are_not_repetition_cards() -> None:
@@ -953,7 +953,7 @@ def test_repeated_transparent_bg_text_spans_are_not_repetition_cards() -> None:
     ]
     results = classify_components(spans, CONFIG, VIEWPORT)
     for result in results:
-        assert result.component_dist == {ComponentType.PAGE_TEXT: 1.0}
+        assert result.component_distribution == {ComponentType.PAGE_TEXT: 1.0}
 
 
 def test_text_presence_votes_page_text_on_plain_text_element() -> None:
@@ -961,7 +961,7 @@ def test_text_presence_votes_page_text_on_plain_text_element() -> None:
     page_text, so body-copy and muted-gray typography is finally measured."""
     p = _element(tag="p", has_text=True)
     [result] = classify_components([p], CONFIG, VIEWPORT)
-    assert result.component_dist == {ComponentType.PAGE_TEXT: 1.0}
+    assert result.component_distribution == {ComponentType.PAGE_TEXT: 1.0}
 
 
 def test_text_presence_suppressed_on_clickable_elements() -> None:
@@ -969,8 +969,8 @@ def test_text_presence_suppressed_on_clickable_elements() -> None:
     by definition and already routed via the link rules (see the YAML comment)."""
     link = _element(tag="a", clickable=True, has_text=True)
     [result] = classify_components([link], CONFIG, VIEWPORT)
-    assert ComponentType.PAGE_TEXT not in result.component_dist
-    assert _argmax(result.component_dist) is ComponentType.LINK
+    assert ComponentType.PAGE_TEXT not in result.component_distribution
+    assert _argmax(result.component_distribution) is ComponentType.LINK
 
 
 def test_text_presence_does_not_displace_semantic_card_bg() -> None:
@@ -978,8 +978,8 @@ def test_text_presence_does_not_displace_semantic_card_bg() -> None:
     below the card's semantic card_bg vote (3.0)."""
     card = _element(tag="div", class_tokens=["card"], has_text=True)
     [result] = classify_components([card], CONFIG, VIEWPORT)
-    assert _argmax(result.component_dist) is ComponentType.CARD_BG
-    assert 0.05 <= result.component_dist[ComponentType.PAGE_TEXT] < 0.5
+    assert _argmax(result.component_distribution) is ComponentType.CARD_BG
+    assert 0.05 <= result.component_distribution[ComponentType.PAGE_TEXT] < 0.5
 
 
 def test_no_viewport_uses_default() -> None:
@@ -988,8 +988,8 @@ def test_no_viewport_uses_default() -> None:
         tag="header", bounding_box=BoundingBox(x=0.0, y=0.0, width=1280.0, height=80.0)
     )
     [result] = classify_components([header], CONFIG)
-    assert result.component_dist
-    assert _argmax(result.component_dist) is ComponentType.HEADER_BG
+    assert result.component_distribution
+    assert _argmax(result.component_distribution) is ComponentType.HEADER_BG
 
 
 def test_finalize_distribution_does_not_overflow_on_large_votes() -> None:
@@ -1045,14 +1045,16 @@ def test_single_family_element_is_byte_identical_to_global_softmax() -> None:
         tag="header", bounding_box=BoundingBox(x=0.0, y=0.0, width=1280.0, height=80.0)
     )
     [header_res] = classify_components([header], CONFIG, VIEWPORT)
-    assert all(c.property_family is PropertyFamily.BACKGROUND for c in header_res.component_dist)
-    assert header_res.component_dist == {ComponentType.HEADER_BG: 1.0}
+    assert all(
+        c.property_family is PropertyFamily.BACKGROUND for c in header_res.component_distribution
+    )
+    assert header_res.component_distribution == {ComponentType.HEADER_BG: 1.0}
 
     # A plain text paragraph: a lone text-family page_text vote.
     para = _element(tag="p", has_text=True)
     [para_res] = classify_components([para], CONFIG, VIEWPORT)
-    assert all(c.property_family is PropertyFamily.TEXT for c in para_res.component_dist)
-    assert para_res.component_dist == {ComponentType.PAGE_TEXT: 1.0}
+    assert all(c.property_family is PropertyFamily.TEXT for c in para_res.component_distribution)
+    assert para_res.component_distribution == {ComponentType.PAGE_TEXT: 1.0}
 
     # A multi-vote single-family element (all background): a borderless ``.card`` with text-
     # presence excluded, so card_bg + page_text? page_text is the text family, so use a card
@@ -1075,7 +1077,7 @@ def test_multifamily_element_paints_both_families_unstarved() -> None:
     """
     card = _element(tag="div", class_tokens=["card"], border=_color("#d1d9e0"), has_text=True)
     [result] = classify_components([card], CONFIG, VIEWPORT)
-    dist = result.component_dist
+    dist = result.component_distribution
     bg_mass = sum(v for c, v in dist.items() if c.property_family is PropertyFamily.BACKGROUND)
     text_mass = sum(v for c, v in dist.items() if c.property_family is PropertyFamily.TEXT)
     border_mass = sum(v for c, v in dist.items() if c.property_family is PropertyFamily.BORDER)
@@ -1090,9 +1092,9 @@ def test_multifamily_distribution_sums_to_one() -> None:
     # A bordered submit input spans all three families: cta_bg/link (background/text) + border.
     submit = _element(tag="input", input_type="submit", clickable=True, border=_color("#d1d9e0"))
     [result] = classify_components([submit], CONFIG, VIEWPORT)
-    families = {c.property_family for c in result.component_dist}
+    families = {c.property_family for c in result.component_distribution}
     assert len(families) >= 2  # genuinely multi-family
-    assert math.isclose(sum(result.component_dist.values()), 1.0, rel_tol=1e-9)
+    assert math.isclose(sum(result.component_distribution.values()), 1.0, rel_tol=1e-9)
 
 
 def test_gradient_pill_attributes_bg_channel_without_the_removed_hack() -> None:
@@ -1117,6 +1119,6 @@ def test_gradient_pill_attributes_bg_channel_without_the_removed_hack() -> None:
     )
     [result] = classify_components([pill], CONFIG, VIEWPORT)
     # Interactive label still dominant, but the bg-channel cta_bg now carries real mass.
-    assert _argmax(result.component_dist) is ComponentType.CTA_TEXT
-    assert result.component_dist.get(ComponentType.CTA_BG, 0.0) > 0.05
-    assert math.isclose(sum(result.component_dist.values()), 1.0, rel_tol=1e-9)
+    assert _argmax(result.component_distribution) is ComponentType.CTA_TEXT
+    assert result.component_distribution.get(ComponentType.CTA_BG, 0.0) > 0.05
+    assert math.isclose(sum(result.component_distribution.values()), 1.0, rel_tol=1e-9)
