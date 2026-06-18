@@ -64,11 +64,11 @@ def nearest_within[T](
     """
     nearest_index: int | None = None
     nearest_distance = radius
-    for idx, candidate in enumerate(candidates):
+    for index, candidate in enumerate(candidates):
         distance = delta_e(target, key(candidate))
         if distance <= nearest_distance:
             nearest_distance = distance
-            nearest_index = idx
+            nearest_index = index
     return nearest_index
 
 
@@ -85,7 +85,7 @@ def first_within[T](
     when a target is within radius of two candidates this returns the earlier one, which
     matters for stable grouping (do not substitute nearest here).
     """
-    for idx, candidate in enumerate(candidates):
+    for index, candidate in enumerate(candidates):
         if delta_e(target, key(candidate)) <= radius:
-            return idx
+            return index
     return None

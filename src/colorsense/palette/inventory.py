@@ -479,7 +479,7 @@ def build_inventory(harvest: Harvest, classified: list[ClassifiedElement]) -> li
     # STEP 1b: attribute element semantics to the nearest entry in the family's pool
     # (or a new one), routing each component's mass to the family that paints it.
     for classification in classified:
-        if not classification.component_dist:
+        if not classification.component_distribution:
             continue
 
         # Split the distribution into per-family sub-distributions. Family routing is the
@@ -490,7 +490,7 @@ def build_inventory(harvest: Harvest, classified: list[ClassifiedElement]) -> li
             PropertyFamily.TEXT: {},
             PropertyFamily.BORDER: {},
         }
-        for component, mass in classification.component_dist.items():
+        for component, mass in classification.component_distribution.items():
             family_distributions[component.property_family][component] = mass
 
         # Fixed family order for determinism. The background family can carry more than one

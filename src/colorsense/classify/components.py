@@ -754,8 +754,10 @@ def classify_components(
 
         # Dampen votes, then softmax/prune/renormalize.
         _dampen_votes(vote_totals, element, config)
-        component_dist = _finalize_distribution(vote_totals, config)
+        component_distribution = _finalize_distribution(vote_totals, config)
 
-        results.append(ClassifiedElement(element=element, component_dist=component_dist))
+        results.append(
+            ClassifiedElement(element=element, component_distribution=component_distribution)
+        )
 
     return results

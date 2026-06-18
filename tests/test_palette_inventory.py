@@ -92,7 +92,7 @@ def _classified(
 ) -> ClassifiedElement:
     return ClassifiedElement(
         element=_element(bg, text=text, border=border, bg_gradient_stops=bg_gradient_stops),
-        component_dist=dist,
+        component_distribution=dist,
     )
 
 
