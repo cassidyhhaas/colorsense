@@ -15,7 +15,7 @@ import pytest
 
 from colorsense.color.primitives import parse_css_color
 from colorsense.harvest import states
-from colorsense.models import Color, HarvestedElement, Rect
+from colorsense.models import BoundingBox, Color, HarvestedElement
 
 
 def _color(value: str) -> Color:
@@ -34,7 +34,7 @@ def _element(
         tag="button",
         role=None,
         id=None,
-        rect=Rect(x=0.0, y=0.0, width=100.0, height=40.0),
+        bounding_box=BoundingBox(x=0.0, y=0.0, width=100.0, height=40.0),
         position="static",
         bg=bg,
         text=None,

@@ -184,7 +184,7 @@ async def test_goto_warns_and_continues_when_style_injection_keeps_failing() -> 
 
     assert page.style_attempts == 2  # initial attempt + one retry, then degrade
     assert page.injected_css == []
-    assert session.consent_rects == []  # the rest of goto() still ran
+    assert session.consent_boxes == []  # the rest of goto() still ran
 
 
 # --- RenderSession teardown: every resource is closed exactly once --------------------

@@ -98,7 +98,9 @@ def _is_pill(element: HarvestedElement) -> bool:
     never a card") applies at any size — while the badge *rule* layers the size/text gates
     on top.
     """
-    return is_pill_shape(element.rect.width, element.rect.height, element.min_corner_radius)
+    return is_pill_shape(
+        element.bounding_box.width, element.bounding_box.height, element.min_corner_radius
+    )
 
 
 def _is_small_circle(element: HarvestedElement, max_h_px: float) -> bool:
@@ -110,8 +112,10 @@ def _is_small_circle(element: HarvestedElement, max_h_px: float) -> bool:
     circle-badge promotion (which layers clickable + recurrence on top).
     """
     return (
-        is_circle_shape(element.rect.width, element.rect.height, element.min_corner_radius)
-        and element.rect.height <= max_h_px
+        is_circle_shape(
+            element.bounding_box.width, element.bounding_box.height, element.min_corner_radius
+        )
+        and element.bounding_box.height <= max_h_px
     )
 
 
@@ -174,7 +178,7 @@ def _derive_page_canvas_color(elements: list[HarvestedElement]) -> Color | None:
         bg = opaque_bg(element)
         if bg is None:
             continue
-        area = element.rect.width * element.rect.height
+        area = element.bounding_box.width * element.bounding_box.height
         if area > best_area:
             best_area = area
             best = bg
@@ -233,12 +237,12 @@ def _page_canvas_index(
             continue
         if ciede2000(bg, page_canvas) > fallback.color_match_delta_e:
             continue
-        rect = element.rect
-        full_width = (rect.width / vp_w) >= thresholds.full_width
-        top = rect.y / vp_h
+        box = element.bounding_box
+        full_width = (box.width / vp_w) >= thresholds.full_width
+        top = box.y / vp_h
         if not (full_width and top < thresholds.top_band):
             continue
-        area = rect.width * rect.height
+        area = box.width * box.height
         if area > best_area:
             best_area = area
             best_index = index
@@ -348,21 +352,21 @@ def _matches_geometry(
     viewport: Viewport,
 ) -> bool:
     """Dispatch the geometry ``when`` predicates (validated at config load)."""
-    rect = element.rect
+    box = element.bounding_box
     vp_w = float(viewport.width)
     vp_h = float(viewport.height)
     if vp_w <= 0.0 or vp_h <= 0.0:
         return False
 
-    full_width = (rect.width / vp_w) >= thresholds.full_width
-    top = rect.y / vp_h
-    height = rect.height / vp_h
-    area = (rect.width * rect.height) / (vp_w * vp_h)
+    full_width = (box.width / vp_w) >= thresholds.full_width
+    top = box.y / vp_h
+    height = box.height / vp_h
+    area = (box.width * box.height) / (vp_w * vp_h)
 
     if when == "full_width & top<top_band & h<short_h":
         return full_width and top < thresholds.top_band and height < thresholds.short_h
     if when == "position in (fixed,sticky) & top<sticky_top_px":
-        return element.position in {"fixed", "sticky"} and rect.y < thresholds.sticky_top_px
+        return element.position in {"fixed", "sticky"} and box.y < thresholds.sticky_top_px
     if when == "full_width & top<top_band & h>=hero_min_h":
         return full_width and top < thresholds.top_band and height >= thresholds.hero_min_h
     if when == "top>=bottom_band & full_width":
@@ -374,7 +378,7 @@ def _matches_geometry(
             _is_pill(element)
             and _paints_visible_fill(element)
             and element.has_text
-            and element.rect.height <= thresholds.badge_max_h_px
+            and element.bounding_box.height <= thresholds.badge_max_h_px
         )
     return False
 
@@ -496,7 +500,7 @@ def _apply_suppressors(
 ) -> None:
     """Apply multiplicative suppressors to the accumulated votes in place."""
     suppressors = config.component_classifier.suppressors
-    rect = element.rect
+    box = element.bounding_box
 
     for key, suppressor in suppressors.items():
         if suppressor.applies_to == "all":
@@ -504,7 +508,7 @@ def _apply_suppressors(
             if key == "aria_hidden":
                 triggered = element.aria_hidden
             elif key == "zero_area_or_hidden":
-                triggered = (not element.visible) or rect.width <= 0.0 or rect.height <= 0.0
+                triggered = (not element.visible) or box.width <= 0.0 or box.height <= 0.0
             if triggered:
                 for component in vote_totals:
                     vote_totals[component] *= suppressor.factor

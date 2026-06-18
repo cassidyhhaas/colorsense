@@ -32,7 +32,7 @@ from colorsense.harvest.screenshot import (
     _rgb_to_color,
     harvest_screenshot,
 )
-from colorsense.models import Rect, Theme, Viewport
+from colorsense.models import BoundingBox, Theme, Viewport
 
 VIEWPORT = Viewport(width=1280, height=800, device_scale_factor=1.0)
 
@@ -307,7 +307,7 @@ async def test_harvest_screenshot_pillow_bomb_raise_folds_into_oversize_error() 
 
 
 # ---------------------------------------------------------------------------
-# Consent-rect -> keep-mask scaling arithmetic (CSS px rects, device px image)
+# Consent-box -> keep-mask scaling arithmetic (CSS px boxes, device px image)
 # ---------------------------------------------------------------------------
 
 
@@ -322,29 +322,29 @@ def _banded_png_bytes(width: int, height: int, band_rows: int) -> bytes:
 
 # A 200x100 device-px image whose top half (50 rows) is red, rest white.
 _BAND_IMAGE = _banded_png_bytes(200, 100, 50)
-# The CSS-px rect covering exactly that red band at device_scale_factor=2.0.
-_BAND_RECT_CSS_AT_DSF2 = Rect(x=0.0, y=0.0, width=100.0, height=25.0)
+# The CSS-px box covering exactly that red band at device_scale_factor=2.0.
+_BAND_BOX_CSS_AT_DSF2 = BoundingBox(x=0.0, y=0.0, width=100.0, height=25.0)
 
 
 @pytest.mark.asyncio
-async def test_consent_rect_scaled_by_device_scale_factor() -> None:
-    # At dsf=2 the CSS rect (100x25) must scale to device px (200x50) and mask the
+async def test_consent_box_scaled_by_device_scale_factor() -> None:
+    # At dsf=2 the CSS box (100x25) must scale to device px (200x50) and mask the
     # whole red band; a dsf-scaling bug would mask only a quarter and leave red in.
     page = _FakePage(doc_width=100.0, doc_height=50.0, image=_BAND_IMAGE)
 
-    bins = await harvest_screenshot(page, [_BAND_RECT_CSS_AT_DSF2], 2.0)  # type: ignore[arg-type]
+    bins = await harvest_screenshot(page, [_BAND_BOX_CSS_AT_DSF2], 2.0)  # type: ignore[arg-type]
 
     assert [b.color.hex for b in bins] == ["#ffffff"]
     assert bins[0].area_fraction == pytest.approx(1.0, abs=1e-6)
 
 
 @pytest.mark.asyncio
-async def test_consent_rect_at_dsf1_masks_only_unscaled_region() -> None:
-    # Control for the dsf test: at dsf=1 the same rect masks only the 100x25
+async def test_consent_box_at_dsf1_masks_only_unscaled_region() -> None:
+    # Control for the dsf test: at dsf=1 the same box masks only the 100x25
     # top-left corner, so most of the red band (7500 of 17500 kept px) survives.
     page = _FakePage(doc_width=200.0, doc_height=100.0, image=_BAND_IMAGE)
 
-    bins = await harvest_screenshot(page, [_BAND_RECT_CSS_AT_DSF2], 1.0)  # type: ignore[arg-type]
+    bins = await harvest_screenshot(page, [_BAND_BOX_CSS_AT_DSF2], 1.0)  # type: ignore[arg-type]
 
     fractions = {b.color.hex: b.area_fraction for b in bins}
     assert fractions["#ffffff"] == pytest.approx(10000 / 17500, abs=1e-6)
@@ -353,29 +353,29 @@ async def test_consent_rect_at_dsf1_masks_only_unscaled_region() -> None:
 
 
 @pytest.mark.asyncio
-async def test_consent_rect_out_of_bounds_is_clamped() -> None:
-    # A rect spilling past every edge (negative origin, oversized extent) must be
+async def test_consent_box_out_of_bounds_is_clamped() -> None:
+    # A box spilling past every edge (negative origin, oversized extent) must be
     # clamped to the image, not raise or wrap around with negative indices.
     page = _FakePage(doc_width=200.0, doc_height=100.0, image=_BAND_IMAGE)
-    rect = Rect(x=-50.0, y=-30.0, width=1000.0, height=80.0)  # clamps to rows 0..50
+    box = BoundingBox(x=-50.0, y=-30.0, width=1000.0, height=80.0)  # clamps to rows 0..50
 
-    bins = await harvest_screenshot(page, [rect], 1.0)  # type: ignore[arg-type]
+    bins = await harvest_screenshot(page, [box], 1.0)  # type: ignore[arg-type]
 
     assert [b.color.hex for b in bins] == ["#ffffff"]
     assert bins[0].area_fraction == pytest.approx(1.0, abs=1e-6)
 
 
 @pytest.mark.asyncio
-async def test_degenerate_consent_rects_are_ignored() -> None:
-    # Rects whose scaled width/height collapse to zero (or are negative) must be
+async def test_degenerate_consent_boxes_are_ignored() -> None:
+    # Boxes whose scaled width/height collapse to zero (or are negative) must be
     # skipped entirely, leaving the full image sampled.
     page = _FakePage(doc_width=200.0, doc_height=100.0, image=_BAND_IMAGE)
-    rects = [
-        Rect(x=10.0, y=10.0, width=0.4, height=0.4),  # int-truncates to zero size
-        Rect(x=10.0, y=10.0, width=-5.0, height=20.0),  # negative width
+    boxes = [
+        BoundingBox(x=10.0, y=10.0, width=0.4, height=0.4),  # int-truncates to zero size
+        BoundingBox(x=10.0, y=10.0, width=-5.0, height=20.0),  # negative width
     ]
 
-    bins = await harvest_screenshot(page, rects, 1.0)  # type: ignore[arg-type]
+    bins = await harvest_screenshot(page, boxes, 1.0)  # type: ignore[arg-type]
 
     fractions = {b.color.hex: b.area_fraction for b in bins}
     assert fractions == {
@@ -385,26 +385,26 @@ async def test_degenerate_consent_rects_are_ignored() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Media-rect masking (photographic content excluded from the palette)
+# Media-box masking (photographic content excluded from the palette)
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
-async def test_media_rect_excludes_photo_region() -> None:
-    # The red band stands in for a raster photo; passed as a media rect it must be zeroed
-    # out of the keep-mask exactly like a consent rect, leaving only the white background.
+async def test_media_box_excludes_photo_region() -> None:
+    # The red band stands in for a raster photo; passed as a media box it must be zeroed
+    # out of the keep-mask exactly like a consent box, leaving only the white background.
     page = _FakePage(doc_width=200.0, doc_height=100.0, image=_BAND_IMAGE)
-    photo_rect = Rect(x=0.0, y=0.0, width=200.0, height=50.0)  # covers the red band
+    photo_box = BoundingBox(x=0.0, y=0.0, width=200.0, height=50.0)  # covers the red band
 
-    bins = await harvest_screenshot(page, [], 1.0, [photo_rect])  # type: ignore[arg-type]
+    bins = await harvest_screenshot(page, [], 1.0, [photo_box])  # type: ignore[arg-type]
 
     assert [b.color.hex for b in bins] == ["#ffffff"]
     assert bins[0].area_fraction == pytest.approx(1.0, abs=1e-6)
 
 
 @pytest.mark.asyncio
-async def test_media_rects_default_none_keeps_everything() -> None:
-    # Omitting media_rects entirely (the back-compat default) must sample the whole image:
+async def test_media_boxes_default_none_keeps_everything() -> None:
+    # Omitting media_boxes entirely (the back-compat default) must sample the whole image:
     # the red band survives alongside the white background, 50/50.
     page = _FakePage(doc_width=200.0, doc_height=100.0, image=_BAND_IMAGE)
 
@@ -416,15 +416,15 @@ async def test_media_rects_default_none_keeps_everything() -> None:
 
 
 @pytest.mark.asyncio
-async def test_media_and_consent_rects_mask_together() -> None:
-    # Consent and media rects share one keep-mask: a consent rect over the top half (red)
-    # and a media rect over a strip of the white bottom half both vanish, with the
+async def test_media_and_consent_boxes_mask_together() -> None:
+    # Consent and media boxes share one keep-mask: a consent box over the top half (red)
+    # and a media box over a strip of the white bottom half both vanish, with the
     # remaining white dominating.
     page = _FakePage(doc_width=200.0, doc_height=100.0, image=_BAND_IMAGE)
-    consent_rect = Rect(x=0.0, y=0.0, width=200.0, height=50.0)  # the red band
-    media_rect = Rect(x=0.0, y=50.0, width=200.0, height=10.0)  # a white strip below it
+    consent_box = BoundingBox(x=0.0, y=0.0, width=200.0, height=50.0)  # the red band
+    media_box = BoundingBox(x=0.0, y=50.0, width=200.0, height=10.0)  # a white strip below it
 
-    bins = await harvest_screenshot(page, [consent_rect], 1.0, [media_rect])  # type: ignore[arg-type]
+    bins = await harvest_screenshot(page, [consent_box], 1.0, [media_box])  # type: ignore[arg-type]
 
     assert [b.color.hex for b in bins] == ["#ffffff"]
     assert bins[0].area_fraction == pytest.approx(1.0, abs=1e-6)
@@ -463,15 +463,15 @@ class _FakeRenderSession:
     """A fake ``RenderSession`` exposing a :class:`_HarvestFakePage`."""
 
     page: _HarvestFakePage
-    consent_rects: list[Any]
-    media_rects: list[Any]
+    consent_boxes: list[Any]
+    media_boxes: list[Any]
 
     _next_page: _HarvestFakePage  # set by the test before construction
 
     def __init__(self, *_args: Any, **_kwargs: Any) -> None:
         self.page = type(self)._next_page
-        self.consent_rects = []
-        self.media_rects = []
+        self.consent_boxes = []
+        self.media_boxes = []
 
     async def __aenter__(self) -> _FakeRenderSession:
         return self

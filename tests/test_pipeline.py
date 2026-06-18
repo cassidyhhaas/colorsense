@@ -21,10 +21,10 @@ from colorsense.config import Config, load_default_config
 from colorsense.harvest import RenderError, RequestFilter, SharedBrowser
 from colorsense.models import (
     AnalysisResult,
+    BoundingBox,
     Color,
     Harvest,
     HarvestedElement,
-    Rect,
     ScreenshotBin,
     Theme,
     TokenRecord,
@@ -408,7 +408,7 @@ def _bg_element(
         role=None,
         id=None,
         class_tokens=class_tokens or [],
-        rect=Rect(x=0.0, y=0.0, width=1280.0, height=200.0),
+        bounding_box=BoundingBox(x=0.0, y=0.0, width=1280.0, height=200.0),
         position="static",
         bg=bg,
         text=_color("#111827"),

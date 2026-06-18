@@ -1,7 +1,7 @@
 """Visible-DOM element harvesting with computed colors and structural flags.
 
 Walks the rendered DOM in-page, capturing for each element its computed ``background-color`` /
-``color`` / ``border-color`` (parsed to [`Color`][colorsense.Color]), bounding rect, position,
+``color`` / ``border-color`` (parsed to [`Color`][colorsense.Color]), bounding box, position,
 tag/role/id/class tokens, the input ``type`` attribute (``<input>`` only), the opaque stops of
 a gradient that fills it (only for clickable pill CTAs), its composited *effective*
 background (the first fully-opaque ``background-color`` up the ancestor chain, plus whether
@@ -35,7 +35,7 @@ from playwright.async_api import Page
 from colorsense._util import dedupe_by
 from colorsense.color.primitives import is_painting, parse_css_color
 from colorsense.harvest.render import EVAL_TIMEOUT_S
-from colorsense.models import Color, HarvestedElement, Rect, is_pill_shape
+from colorsense.models import BoundingBox, Color, HarvestedElement, is_pill_shape
 
 # Bound on the per-render element payload. Each record below materializes as a pydantic
 # model in the *host* Python process — container limits bound the renderer, not the
@@ -101,7 +101,7 @@ class _RawElement(TypedDict):
     role: str | None
     id: str | None
     class_tokens: list[str]
-    rect: dict[str, float]
+    bounding_box: dict[str, float]
     position: str
     bg: str
     text: str
@@ -308,7 +308,7 @@ _COLLECT_DOM_JS: str = r"""
             role: role,
             id: el.id || null,
             class_tokens: classList,
-            rect: {x: r.x, y: r.y, w: r.width, h: r.height},
+            bounding_box: {x: r.x, y: r.y, w: r.width, h: r.height},
             position: style.position,
             bg: style.backgroundColor,
             text: style.color,
@@ -335,7 +335,7 @@ _COLLECT_DOM_JS: str = r"""
     // Host-process memory bound (see _MAX_HARVEST_ELEMENTS in Python): keep the
     // largest-area records, preserving document order among the survivors.
     if (out.length > maxElements) {
-        const ranked = out.map((rec, i) => [rec.rect.w * rec.rect.h, i]);
+        const ranked = out.map((rec, i) => [rec.bounding_box.w * rec.bounding_box.h, i]);
         ranked.sort((a, b) => (b[0] - a[0]) || (a[1] - b[1]));
         const keep = new Set(ranked.slice(0, maxElements).map((pair) => pair[1]));
         return out.filter((rec, i) => keep.has(i));
@@ -373,14 +373,14 @@ async def harvest_elements(
     elements: list[HarvestedElement] = []
     selectors: list[str] = []
     for raw in raw_elements:
-        rect = raw["rect"]
+        box = raw["bounding_box"]
         bg = parse_css_color(raw["bg"])
         gradient_stops: tuple[Color, ...] = ()
         if _is_interactive_pill(
             clickable=raw["clickable"],
             min_corner_radius=raw["min_corner_radius"],
-            width=rect["w"],
-            height=rect["h"],
+            width=box["w"],
+            height=box["h"],
         ):
             gradient_stops = _gradient_fill_stops(bg, raw["bg_image_colors"])
         elements.append(
@@ -389,7 +389,7 @@ async def harvest_elements(
                 role=raw["role"],
                 id=raw["id"],
                 class_tokens=raw["class_tokens"],
-                rect=Rect(x=rect["x"], y=rect["y"], width=rect["w"], height=rect["h"]),
+                bounding_box=BoundingBox(x=box["x"], y=box["y"], width=box["w"], height=box["h"]),
                 position=raw["position"],
                 bg=bg,
                 text=parse_css_color(raw["text"]),

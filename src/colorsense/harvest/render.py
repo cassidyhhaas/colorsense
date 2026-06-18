@@ -5,7 +5,7 @@
 inside an externally supplied `Browser` — navigates robustly
 to a URL (guarding ``networkidle`` so ``file://`` pages never hang), neutralizes
 transitions/animations, step-scrolls to trigger lazy content, and detects consent/overlay
-regions whose bounding rects can be masked out of the screenshot.
+regions whose bounding boxes can be masked out of the screenshot.
 
 `SharedBrowser` is the lazy browser-lifecycle handle that lets multiple sessions
 (e.g. the light and dark renders of one ``analyze()`` call) share a single Chromium
@@ -39,7 +39,7 @@ from playwright.async_api import (
     async_playwright,
 )
 
-from colorsense.models import Rect, Theme, Viewport
+from colorsense.models import BoundingBox, Theme, Viewport
 
 RequestFilter = Callable[[str], bool] | Callable[[str], Awaitable[bool]]
 """An egress predicate over a request URL: ``True`` permits, ``False`` aborts.
@@ -137,8 +137,8 @@ _STEP_SCROLL_JS: str = """
 }
 """
 
-# JS that finds consent/overlay banners and returns their bounding rects.
-_CONSENT_RECTS_JS: str = r"""
+# JS that finds consent/overlay banners and returns their bounding boxes.
+_CONSENT_BOXES_JS: str = r"""
 () => {
     const keywords = /cookie|consent|gdpr|onetrust|cookiebot|usercentrics|privacy|banner/i;
     const out = [];
@@ -176,18 +176,18 @@ _CONSENT_RECTS_JS: str = r"""
 """
 
 
-# Upper bound on the number of raster-media rects collected per page. Each rect is zeroed
-# out of the screenshot keep-mask (an O(rects) numpy slice loop), so the cost is bounded by
+# Upper bound on the number of raster-media boxes collected per page. Each box is zeroed
+# out of the screenshot keep-mask (an O(boxes) numpy slice loop), so the cost is bounded by
 # this cap, not the page's element count. A hostile page can synthesize hundreds of
 # thousands of ``<img>`` tags; mirroring the spirit of the DOM/gradient caps in
 # ``harvest/dom.py``, we collect at most this many — far above any genuine page (real sites
 # carry at most a few dozen above-the-fold images) yet a hard bound on attacker-controlled
 # work. The JS ranks candidates largest-area-first before truncating, so the photos most
 # worth masking survive the cap.
-_MAX_MEDIA_RECTS: int = 256
+_MAX_MEDIA_BOXES: int = 256
 
-# JS that finds raster *media* elements and returns their bounding rects (CSS px, the same
-# coordinate basis as _CONSENT_RECTS_JS), so photographic content can be masked out of the
+# JS that finds raster *media* elements and returns their bounding boxes (CSS px, the same
+# coordinate basis as _CONSENT_BOXES_JS), so photographic content can be masked out of the
 # screenshot palette and a site's design colors aren't drowned by its photography.
 #
 # An element is maskable raster media when it is visible, has non-zero area, AND either:
@@ -203,9 +203,9 @@ _MAX_MEDIA_RECTS: int = 256
 #     often carry the brand color. Note the asymmetry: an ``<img src="logo.svg">`` IS masked
 #     (it is a replaced raster element by tag, regardless of the resource's format) — the
 #     distinction drawn here is inline-vector vs replaced-element, not file extension.
-# Candidates are ranked largest-area-first and truncated to maxRects (passed from Python).
-_MEDIA_RECTS_JS: str = r"""
-(maxRects) => {
+# Candidates are ranked largest-area-first and truncated to maxBoxes (passed from Python).
+_MEDIA_BOXES_JS: str = r"""
+(maxBoxes) => {
     const rasterTags = new Set(['IMG', 'VIDEO', 'CANVAS', 'PICTURE']);
     const out = [];
     for (const el of document.querySelectorAll('*')) {
@@ -222,7 +222,7 @@ _MEDIA_RECTS_JS: str = r"""
     }
     // Largest-area-first so the photos most worth masking survive the cap.
     out.sort((a, b) => b.area - a.area);
-    return out.slice(0, maxRects).map((m) => ({x: m.x, y: m.y, w: m.w, h: m.h}));
+    return out.slice(0, maxBoxes).map((m) => ({x: m.x, y: m.y, w: m.w, h: m.h}));
 }
 """
 
@@ -395,7 +395,7 @@ class RenderSession:
         async with RenderSession(theme, viewport) as session:
             await session.goto(url)
             page = session.page  # run module JS against it
-            consent = session.consent_rects
+            consent = session.consent_boxes
 
     Parameters
     ----------
@@ -458,8 +458,8 @@ class RenderSession:
         self._browser: Browser | None = browser
         self._context: BrowserContext | None = None
         self._page: Page | None = None
-        self._consent_rects: list[Rect] = []
-        self._media_rects: list[Rect] = []
+        self._consent_boxes: list[BoundingBox] = []
+        self._media_boxes: list[BoundingBox] = []
 
     # -- context manager --------------------------------------------------
 
@@ -549,19 +549,19 @@ class RenderSession:
         return self._viewport
 
     @property
-    def consent_rects(self) -> list[Rect]:
-        """Bounding rects of detected consent/overlay banners (for masking)."""
-        return list(self._consent_rects)
+    def consent_boxes(self) -> list[BoundingBox]:
+        """Bounding boxes of detected consent/overlay banners (for masking)."""
+        return list(self._consent_boxes)
 
     @property
-    def media_rects(self) -> list[Rect]:
-        """Bounding rects of detected raster media (images/video/canvas/url() backgrounds).
+    def media_boxes(self) -> list[BoundingBox]:
+        """Bounding boxes of detected raster media (images/video/canvas/url() backgrounds).
 
         Masked out of the screenshot palette so photographic content does not drown a
         site's design colors. Excludes CSS gradients and inline ``<svg>`` (see
-        `_MEDIA_RECTS_JS`).
+        `_MEDIA_BOXES_JS`).
         """
-        return list(self._media_rects)
+        return list(self._media_boxes)
 
     # -- navigation -------------------------------------------------------
 
@@ -597,8 +597,8 @@ class RenderSession:
                 page.evaluate(_STEP_SCROLL_JS, _MAX_SCROLL_STEPS), _BEST_EFFORT_TIMEOUT_S
             )
 
-        self._consent_rects = await self._detect_consent_rects()
-        self._media_rects = await self._detect_media_rects()
+        self._consent_boxes = await self._detect_consent_boxes()
+        self._media_boxes = await self._detect_media_boxes()
 
     @staticmethod
     async def _disable_motion(page: Page) -> None:
@@ -633,24 +633,24 @@ class RenderSession:
             stacklevel=2,
         )
 
-    async def _detect_consent_rects(self) -> list[Rect]:
-        """Return bounding rects of consent/overlay banners without clicking them."""
-        return await self._detect_rects(_CONSENT_RECTS_JS)
+    async def _detect_consent_boxes(self) -> list[BoundingBox]:
+        """Return bounding boxes of consent/overlay banners without clicking them."""
+        return await self._detect_boxes(_CONSENT_BOXES_JS)
 
-    async def _detect_media_rects(self) -> list[Rect]:
-        """Return bounding rects of raster media (images/video/canvas/url() backgrounds).
+    async def _detect_media_boxes(self) -> list[BoundingBox]:
+        """Return bounding boxes of raster media (images/video/canvas/url() backgrounds).
 
         Best-effort, like consent detection: a wedged renderer or malformed payload yields
-        no rects rather than failing the harvest. The collected count is bounded by
-        `_MAX_MEDIA_RECTS` (passed into the JS, which truncates largest-area-first) so a
+        no boxes rather than failing the harvest. The collected count is bounded by
+        `_MAX_MEDIA_BOXES` (passed into the JS, which truncates largest-area-first) so a
         page declaring hundreds of thousands of ``<img>`` tags cannot blow up the mask loop.
-        See `_MEDIA_RECTS_JS` for the maskable-vs-kept predicate (gradients and inline
+        See `_MEDIA_BOXES_JS` for the maskable-vs-kept predicate (gradients and inline
         ``<svg>`` are deliberately kept).
         """
-        return await self._detect_rects(_MEDIA_RECTS_JS, _MAX_MEDIA_RECTS)
+        return await self._detect_boxes(_MEDIA_BOXES_JS, _MAX_MEDIA_BOXES)
 
-    async def _detect_rects(self, js: str, *args: object) -> list[Rect]:
-        r"""Evaluate a rect-returning JS payload and parse it into `Rect`\ s, best-effort.
+    async def _detect_boxes(self, js: str, *args: object) -> list[BoundingBox]:
+        r"""Evaluate a box-returning JS payload and parse it into `BoundingBox`\ es, best-effort.
 
         Shared by consent and media detection: both run a bounded in-page pass returning a
         list of ``{x, y, w, h}`` dicts (CSS px). Any failure — a wedged-renderer timeout, a
@@ -662,14 +662,14 @@ class RenderSession:
             raw = await asyncio.wait_for(self.page.evaluate(js, *args), _BEST_EFFORT_TIMEOUT_S)
         except Exception:  # detection is best-effort (including a wedged-renderer timeout)
             return []
-        rects: list[Rect] = []
+        boxes: list[BoundingBox] = []
         if not isinstance(raw, list):
-            return rects
+            return boxes
         for item in raw:
             if not isinstance(item, dict):
                 continue
             try:
-                rect = Rect(
+                box = BoundingBox(
                     x=float(item["x"]),
                     y=float(item["y"]),
                     width=float(item["w"]),
@@ -680,5 +680,5 @@ class RenderSession:
                 # values; skip them so detection degrades to a best-effort list (per the
                 # docstring) rather than raising out of the harvest.
                 continue
-            rects.append(rect)
-        return rects
+            boxes.append(box)
+        return boxes

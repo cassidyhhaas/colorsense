@@ -130,10 +130,10 @@ async def test_min_corner_radius_harvested_and_pill_chips_classify_as_badge(
     assert len(chips) == 4
     for chip in chips:
         # rounded-full resolves to a large px radius, well over half the 28px height.
-        assert chip.min_corner_radius >= chip.rect.height / 2.0
+        assert chip.min_corner_radius >= chip.bounding_box.height / 2.0
 
     card = next(el for el in harvest.elements if "card" in el.class_tokens)
-    assert card.min_corner_radius < card.rect.height / 2.0  # 8px vs 200px
+    assert card.min_corner_radius < card.bounding_box.height / 2.0  # 8px vs 200px
 
     # Only the top-left corner is rounded, so the MIN of the four corners is 0.
     tab = next(el for el in harvest.elements if "tab" in el.class_tokens)
@@ -413,17 +413,17 @@ async def test_render_session_exposes_page_and_consent(fixtures_dir: Path) -> No
         title = await session.page.title()
         assert title == "Consent fixture"
         # A consent banner region was detected for masking.
-        assert session.consent_rects, "expected a detected consent region"
+        assert session.consent_boxes, "expected a detected consent region"
 
 
-async def test_render_session_exposes_media_rects(fixtures_dir: Path) -> None:
+async def test_render_session_exposes_media_boxes(fixtures_dir: Path) -> None:
     async with RenderSession(Theme.LIGHT, VIEWPORT) as session:
         await session.goto((fixtures_dir / "media_mask.html").as_uri())
         # The url()-background photo (and only it) was detected as maskable raster media;
-        # the gradient and inline <svg> bands must NOT contribute rects.
-        assert session.media_rects, "expected a detected raster-media region"
-        assert len(session.media_rects) == 1, (
-            f"only the url() photo should be masked, got {len(session.media_rects)} rects"
+        # the gradient and inline <svg> bands must NOT contribute boxes.
+        assert session.media_boxes, "expected a detected raster-media region"
+        assert len(session.media_boxes) == 1, (
+            f"only the url() photo should be masked, got {len(session.media_boxes)} boxes"
         )
 
 
@@ -482,9 +482,9 @@ async def test_element_payload_cap_keeps_largest_area(fixtures_dir: Path) -> Non
         kept_tags_classes = [(rec["tag"], rec["class_tokens"]) for rec in capped]
         assert ("body", []) in kept_tags_classes
         assert ("div", ["big"]) in kept_tags_classes
-        areas = [rec["rect"]["w"] * rec["rect"]["h"] for rec in capped]
+        areas = [rec["bounding_box"]["w"] * rec["bounding_box"]["h"] for rec in capped]
         dropped_areas = [
-            rec["rect"]["w"] * rec["rect"]["h"]
+            rec["bounding_box"]["w"] * rec["bounding_box"]["h"]
             for rec in uncapped
             if (rec["tag"], rec["class_tokens"]) not in kept_tags_classes
         ]
