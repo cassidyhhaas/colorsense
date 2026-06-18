@@ -278,7 +278,7 @@ class _PrivateNetworkBlocker:
             self._inflight.pop(host, None)
 
     def _lookup_pool(self) -> ThreadPoolExecutor:
-        """The predicate-owned DNS lookup pool, created lazily on the first cache miss.
+        """Return the predicate-owned DNS lookup pool, created lazily on the first cache miss.
 
         See the ``__init__`` comment for why this is a dedicated bounded pool rather
         than the loop's default ``to_thread`` executor, and for its lifecycle.

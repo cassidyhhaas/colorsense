@@ -257,7 +257,7 @@ async def _default_robots_loader(
 
 
 def _cache_key(url: str, theme: Theme, viewport: Viewport) -> tuple[str, str, int, int, float]:
-    """A render is identified by URL + theme + viewport geometry."""
+    """Identify a render by URL + theme + viewport geometry."""
     return (url, str(theme), viewport.width, viewport.height, viewport.device_scale_factor)
 
 
@@ -566,7 +566,7 @@ class PolitenessPolicy:
     # -- render concurrency --------------------------------------------------
 
     def _render_slots(self) -> asyncio.Semaphore | None:
-        """The render-bounding semaphore, or ``None`` when unbounded.
+        """Return the render-bounding semaphore, or ``None`` when unbounded.
 
         Created lazily inside the running loop, and re-created if the policy is later used
         from a *different* loop (e.g. sequential ``asyncio.run`` calls sharing one policy):

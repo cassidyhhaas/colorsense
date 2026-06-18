@@ -75,7 +75,7 @@ __all__ = ["build_inventory"]
 
 
 def _bg_fill_colors(element: HarvestedElement) -> list[Color]:
-    """The color(s) the element's background paints, for bg-channel attribution.
+    """Return the color(s) the element's background paints, for bg-channel attribution.
 
     A solid (opaque) ``background-color`` is the single fill. When it paints nothing
     (``alpha == 0``) the gradient fill stops take over — a gradient CTA's

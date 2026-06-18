@@ -397,7 +397,7 @@ def _repetition_member_indices(
     elements: list[HarvestedElement],
     config: Config,
 ) -> set[int]:
-    """Indices of elements belonging to a qualifying repeated-sibling group.
+    """Return indices of elements belonging to a qualifying repeated-sibling group.
 
     Groups are formed by ``(tag, shared-class-token)``: two elements are grouped
     if they share a tag and at least one class token. A group qualifies when it
@@ -452,7 +452,7 @@ def _circle_badge_member_indices(
     elements: list[HarvestedElement],
     config: Config,
 ) -> set[int]:
-    """Indices of small clickable circular chips that RECUR as a structurally-similar group.
+    """Return indices of small clickable circular chips that RECUR as a structurally-similar group.
 
     A perfect circle is not a pill, so the badge geometry rule skips it; an icon-only
     circular chip (no text node) then falls through to ``card_bg``. This detector promotes
