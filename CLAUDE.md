@@ -2,6 +2,20 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+# Conventions
+Source of truth for style is `pyproject.toml` ([tool.ruff]). PEP 8 + PEP 257 apply.
+- Mypy is strict and the code is fully typed (`py.typed` ships); keep new code that way.
+- This project is an SSRF surface by nature (it fetches and renders arbitrary URLs). Security-relevant changes (anything in `net/`, fetch/redirect behavior, URL handling) must keep `SECURITY.md` accurate; `examples/webservice/` is the reference implementation of its controls.
+- Update `README.md`/`docs/`/`SECURITY.md` on behavior or API changes, and add a `CHANGELOG.md` line under *Unreleased*.
+
+YOU MUST:
+- Run `ruff format` and `ruff check --fix` on any file you edit, before finishing.
+- When you read existing code that diverges from these conventions, call it out
+  explicitly in your summary — file, line, which rule, and whether it's auto-fixable
+  vs. a judgment call (naming, docstring content, structure). Do not silently fix
+  unrelated code while doing something else.
+- Keep formatting-only changes in separate commits from logic changes.
+
 ## What this is
 
 colorsense renders a website in headless Chromium (Playwright), harvests its design tokens and computed element colors, and classifies them by usage — what colors paint surfaces, text, interactive elements, and borders — plus a derived 60/30/10 roles view, returned as a frozen Pydantic `AnalysisResult`. Python 3.12+, src layout, `uv`-managed.
@@ -48,10 +62,3 @@ Other load-bearing pieces:
 - The suite is **network-free**: live-page tests render fixture HTML from `tests/fixtures/` over `file://`, opting in via the `file_policy()` helper in `tests/conftest.py` (`PolitenessPolicy(allow_file_urls=True)`).
 - Tests launching real Chromium are marked `browser` (a `--strict-markers` marker).
 - `examples/` is not installed — `conftest.py` puts the repo root on `sys.path` so its tests import it directly. It is linted, type-checked (mypy strict), and tested like library code.
-
-## Conventions
-
-- Mypy is strict and the code is fully typed (`py.typed` ships); keep new code that way.
-- Ruff: line length 100, rules `E,F,I,UP,B,SIM,RUF`.
-- This project is an SSRF surface by nature (it fetches and renders arbitrary URLs). Security-relevant changes (anything in `net/`, fetch/redirect behavior, URL handling) must keep `SECURITY.md` accurate; `examples/webservice/` is the reference implementation of its controls.
-- Update `README.md`/`docs/`/`SECURITY.md` on behavior or API changes, and add a `CHANGELOG.md` line under *Unreleased*.
