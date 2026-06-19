@@ -18,7 +18,7 @@ YOU MUST:
 
 ## What this is
 
-colorsense renders a website in headless Chromium (Playwright), harvests its design tokens and computed element colors, and classifies them by usage — what colors paint surfaces, text, interactive elements, and borders — plus a derived 60/30/10 roles view, returned as a frozen Pydantic `AnalysisResult`. Python 3.12+, src layout, `uv`-managed.
+colorsense renders a website in headless Chromium (Playwright), harvests its design tokens and computed element colors, and classifies them by usage — what colors paint surfaces, text, interactive elements, and borders — returned as a frozen Pydantic `AnalysisResult`. Python 3.12+, src layout, `uv`-managed.
 
 ## Commands
 
