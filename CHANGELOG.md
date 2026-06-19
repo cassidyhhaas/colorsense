@@ -9,6 +9,13 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- **Every field on the `models.py` contracts now carries an explicit `pydantic.Field`** with a
+  description, validation bounds, and (where useful) examples. Numeric fields gained range
+  constraints that the contracts always satisfied but never enforced — `Color` coordinates
+  (`lightness`/`alpha` in `[0, 1]`, `hue` in `[0, 360)`, `chroma >= 0`), area/probability/weight
+  fields in `[0, 1]`, `Viewport` dimensions `>= 1`, and so on. Well-formed data is unaffected;
+  out-of-range values that previously slipped through now raise `ValidationError`. The field
+  descriptions also surface in JSON Schema (`model_json_schema()`).
 - **Renamed the internal `Rect` value type to `BoundingBox`** and its field on
   `HarvestedElement` from `rect` to `bounding_box`, for self-documenting clarity ahead of the
   major version bump. `RenderSession.consent_rects`/`media_rects` likewise become

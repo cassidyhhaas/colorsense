@@ -30,6 +30,15 @@ def validate_target_url(url: str, *, allowed_hosts: frozenset[str] | None = None
     when ``allowed_hosts`` is configured — the host must be on it (compare lowercase).
     Address-level checks belong to the ``block_private_networks`` egress filter, which
     also covers every redirect hop and sub-resource, not just this initial URL.
+
+    Args:
+        url: The user-supplied navigation URL to validate.
+        allowed_hosts: An optional set of permitted exact hostnames (lowercase); when
+            ``None``, any public host is accepted.
+
+    Raises:
+        ValueError: If the scheme is not http(s), the URL carries userinfo, the host is
+            missing, or the host is not on a configured allowlist.
     """
     parts = urlsplit(url)
     if parts.scheme.lower() not in _FETCHABLE_SCHEMES:

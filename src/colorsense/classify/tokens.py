@@ -47,6 +47,11 @@ class _TokenRoleClassification(BaseModel):
 
     These fields flow into a `ClassifiedToken` once alias inheritance and role
     distributions are resolved.
+
+    Attributes:
+        semantic_role: The semantic role inferred for the token.
+        weight: The classification scoring weight (relative confidence/intent mass).
+        origin: Which classification path produced this role.
     """
 
     semantic_role: TokenSemanticRole
@@ -57,7 +62,18 @@ class _TokenRoleClassification(BaseModel):
 def _classify_role_without_alias_inheritance(
     record: TokenRecord, config: Config
 ) -> _TokenRoleClassification:
-    """Classify a single record's role on its own merits (no alias inheritance)."""
+    """Classify a single record's role on its own merits (no alias inheritance).
+
+    Applies the precedence relational → name rule → scale detection → fallback, returning
+    the first match.
+
+    Args:
+        record: The declared token to classify.
+        config: The loaded configuration supplying the matching vocabulary and weights.
+
+    Returns:
+        The token's semantic role, scoring weight, and origin path.
+    """
     name = record.name
 
     # 1. Relational (text-on-<base>) takes precedence.
@@ -109,6 +125,14 @@ def _usage_intent_for_role(role: TokenSemanticRole, config: Config) -> dict[Usag
 
     Usage-intent distributions are copied verbatim (already normalized at load).
     Channel routes carry no usage weight.
+
+    Args:
+        role: The semantic role to look up a usage-intent distribution for.
+        config: The loaded configuration supplying the role-to-usage-intent mapping.
+
+    Returns:
+        The per-[`UsageRole`][colorsense.UsageRole] intent distribution, or ``{}`` when the
+        role has no usage intent (unmapped or a channel route).
     """
     row = config.token_vocabulary.semantic_role_to_usage_intent_or_channel.get(role)
     if row is None:
@@ -130,10 +154,16 @@ def _resolve_alias_role(
 ) -> _TokenRoleClassification | None:
     """Follow ``alias_target`` links until a non-``ignore`` classification is found.
 
-    Returns the inherited classification with origin rewritten to
-    `TokenOrigin.ALIAS` (the alias itself was not matched, its target was), or
-    ``None`` when the chain dead-ends (missing target, cycle, or all targets are
-    ``ignore``).
+    Args:
+        record: The ``ignore`` token whose alias chain is being followed.
+        index: All token records keyed by name, for resolving ``alias_target`` links.
+        pre_alias_role_classifications: Each token's own-merits classification, keyed by
+            name (the first-pass result before alias inheritance).
+
+    Returns:
+        The inherited classification with origin rewritten to `TokenOrigin.ALIAS` (the alias
+        itself was not matched, its target was), or ``None`` when the chain dead-ends
+        (missing target, cycle, or all targets are ``ignore``).
     """
     seen: set[str] = {record.name}
     target_name = record.alias_target
@@ -158,10 +188,16 @@ def _resolve_alias_role(
 def classify_tokens(tokens: list[TokenRecord], config: Config) -> list[ClassifiedToken]:
     """Classify ``tokens`` into semantic roles and usage intent.
 
-    Returns one `ClassifiedToken` per input record (order preserved). ``status``
-    tokens get an empty usage intent when ``status_excluded_from_palette`` is set — they still
-    surface to consumers as [`DesignToken`][colorsense.DesignToken] entries with
-    ``semantic_role=status`` when tokens are requested.
+    ``status`` tokens get an empty usage intent when ``status_excluded_from_palette`` is
+    set — they still surface to consumers as [`DesignToken`][colorsense.DesignToken] entries
+    with ``semantic_role=status`` when tokens are requested.
+
+    Args:
+        tokens: The declared token records harvested from the page.
+        config: The loaded configuration supplying the classification vocabulary and weights.
+
+    Returns:
+        One `ClassifiedToken` per input record, in the same order.
     """
     # Index by name; later declarations win for duplicate names.
     index: dict[str, TokenRecord] = {record.name: record for record in tokens}

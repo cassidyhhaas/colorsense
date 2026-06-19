@@ -68,12 +68,20 @@ class AnalysisTimeoutError(TimeoutError):
     """Raised by [`analyze`][colorsense.analyze] when ``max_total_seconds`` expires.
 
     Subclasses the builtin `TimeoutError`, so a generic ``except TimeoutError``
-    still catches it. The offending URL and the configured budget are available as
-    `url` and `max_total_seconds`.
+    still catches it.
+
+    Attributes:
+        url: The URL whose analysis exceeded the deadline.
+        max_total_seconds: The configured overall deadline, in seconds.
     """
 
     def __init__(self, url: str, max_total_seconds: float) -> None:
-        """Build the error from the offending URL and the configured budget."""
+        """Build the error from the offending URL and the configured budget.
+
+        Args:
+            url: The URL whose analysis exceeded the deadline.
+            max_total_seconds: The configured overall deadline, in seconds.
+        """
         super().__init__(
             f"analysis of {url!r} exceeded its overall deadline of {max_total_seconds:g}s"
         )
@@ -88,6 +96,11 @@ class _ThemeOutput:
     The per-theme analysis (color-keyed index, role-keyed usage view, divergence, tokens)
     lives on the [`ThemePalette`][colorsense.ThemePalette] itself; only the cross-theme
     aggregates ride alongside.
+
+    Attributes:
+        palette: The fully-derived palette for the theme.
+        third_party_colors: Colors attributed to third-party widgets, carried alongside the
+            palette for cross-theme aggregation.
     """
 
     palette: ThemePalette
@@ -113,68 +126,64 @@ async def analyze(
     to worker threads via ``asyncio.to_thread`` so the event loop stays responsive.
     Awaitable directly from an asyncio event loop (e.g. a FastAPI ``async def`` endpoint).
 
-    Parameters
-    ----------
-    url:
-        Page to analyze. Any ``http(s)`` fetch is gated by ``politeness``. ``file://`` URLs
-        (used by the test suite) are an explicit opt-in via
-        ``PolitenessPolicy(allow_file_urls=True)``; all other schemes are rejected.
-    config_path:
-        Path to a palette config YAML to override the default. When ``None`` (the default)
-        the configuration bundled with the package is used, so no file needs to exist on
-        disk. Copy the bundled ``data/palette_config.yaml`` and pass its path here to tune.
-    viewport:
-        Render viewport; defaults to 1280x800 at 1x scale.
-    themes:
-        Themes to render, in priority order (the first is "primary": it is the theme kept when
-        near-identical renders collapse). Duplicates are ignored. Defaults to **light only** — most
-        sites have no dark mode and a second theme roughly doubles the work. Pass
-        ``themes=(Theme.LIGHT, Theme.DARK)`` (or the exported
-        [`LIGHT_AND_DARK`][colorsense.LIGHT_AND_DARK]) to also analyze dark mode; near-identical
-        renders still collapse to a single reported theme.
-    politeness:
-        Fetch policy (robots gate, rate limit, render cache). A conservative default
-        [`PolitenessPolicy`][colorsense.PolitenessPolicy] is created when omitted. The **consumer**
-        is responsible for authorization — see ``SECURITY.md``.
-    max_total_seconds:
-        Optional overall deadline for the entire call — every theme render *plus* the CPU
-        classification — enforced via `asyncio.timeout` (the SECURITY.md §2 deadline, shipped as a
-        knob). ``None`` (default) imposes no deadline, the previous behavior. On expiry, all
-        in-flight renders are cancelled, the shared browser is closed on the way out, and
-        [`AnalysisTimeoutError`][colorsense.AnalysisTimeoutError] is raised (a `TimeoutError`
-        subclass carrying the url and budget). Must be positive when set (``<= 0`` raises
-        `ValueError`).
-    browser_args:
-        Extra command-line arguments for the call's Chromium launch, appended to the
-        library's own launch arguments and passed **verbatim** to Chromium (the library
-        does not validate or allowlist the flags — mechanism, not policy). Every render of
-        this call — all themes share one browser — launches with them. Canonical use case:
-        ``browser_args=("--js-flags=--max-old-space-size=512",)`` caps each renderer
-        process's V8 heap at 512 MB. Note this bounds the **JS heap only**, not total
-        renderer memory; hard per-render memory/CPU caps are the container/cgroup layer's
-        job (see ``SECURITY.md`` §2). Default ``()``: no extra arguments, behavior
-        unchanged. Non-string entries (or a bare string) raise `TypeError` before
-        any render.
-    include_tokens:
-        When ``True``, each [`ThemePalette`][colorsense.ThemePalette] carries its declared design
-        tokens as ``tokens`` (a tuple of [`DesignToken`][colorsense.DesignToken]; ``()`` when no
-        usable color tokens were found — none declared, or all declarations filtered as
-        non-color/ignore/zero-weight). When ``False`` (the default) ``tokens`` is ``None``.
-        The flag gates **only output assembly**: token classification and reconciliation
-        always run, so every other field is identical either way.
+    Args:
+        url: Page to analyze. Any ``http(s)`` fetch is gated by ``politeness``. ``file://``
+            URLs (used by the test suite) are an explicit opt-in via
+            ``PolitenessPolicy(allow_file_urls=True)``; all other schemes are rejected.
+        config_path: Path to a palette config YAML to override the default. When ``None``
+            (the default) the configuration bundled with the package is used, so no file
+            needs to exist on disk. Copy the bundled ``data/palette_config.yaml`` and pass
+            its path here to tune.
+        viewport: Render viewport; defaults to 1280x800 at 1x scale.
+        themes: Themes to render, in priority order (the first is "primary": it is the theme
+            kept when near-identical renders collapse). Duplicates are ignored. Defaults to
+            **light only** — most sites have no dark mode and a second theme roughly doubles
+            the work. Pass ``themes=(Theme.LIGHT, Theme.DARK)`` (or the exported
+            [`LIGHT_AND_DARK`][colorsense.LIGHT_AND_DARK]) to also analyze dark mode;
+            near-identical renders still collapse to a single reported theme.
+        politeness: Fetch policy (robots gate, rate limit, render cache). A conservative
+            default [`PolitenessPolicy`][colorsense.PolitenessPolicy] is created when
+            omitted. The **consumer** is responsible for authorization — see ``SECURITY.md``.
+        max_total_seconds: Optional overall deadline for the entire call — every theme render
+            *plus* the CPU classification — enforced via `asyncio.timeout` (the SECURITY.md §2
+            deadline, shipped as a knob). ``None`` (default) imposes no deadline, the previous
+            behavior. On expiry, all in-flight renders are cancelled, the shared browser is
+            closed on the way out, and
+            [`AnalysisTimeoutError`][colorsense.AnalysisTimeoutError] is raised (a
+            `TimeoutError` subclass carrying the url and budget). Must be positive when set
+            (``<= 0`` raises `ValueError`).
+        browser_args: Extra command-line arguments for the call's Chromium launch, appended
+            to the library's own launch arguments and passed **verbatim** to Chromium (the
+            library does not validate or allowlist the flags — mechanism, not policy). Every
+            render of this call — all themes share one browser — launches with them.
+            Canonical use case: ``browser_args=("--js-flags=--max-old-space-size=512",)``
+            caps each renderer process's V8 heap at 512 MB. Note this bounds the **JS heap
+            only**, not total renderer memory; hard per-render memory/CPU caps are the
+            container/cgroup layer's job (see ``SECURITY.md`` §2). Default ``()``: no extra
+            arguments, behavior unchanged. Non-string entries (or a bare string) raise
+            `TypeError` before any render.
+        include_tokens: When ``True``, each [`ThemePalette`][colorsense.ThemePalette] carries
+            its declared design tokens as ``tokens`` (a tuple of
+            [`DesignToken`][colorsense.DesignToken]; ``()`` when no usable color tokens were
+            found — none declared, or all declarations filtered as
+            non-color/ignore/zero-weight). When ``False`` (the default) ``tokens`` is
+            ``None``. The flag gates **only output assembly**: token classification and
+            reconciliation always run, so every other field is identical either way.
 
-    Raises
-    ------
-    colorsense.net.politeness.UnsupportedSchemeError
-        If the URL scheme is not fetchable under the policy: only ``http(s)`` by default;
-        ``file://`` requires ``PolitenessPolicy(allow_file_urls=True)``; every other scheme
-        is always rejected.
-    colorsense.net.politeness.RobotsDisallowedError
-        If ``robots.txt`` disallows the fetch and the policy respects it.
-    colorsense.harvest.RenderError
-        If the page fails to render or navigate (DNS, timeout, TLS, or navigation error).
-    AnalysisTimeoutError
-        If ``max_total_seconds`` is set and the whole analysis does not finish within it.
+    Returns:
+        A typed [`AnalysisResult`][colorsense.AnalysisResult] with the per-theme palettes,
+        the cross-theme third-party colors, and the run metadata.
+
+    Raises:
+        colorsense.net.politeness.UnsupportedSchemeError: If the URL scheme is not fetchable
+            under the policy: only ``http(s)`` by default; ``file://`` requires
+            ``PolitenessPolicy(allow_file_urls=True)``; every other scheme is always rejected.
+        colorsense.net.politeness.RobotsDisallowedError: If ``robots.txt`` disallows the
+            fetch and the policy respects it.
+        colorsense.harvest.RenderError: If the page fails to render or navigate (DNS,
+            timeout, TLS, or navigation error).
+        AnalysisTimeoutError: If ``max_total_seconds`` is set and the whole analysis does not
+            finish within it.
     """
     # Validate eagerly: a broken browser_args value must raise here, before any robots
     # fetch or render starts (and on the deadline path, before the timer even exists).
@@ -213,6 +222,9 @@ async def _analyze(
     ``async with SharedBrowser()`` below unwinds: the ``TaskGroup`` cancels in-flight
     renders, then ``SharedBrowser.__aexit__`` closes the browser — so no headless Chromium
     outlives a timed-out call.
+
+    Returns:
+        The assembled [`AnalysisResult`][colorsense.AnalysisResult] for the run.
     """
     config = load_default_config() if config_path is None else load_config(config_path)
     policy = politeness if politeness is not None else PolitenessPolicy()
@@ -283,6 +295,12 @@ def _reraise_first_leaf(eg: ExceptionGroup[Exception]) -> NoReturn:
     ``ValueError``) — the ``TaskGroup`` wrapping is an implementation detail and must not
     leak ``ExceptionGroup`` to callers. The leaf keeps its original traceback; the group is
     attached as ``__cause__`` so the full failure context stays inspectable.
+
+    Args:
+        eg: The (possibly nested) exception group raised by a ``TaskGroup``.
+
+    Raises:
+        Exception: The first leaf exception of ``eg``, with ``eg`` attached as ``__cause__``.
     """
     leaf: BaseException = eg
     while isinstance(leaf, BaseExceptionGroup):
@@ -297,6 +315,15 @@ def _analyze_theme(
 
     Pure CPU over immutable inputs (no I/O, no shared mutable state); ``analyze`` runs it
     on a worker thread via ``asyncio.to_thread`` to keep the event loop responsive.
+
+    Args:
+        harvest: Everything extracted from the rendered page for this theme.
+        config: The loaded palette configuration driving all classifier weights.
+        viewport: The viewport the page was rendered at.
+        include_tokens: Whether to attach declared design tokens to the palette.
+
+    Returns:
+        The derived palette plus this theme's third-party colors.
     """
     classified_tokens = classify_tokens(harvest.tokens, config)
     classified_elements = classify_components(harvest.elements, config, viewport)
@@ -334,6 +361,13 @@ def _design_tokens(classified: list[ClassifiedToken]) -> tuple[DesignToken, ...]
     occurrence in document order — the harvester resolves every record against the
     rendered ``:root``, so duplicate-name records share one resolved color and dropping
     later ones loses nothing. Sorted by name for stable output.
+
+    Args:
+        classified: The classified tokens to project, in document order.
+
+    Returns:
+        The meaningful tokens as public [`DesignToken`][colorsense.DesignToken]s, deduped by
+        name and sorted by name.
     """
     meaningful = [
         token
@@ -364,6 +398,13 @@ def _collapse_themes(ordered_themes: list[Theme], harvests: dict[Theme, Harvest]
 
     A site that ignores ``prefers-color-scheme`` renders the same under every theme; there
     is no point reporting two identical palettes, so only the primary theme survives.
+
+    Args:
+        ordered_themes: The requested themes in priority order (the first is primary).
+        harvests: The harvested render of each ordered theme.
+
+    Returns:
+        The themes to analyze: the primary plus every later theme that differs from it.
     """
     if len(ordered_themes) <= 1:
         return ordered_themes
@@ -385,6 +426,14 @@ def _near_identical(a: Harvest, b: Harvest) -> bool:
 
     Sorting and the inner matching break ``area_fraction`` ties deterministically on the
     color hex so the result never depends on incidental bin insertion order.
+
+    Args:
+        a: One render's harvest (compared symmetrically against ``b``).
+        b: The other render's harvest.
+
+    Returns:
+        ``True`` if the two renders' dominant screenshot colors match symmetrically within
+        the collapse threshold, else ``False``.
     """
     bins_a = sorted(a.screenshot_bins, key=lambda s: (-s.area_fraction, s.color.hex))
     bins_b = sorted(b.screenshot_bins, key=lambda s: (-s.area_fraction, s.color.hex))
@@ -402,7 +451,14 @@ def _near_identical(a: Harvest, b: Harvest) -> bool:
 
 
 def _third_party_colors(clusters: list[ColorCluster]) -> list[Color]:
-    """Colors of clusters whose component mix is dominated by third-party widgets."""
+    """Colors of clusters whose component mix is dominated by third-party widgets.
+
+    Args:
+        clusters: The color clusters built for the theme.
+
+    Returns:
+        The deduped colors of clusters whose dominant component is third-party.
+    """
     out: list[Color] = []
     for cluster in clusters:
         mix = cluster.component_mix
@@ -416,14 +472,30 @@ def _third_party_colors(clusters: list[ColorCluster]) -> list[Color]:
 
 
 def _dedupe_colors(colors: Iterable[Color]) -> list[Color]:
-    """Order-preserving dedupe of colors by hex."""
+    """Order-preserving dedupe of colors by hex.
+
+    Args:
+        colors: The colors to dedupe.
+
+    Returns:
+        The colors with later duplicates (by hex) removed, in first-seen order.
+    """
     return dedupe_by(colors, key=lambda c: c.hex)
 
 
 def _build_metadata(
     requested: list[Theme], kept: list[Theme], policy: PolitenessPolicy
 ) -> RunMetadata:
-    """Provenance for the run: themes requested vs analyzed, and the fetch policy."""
+    """Provenance for the run: themes requested vs analyzed, and the fetch policy.
+
+    Args:
+        requested: The themes the caller requested, in priority order.
+        kept: The themes actually analyzed after near-identical renders collapsed.
+        policy: The fetch policy in effect for the run.
+
+    Returns:
+        The assembled [`RunMetadata`][colorsense.RunMetadata] for the run.
+    """
     return RunMetadata(
         themes_requested=tuple(requested),
         themes_analyzed=tuple(kept),

@@ -42,12 +42,24 @@ def prune_distribution[T](
     * the weights sum to zero (e.g. an all-zero-area surface set) → every item ties, so
       the smallest ``tie_key`` wins outright.
 
-    ``protected`` (optional, parallel to ``items``) marks entries that survive the
-    share prune regardless of their share — the caller has independent absolute evidence
-    that they belong (e.g. a minimum raw vote mass), so they must not be diluted out when
-    a role accumulates many entries. They renormalize alongside the share survivors. A
-    protected entry still cannot resurrect a zero-total input (the argmax fallback owns
-    that case). An empty ``items`` yields ``[]``.
+    Args:
+        items: The candidates to rank, parallel to ``weights``.
+        weights: Raw prominence weights, parallel to ``items``; normalized into a
+            probability distribution before pruning.
+        min_share: Minimum probability share an entry must reach to survive the prune
+            (survivors are renormalized afterwards).
+        tie_key: Maps an item to the string used to break exact-probability ties in the
+            argmax fallback (smallest wins — the codebase's determinism convention).
+        protected: Optional flags parallel to ``items``; a ``True`` entry survives the
+            share prune regardless of its share. The caller has independent absolute
+            evidence that it belongs (e.g. a minimum raw vote mass), so it must not be
+            diluted out when a role accumulates many entries. Protected entries
+            renormalize alongside the share survivors, but cannot resurrect a zero-total
+            input (the argmax fallback owns that case).
+
+    Returns:
+        ``(item, probability)`` pairs in input order, the probabilities renormalized
+        over the survivors. An empty ``items`` yields ``[]``.
     """
     if not items:
         return []

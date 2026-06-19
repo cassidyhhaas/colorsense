@@ -105,7 +105,16 @@ class _DocumentSize(TypedDict):
 
 
 def _rgb_to_color(r: int, g: int, b: int) -> Color | None:
-    """Convert an 8-bit RGB triple to a [`Color`][colorsense.Color]."""
+    """Convert an 8-bit RGB triple to a [`Color`][colorsense.Color].
+
+    Args:
+        r: Red channel, 0-255.
+        g: Green channel, 0-255.
+        b: Blue channel, 0-255.
+
+    Returns:
+        The parsed `Color`, or ``None`` if the triple does not parse.
+    """
     return parse_css_color(f"rgb({r}, {g}, {b})")
 
 
@@ -124,8 +133,20 @@ async def harvest_screenshot(
     colors are not drowned by its photography. ``media_boxes`` defaults to ``None`` (treated
     as empty) so existing callers and tests pass through unchanged.
 
-    Raises `_OversizedCaptureError` if the captured image's declared dimensions
-    exceed the decode pixel cap (surfaced by ``harvest_page`` as ``RenderError``).
+    Args:
+        page: The live Playwright page to capture.
+        consent_boxes: CSS-pixel boxes of consent/overlay banners to mask out.
+        device_scale_factor: The render's device scale factor, used to map CSS-pixel
+            boxes onto the device-pixel capture.
+        media_boxes: CSS-pixel boxes of raster media to mask out; ``None`` is treated as
+            empty.
+
+    Returns:
+        Area-weighted `ScreenshotBin` objects for the masked, quantized capture.
+
+    Raises:
+        _OversizedCaptureError: If the captured image's declared dimensions exceed the
+            decode pixel cap (surfaced by ``harvest_page`` as ``RenderError``).
     """
     # Bound capture dimensions: a pathologically tall or wide (e.g. attacker-controlled)
     # page would decode into a huge array + keep-mask before any downscaling. The clip is
@@ -193,7 +214,17 @@ async def harvest_screenshot(
 
 
 def _quantize(array: np.ndarray, keep: np.ndarray) -> list[ScreenshotBin]:
-    """Quantize the kept pixels of ``array`` into area-weighted color bins."""
+    """Quantize the kept pixels of ``array`` into area-weighted color bins.
+
+    Args:
+        array: The decoded ``(height, width, 3)`` uint8 RGB image.
+        keep: A ``(height, width)`` boolean mask; ``False`` pixels are excluded from
+            sampling.
+
+    Returns:
+        The `ScreenshotBin` objects above the noise floor, sorted by descending area then
+        color hex; empty when no pixels are kept.
+    """
     height, width = array.shape[0], array.shape[1]
 
     # Downscale for stable, fast quantization. Nearest keeps colors crisp/deterministic.

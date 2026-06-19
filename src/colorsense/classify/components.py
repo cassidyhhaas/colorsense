@@ -78,6 +78,10 @@ def _add_votes(
 
     Keys that are routing sentinels (e.g. ``"ignore"``) or otherwise not valid
     [`ComponentType`][colorsense.ComponentType] members are skipped rather than crashing.
+
+    Args:
+        vote_totals: The running per-component vote totals, mutated in place.
+        votes: The config vote dict to add, keyed by component-type strings.
     """
     for key, weight in votes.items():
         if key in _NON_COMPONENT_VOTE_KEYS:
@@ -97,6 +101,12 @@ def _is_pill(element: HarvestedElement) -> bool:
     intentionally size-agnostic — so the card-detector exclusion ("a stadium shape is
     never a card") applies at any size — while the badge *rule* layers the size/text gates
     on top.
+
+    Args:
+        element: The harvested element to test.
+
+    Returns:
+        ``True`` if the element is a fully-rounded pill (wider than tall), else ``False``.
     """
     return is_pill_shape(
         element.bounding_box.width, element.bounding_box.height, element.min_corner_radius
@@ -110,6 +120,13 @@ def _is_small_circle(element: HarvestedElement, max_h_px: float) -> bool:
     ``max_h_px`` — a UI chip/dot, not a large circular avatar or thumbnail. Used both to keep
     small circles OUT of the card detector (a small circle is never a card) and to gate the
     circle-badge promotion (which layers clickable + recurrence on top).
+
+    Args:
+        element: The harvested element to test.
+        max_h_px: Maximum height in CSS pixels for the element to count as small.
+
+    Returns:
+        ``True`` if the element is a circle no taller than ``max_h_px``, else ``False``.
     """
     return (
         is_circle_shape(
@@ -125,6 +142,13 @@ def _paints_visible_fill(element: HarvestedElement) -> bool:
     Gates the badge rule so a decorative fully-rounded divider (a ``rounded-full`` bar
     with a transparent/gradient background and no border) is not mislabeled a badge — a
     colored chip always paints one of these.
+
+    Args:
+        element: The harvested element to test.
+
+    Returns:
+        ``True`` if the element paints a non-transparent background, a border, or a
+        box-shadow, else ``False``.
     """
     return is_painting(element.bg) or element.border is not None or element.has_box_shadow
 
@@ -141,6 +165,13 @@ def _paints_button_surface(element: HarvestedElement) -> bool:
     gradient-pill anchor is a button-styled CTA whose label text is `cta_text` (a CTA
     label, carried by no usage role), while a bare anchor — even an elevated, shadow-only
     one such as a text link with a focus ring — stays a genuine inline ``link``.
+
+    Args:
+        element: The harvested element to test.
+
+    Returns:
+        ``True`` if the element paints a non-transparent background, a border, or a gradient
+        fill, else ``False``.
     """
     return (
         is_painting(element.bg) or element.border is not None or len(element.bg_gradient_stops) > 0
@@ -157,6 +188,13 @@ def _derive_page_canvas_color(elements: list[HarvestedElement]) -> Color | None:
     case the CTA-label relabel cannot fire (no canvas to compare against) and every
     clickable label keeps its ``link`` vote. ``elements`` is in deterministic document
     order, so the ``max``-area tie-break (first-seen on equal area) is stable.
+
+    Args:
+        elements: The harvested elements, in deterministic document order.
+
+    Returns:
+        The page canvas color, or ``None`` when nothing on the page paints an opaque
+        background.
     """
 
     def opaque_bg(element: HarvestedElement) -> Color | None:
@@ -192,6 +230,13 @@ def _canonical_canvas_is_opaque(elements: list[HarvestedElement]) -> bool:
     ``background: transparent`` (alpha 0) paints its page color somewhere else (a
     full-viewport ``<div>``), which is exactly the case the fallback exists to repair. An
     opaque-body site returns ``True`` and is never touched.
+
+    Args:
+        elements: The harvested elements to scan.
+
+    Returns:
+        ``True`` if any ``html``/``body``/``main`` element paints an opaque background, else
+        ``False``.
     """
     for element in elements:
         if element.tag in {"html", "body", "main"} and is_opaque(element.bg):
@@ -220,6 +265,16 @@ def _find_page_canvas_index(
     page color makes the fallback pick the canvas wrapper, never a differently-colored hero.
     ``elements`` is in deterministic document order, so the ``max``-area tie-break (first-seen
     on equal area) is stable.
+
+    Args:
+        elements: The harvested elements, in deterministic document order.
+        thresholds: Geometry thresholds (``full_width``, ``top_band``) for the canvas test.
+        viewport: The viewport that frames the geometry fractions.
+        page_canvas: The independently-derived page-canvas color the fallback must match.
+        fallback: Page-canvas fallback configuration (the ``color_match_delta_e`` gate).
+
+    Returns:
+        The index of the fallback page-canvas element, or ``None`` if no fallback applies.
     """
     if _canonical_canvas_is_opaque(elements) or page_canvas is None:
         return None
@@ -287,6 +342,15 @@ def _is_cta_label(
     (text-presence excludes clickables), so before this rule the card text landed only in
     ``link`` (not a genuine inline link either); routing it to the CTA-label sink is at least
     as correct, and no panel site regresses.
+
+    Args:
+        element: The harvested element to test.
+        page_canvas: The page canvas color a genuine link's text reads against, or ``None``.
+        relabel: Contrast-relabel configuration (``canvas_delta_e``, ``wcag_min_contrast``).
+
+    Returns:
+        ``True`` if the element's text is a CTA-button label rather than an inline link, else
+        ``False``.
     """
     if element.tag == "a" or not element.clickable:
         return False
@@ -311,6 +375,13 @@ def _semantic_tag_rule_applies(rule: VoteRule, element: HarvestedElement) -> boo
     ``input[submit]`` matches only inputs whose harvested ``type`` attribute is
     button-like (see `_BUTTONLIKE_INPUT_TYPES`). Regression guard: it used to
     match EVERY ``<input>``, giving search/text inputs a spurious cta_bg vote.
+
+    Args:
+        rule: The semantic-tag vote rule to test (its ``match`` selector).
+        element: The harvested element to test against the rule.
+
+    Returns:
+        ``True`` if the rule matches the element's tag, role, or input type, else ``False``.
     """
     match = rule.match
     if match.startswith("role="):
@@ -322,7 +393,15 @@ def _semantic_tag_rule_applies(rule: VoteRule, element: HarvestedElement) -> boo
 
 
 def _interactivity_rule_applies(rule: WhenRule, element: HarvestedElement) -> bool:
-    """Return whether an interactivity ``when`` predicate holds for the element."""
+    """Return whether an interactivity ``when`` predicate holds for the element.
+
+    Args:
+        rule: The interactivity vote rule to test (its ``when`` predicate).
+        element: The harvested element to test against the predicate.
+
+    Returns:
+        ``True`` if the predicate holds for the element, else ``False``.
+    """
     when = rule.when
     if when == "clickable":
         return element.clickable
@@ -351,7 +430,17 @@ def _geometry_rule_applies(
     thresholds: GeometryThresholds,
     viewport: Viewport,
 ) -> bool:
-    """Dispatch the geometry ``when`` predicates (validated at config load)."""
+    """Dispatch the geometry ``when`` predicates (validated at config load).
+
+    Args:
+        when: The geometry predicate string to evaluate.
+        element: The harvested element to test.
+        thresholds: Geometry thresholds the predicates compare against.
+        viewport: The viewport that frames the geometry fractions.
+
+    Returns:
+        ``True`` if the geometry predicate holds for the element, else ``False``.
+    """
     box = element.bounding_box
     vp_w = float(viewport.width)
     vp_h = float(viewport.height)
@@ -384,7 +473,16 @@ def _geometry_rule_applies(
 
 
 def _class_token_rule_applies(rule: VoteRule, element: HarvestedElement) -> bool:
-    """Fuzzy substring match of a rule against class tokens or id (lowercased)."""
+    """Fuzzy substring match of a rule against class tokens or id (lowercased).
+
+    Args:
+        rule: The class-token vote rule to test (its ``match`` substring).
+        element: The harvested element whose class tokens and id are searched.
+
+    Returns:
+        ``True`` if the rule's substring is found in any class token or the id, else
+        ``False``.
+    """
     needle = rule.match.lower()
     for token in element.class_tokens:
         if needle in token.lower():
@@ -393,7 +491,15 @@ def _class_token_rule_applies(rule: VoteRule, element: HarvestedElement) -> bool
 
 
 def _is_third_party(element: HarvestedElement) -> bool:
-    """Whether the element looks like a third-party widget."""
+    """Whether the element looks like a third-party widget.
+
+    Args:
+        element: The harvested element to test.
+
+    Returns:
+        ``True`` if the element is an iframe, cross-origin, vendor-matched, or a shadow host,
+        else ``False``.
+    """
     return element.is_iframe or element.cross_origin or element.vendor_match or element.shadow_host
 
 
@@ -408,6 +514,13 @@ def _find_repetition_member_indices(
     has at least ``min_siblings`` members and each member satisfies
     ``requires_any``. This is a list-level heuristic standing in for real DOM
     sibling/structural-similarity analysis.
+
+    Args:
+        elements: The harvested elements to group, in document order.
+        config: The loaded configuration supplying the repetition thresholds and predicates.
+
+    Returns:
+        The indices of elements belonging to a qualifying repeated-sibling group.
     """
     rep = config.component_classifier.repetition
     requires_any = set(rep.requires_any)
@@ -470,6 +583,13 @@ def _find_circle_badge_member_indices(
     (e.g. vercel's single ``status-dot``) never reaches ``min_siblings`` and is left alone, so
     its color keeps winning ``link`` from the text channel rather than being stolen into
     ``action``. A non-clickable decorative dot is excluded by the clickable gate.
+
+    Args:
+        elements: The harvested elements to group, in document order.
+        config: The loaded configuration supplying the circle-badge thresholds.
+
+    Returns:
+        The indices of small clickable circular chips that recur as a qualifying group.
     """
     circle_cfg = config.component_classifier.circle_badge
     max_h = circle_cfg.max_h_px
@@ -504,6 +624,11 @@ def _dampen_votes(
     reduces a vote: a factor of 0 zeros every vote (an ``aria_hidden`` or
     hidden/zero-area element drops out entirely), while a fractional factor damps
     the configured brand components on a third-party element.
+
+    Args:
+        vote_totals: The running per-component vote totals, scaled down in place.
+        element: The harvested element whose flags decide which suppressors trigger.
+        config: The loaded configuration supplying the suppressor factors.
     """
     suppressors = config.component_classifier.suppressors
     box = element.bounding_box
@@ -541,6 +666,15 @@ def _softmax_prune_renormalize(
     keys, not colors, so the palette helper's hex tie-break convention has no analogue
     here. The argmax fallback is deterministic regardless — ``votes`` preserves
     config-rule insertion order. ``votes`` must be non-empty and all-positive.
+
+    Args:
+        votes: A non-empty, all-positive pool of per-component votes.
+        temperature: Softmax temperature (higher flattens the distribution).
+        min_component_prob: Probability below which a component is pruned.
+
+    Returns:
+        The softmaxed, pruned, renormalized distribution; if pruning removes everything, the
+        single argmax mapped to ``1.0``.
     """
     # Max-shifted softmax: mathematically the probabilities are shift-invariant, but
     # unshifted exp(vote/T) overflows once a config's vote weights stack high enough
@@ -576,6 +710,12 @@ def _compute_recombination_weights(
     dominates the recombination, so a faint secondary family cannot dilute a
     strongly-evidenced primary one. With a single painted family this returns
     ``{family: 1.0}``.
+
+    Args:
+        by_family: Positive votes partitioned by property family.
+
+    Returns:
+        Per-family recombination weights summing to 1.0 across the painted families.
     """
     family_mass = {family: sum(votes.values()) for family, votes in by_family.items()}
     total_mass = sum(family_mass.values())
@@ -608,6 +748,15 @@ def _finalize_distribution(
     softmax/prune/renorm is exactly the old global computation. So plain text / plain
     surface / single-family elements (the large majority) are unchanged; only
     multi-family elements differ.
+
+    Args:
+        vote_totals: The accumulated per-component votes (post-suppression).
+        config: The loaded configuration supplying the softmax temperature and prune
+            threshold.
+
+    Returns:
+        The final per-component probability distribution (summing to ~1.0), or ``{}`` when no
+        positive votes remain.
     """
     classifier_config = config.component_classifier
     # Suppressors have already been applied upstream; they are multiplicative and never
@@ -647,6 +796,16 @@ def classify_components(
     component-classifier section of ``config``. ``viewport`` supplies the frame
     of reference for the geometry feature family; when ``None`` a default
     1280x800 viewport is used so geometry fractions remain computable.
+
+    Args:
+        elements: The harvested elements to classify, in document order.
+        config: The loaded configuration supplying the entire rule-based scorer.
+        viewport: The frame of reference for geometry predicates; a default 1280x800
+            viewport is used when ``None``.
+
+    Returns:
+        One [`ClassifiedElement`][colorsense.ClassifiedElement] per input element, in the
+        same order.
     """
     active_viewport = viewport if viewport is not None else _DEFAULT_VIEWPORT
     classifier_config = config.component_classifier

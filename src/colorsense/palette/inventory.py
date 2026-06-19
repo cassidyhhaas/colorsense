@@ -26,10 +26,9 @@ objects:
   CTA/action share is kept off any perceptually-distinct near-black surface bin, while the
   page/surface share keeps the plain join.
 
-Family-segregated clustering
-----------------------------
-Attribution and clustering happen **within three separate pools**, one per
-[`PropertyFamily`][colorsense.PropertyFamily]: ``background``, ``text``, and ``border``.
+Family-segregated clustering. Attribution and clustering happen **within three separate
+pools**, one per [`PropertyFamily`][colorsense.PropertyFamily]: ``background``, ``text``,
+and ``border``.
 The ``background`` pool is seeded with one entry per `ScreenshotBin` (area truth); the
 ``text`` and ``border`` pools start empty, since text/border colors paint no screenshot
 area. A family's mass only ever nearest-joins or clusters against entries in its own
@@ -46,9 +45,7 @@ Perceptual distance is measured exclusively with
 `colorsense.color.primitives.delta_e` (OKLab ``deltaEOK``), whose units are small;
 the thresholds below are tuned for that scale.
 
-Determinism
------------
-There is no randomness. Wherever iteration order could affect the result we sort by a
+Determinism. There is no randomness. Wherever iteration order could affect the result we sort by a
 stable key (color ``hex``). The flat union is assembled in fixed family order
 (background, text, border), each family pre-sorted by ``(-area_weight, hex)``, then a
 **stable** final sort by ``(-area_weight, hex)`` preserves that family order for any
@@ -80,8 +77,14 @@ def _bg_fill_colors(element: HarvestedElement) -> list[Color]:
     A solid (opaque) ``background-color`` is the single fill. When it paints nothing
     (``alpha == 0``) the gradient fill stops take over — a gradient CTA's
     ``background-color`` is transparent, so its brand colors live only in
-    ``bg_gradient_stops`` (populated for clickable pill CTAs only). Returns ``[]`` when
-    the element paints no background at all.
+    ``bg_gradient_stops`` (populated for clickable pill CTAs only).
+
+    Args:
+        element: The harvested element whose background is being attributed.
+
+    Returns:
+        The opaque fill color(s) the background paints, or ``[]`` when the element paints
+        no background at all.
     """
     bg = element.bg
     if bg is not None and is_painting(bg):
@@ -188,6 +191,14 @@ def _is_distinct_near_black_pair(a: Color, b: Color) -> bool:
     tests perceptual distinctness only; the CTA/action scoping is applied separately by the
     callers. The CIEDE2000 call runs only after the cheap lightness gate, so only on the
     near-black subset.
+
+    Args:
+        a: First color to compare.
+        b: Second color to compare.
+
+    Returns:
+        ``True`` if both are near-black yet CIEDE2000-distinct (must not merge), else
+        ``False``.
     """
     return (
         a.lightness <= NEAR_BLACK_MAX_LIGHTNESS
@@ -202,10 +213,18 @@ def _nearest_mergeable_near_black_entry(
     """Nearest background-pool entry to ``color`` that the near-black check permits merging into.
 
     Like `colorsense.color.match.nearest_within` (argmin over OKLab `delta_e` within ``radius``,
-    ``<=``) but skips any entry that is a distinct near-black pair with ``color``, so CTA/action
-    mass falls through to the nearest permitted entry — or to ``None`` (a fresh entry) when every
-    in-radius entry is forbidden. Used only for the CTA/action share of a bg vote; ordinary
-    background attribution keeps the plain shared helper.
+    ``<=``) but skips any entry that is a distinct near-black pair with ``color``. Used only for
+    the CTA/action share of a bg vote; ordinary background attribution keeps the plain shared
+    helper.
+
+    Args:
+        color: The color being attributed.
+        pool: The background-pool entries to match against.
+        radius: Maximum OKLab `delta_e` join distance.
+
+    Returns:
+        The index of the nearest permitted entry, or ``None`` (a fresh entry) when every
+        in-radius entry is a forbidden near-black pair.
     """
     nearest_index: int | None = None
     nearest_distance = radius
@@ -233,6 +252,14 @@ def _is_distinct_near_white_pair(a: Color, b: Color) -> bool:
     two perceptually-distinct near-white text colors. The CIEDE2000 call is reached only after
     the cheap lightness gates, so it runs on the small near-white subset, never the whole pool.
     Callers apply this only within the text/border pools (`_EXACT_COLOR_FAMILIES`).
+
+    Args:
+        a: First color to compare.
+        b: Second color to compare.
+
+    Returns:
+        ``True`` if both are near-white yet CIEDE2000-distinct (must not merge), else
+        ``False``.
     """
     return (
         a.lightness >= NEAR_WHITE_MIN_LIGHTNESS
@@ -248,9 +275,17 @@ def _nearest_mergeable_near_white_entry(
 
     Identical to `colorsense.color.match.nearest_within` (argmin over OKLab `delta_e`, running
     best seeded at ``radius``, ``<=`` so the last of equal-distance candidates wins) except an
-    entry that is a distinct near-white pair with ``color`` is skipped — so the join falls through
-    to the nearest *permitted* entry, or to ``None`` (a fresh entry) when every in-radius entry is
-    forbidden. The background pool keeps the plain shared helper.
+    entry that is a distinct near-white pair with ``color`` is skipped. The background pool keeps
+    the plain shared helper.
+
+    Args:
+        color: The color being attributed.
+        pool: The text/border-pool entries to match against.
+        radius: Maximum OKLab `delta_e` join distance.
+
+    Returns:
+        The index of the nearest permitted entry, or ``None`` (a fresh entry) when every
+        in-radius entry is a forbidden near-white pair.
     """
     nearest_index: int | None = None
     nearest_distance = radius
@@ -274,7 +309,15 @@ class _Entry:
 
 
 def _find(parent: list[int], i: int) -> int:
-    """Union-find root with path compression."""
+    """Union-find root with path compression.
+
+    Args:
+        parent: The union-find parent array (mutated in place by path compression).
+        i: Index whose set root is sought.
+
+    Returns:
+        The representative root index of ``i``'s set.
+    """
     root = i
     while parent[root] != root:
         root = parent[root]
@@ -284,7 +327,13 @@ def _find(parent: list[int], i: int) -> int:
 
 
 def _union(parent: list[int], a: int, b: int) -> None:
-    """Union the sets containing ``a`` and ``b`` (lower root wins for stability)."""
+    """Union the sets containing ``a`` and ``b`` (lower root wins for stability).
+
+    Args:
+        parent: The union-find parent array (mutated in place).
+        a: Index in the first set.
+        b: Index in the second set.
+    """
     ra, rb = _find(parent, a), _find(parent, b)
     if ra == rb:
         return
@@ -304,6 +353,16 @@ def _union_merges_distinct_near_white_pair(
     contain a forbidden pair — closing the transitivity gap a per-edge check leaves open
     (a bridge color near two distinct colors would otherwise chain them together). The pools
     are tiny (a handful of text/border entries), so the cross-scan is cheap.
+
+    Args:
+        parent: The union-find parent array.
+        entries: The pool entries being clustered (parallel to ``parent``).
+        i: Index in the first cluster.
+        j: Index in the second cluster.
+
+    Returns:
+        ``True`` if merging the two clusters would co-locate a distinct near-white pair,
+        else ``False``.
     """
     root_i, root_j = _find(parent, i), _find(parent, j)
     if root_i == root_j:
@@ -318,12 +377,27 @@ def _union_merges_distinct_near_white_pair(
 
 
 def _total_vote_mass(entry: _Entry) -> float:
-    """Total vote mass on a text/border-pool entry (all of one family by construction)."""
+    """Total vote mass on a text/border-pool entry (all of one family by construction).
+
+    Args:
+        entry: The pool entry to sum.
+
+    Returns:
+        The summed vote mass across the entry's components.
+    """
     return sum(entry.vote_mass.values())
 
 
 def _entry_has_cta_action_mass(entry: _Entry) -> bool:
-    """Whether a background-pool entry carries any CTA/action component mass."""
+    """Whether a background-pool entry carries any CTA/action component mass.
+
+    Args:
+        entry: The background-pool entry to test.
+
+    Returns:
+        ``True`` if the entry carries mass from any `CTA_ACTION_BG_COMPONENTS` component,
+        else ``False``.
+    """
     return any(component in CTA_ACTION_BG_COMPONENTS for component in entry.vote_mass)
 
 
@@ -338,6 +412,16 @@ def _union_merges_distinct_near_black_cta_pair(
     page/surface/banner clustering is never blocked (the OKLab denoiser stays intact there).
     Transitivity-safe by the same induction as the near-white check: every union is checked, so no
     cluster ever co-locates a forbidden pair.
+
+    Args:
+        parent: The union-find parent array.
+        entries: The pool entries being clustered (parallel to ``parent``).
+        i: Index in the first cluster.
+        j: Index in the second cluster.
+
+    Returns:
+        ``True`` if merging the two clusters would co-locate a distinct near-black pair in
+        which at least one member carries CTA/action mass, else ``False``.
     """
     root_i, root_j = _find(parent, i), _find(parent, j)
     if root_i == root_j:
@@ -357,8 +441,16 @@ def _cluster_pool(entries: list[_Entry], family: PropertyFamily) -> list[ColorCl
 
     Representative selection is family-specific: ``background`` picks the largest area
     weight (hex tiebreak — area is authoritative for surfaces); ``text``/``border`` pick
-    the largest in-family vote mass (hex tiebreak — they paint no screenshot area). The
-    returned clusters are pre-sorted by ``(-area_weight, hex)``.
+    the largest in-family vote mass (hex tiebreak — they paint no screenshot area).
+
+    Args:
+        entries: The family's working entry pool to cluster.
+        family: The [`PropertyFamily`][colorsense.PropertyFamily] the pool belongs to
+            (selects the representative rule and which distinctness check applies).
+
+    Returns:
+        The family's `ColorCluster`s, pre-sorted by ``(-area_weight, hex)``; ``[]`` for an
+        empty pool.
     """
     entry_count = len(entries)
     if entry_count == 0:
@@ -463,10 +555,16 @@ def build_inventory(harvest: Harvest, classified: list[ClassifiedElement]) -> li
        mass — the usage view needs cross-cluster magnitude); ``component_mix`` = the same
        sums normalized to ~1.0 (empty stays empty).
 
-    Returns the flat union of all three pools' clusters, assembled in fixed family order
-    (background, text, border) and then **stably** sorted by ``area_weight`` descending,
-    ties broken by ``hex`` (the stable sort preserves family order for same-(area, hex)
-    ties, keeping the output deterministic).
+    Args:
+        harvest: The page `Harvest`, whose ``screenshot_bins`` seed the background pool's
+            area truth.
+        classified: The classified DOM elements supplying per-component semantic mass.
+
+    Returns:
+        The flat union of all three pools' clusters, assembled in fixed family order
+        (background, text, border) and then **stably** sorted by ``area_weight``
+        descending, ties broken by ``hex`` (the stable sort preserves family order for
+        same-(area, hex) ties, keeping the output deterministic).
     """
     pools: dict[PropertyFamily, list[_Entry]] = {
         PropertyFamily.BACKGROUND: [

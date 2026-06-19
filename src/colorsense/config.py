@@ -10,8 +10,8 @@ The default configuration ships with the package as ``data/palette_config.yaml``
 and is loaded by [`load_default_config`][colorsense.load_default_config]; callers can
 supply their own copy via [`load_config`][colorsense.load_config].
 
-Public interface
-----------------
+The public interface:
+
 * [`Config`][colorsense.Config] — top-level model + the three token helpers
   ([`Config.match_name_rule`][colorsense.Config.match_name_rule],
   [`Config.detect_scale`][colorsense.Config.detect_scale],
@@ -154,7 +154,18 @@ class AnchorRange(BaseModel):
     @model_validator(mode="before")
     @classmethod
     def _from_pair(cls, value: object) -> object:
-        """Accept the YAML two-element ``[low, high]`` list form."""
+        """Accept the YAML two-element ``[low, high]`` list form.
+
+        Args:
+            value: The raw YAML value — a two-element ``[low, high]`` list/tuple, or an
+                already-mapping form passed through untouched.
+
+        Returns:
+            A ``{"low": ..., "high": ...}`` mapping for the list form, else ``value`` as-is.
+
+        Raises:
+            ValueError: If ``value`` is a list/tuple without exactly two elements.
+        """
         if isinstance(value, (list, tuple)):
             if len(value) != 2:
                 raise ValueError("anchor range must be a two-element [low, high] list")
@@ -162,7 +173,14 @@ class AnchorRange(BaseModel):
         return value
 
     def contains(self, number: int) -> bool:
-        """Return whether ``number`` falls within ``[low, high]`` inclusive."""
+        """Return whether ``number`` falls within ``[low, high]`` inclusive.
+
+        Args:
+            number: The scale number to test against the range.
+
+        Returns:
+            ``True`` if ``low <= number <= high``, else ``False``.
+        """
         return self.low <= number <= self.high
 
 
@@ -185,6 +203,13 @@ class ScaleDetectionConfig(BaseModel):
 
         ``detect_scale`` reads ``match.group(1)``; without this check a groupless pattern
         validates fine and raises ``IndexError`` only when a numbered token first appears.
+
+        Returns:
+            This validated model.
+
+        Raises:
+            ValueError: If ``number_pattern`` does not compile or lacks a capture group for
+                the scale number (group 1).
         """
         try:
             compiled = re.compile(self.number_pattern)
@@ -251,6 +276,18 @@ class TokenVocabularyConfig(BaseModel):
         Distribution rows are normalized to sum to 1.0; channel rows
         (``{channel: ...}``) are passed through untouched. Validation errors
         (e.g. an empty / all-zero distribution) surface as pydantic errors.
+
+        Args:
+            data: The raw config mapping (or any value) before model construction.
+
+        Returns:
+            ``data`` with the ``semantic_role_to_usage_intent_or_channel`` table coerced
+            into channel-route and normalized-distribution rows; unchanged when the table
+            is absent or not a mapping.
+
+        Raises:
+            ValueError: On a non-mapping row, a negative weight, or a distribution that does
+                not sum to a positive value.
         """
         table = "semantic_role_to_usage_intent_or_channel"
         if not isinstance(data, dict):
@@ -502,6 +539,13 @@ class ComponentClassifierConfig(BaseModel):
 
         ``classify.components`` dispatches these by string; an unknown name would
         otherwise be a knob that silently never fires.
+
+        Returns:
+            This validated model.
+
+        Raises:
+            ValueError: On an interactivity/geometry ``when`` predicate or a suppressor key
+                that the classifier does not implement.
         """
         for rule in self.interactivity:
             if rule.when not in _KNOWN_INTERACTIVITY_PREDICATES:
@@ -568,8 +612,14 @@ class Config(BaseModel):
     def _matched_namespace_prefix(self, remainder: str) -> str | None:
         """Return the longest ``namespace_prefixes`` entry that prefixes ``remainder``.
 
-        Comparison is case-insensitive. Returns the prefix as declared in the
-        config (original casing), or ``None`` if no prefix matches.
+        Comparison is case-insensitive.
+
+        Args:
+            remainder: The token name (namespace markers already stripped) to test.
+
+        Returns:
+            The matching prefix as declared in the config (original casing), or ``None`` if
+            no prefix matches.
         """
         lowered = remainder.lower()
         best: str | None = None
@@ -582,8 +632,13 @@ class Config(BaseModel):
         """Match ``name`` against ``name_rules`` with exact > regex > substring precedence.
 
         If a known system namespace prefix was present, the returned weight is
-        multiplied by ``known_system_confidence_boost``. Returns ``None`` when no
-        rule matches.
+        multiplied by ``known_system_confidence_boost``.
+
+        Args:
+            name: The token name to match (a leading ``--`` is stripped first).
+
+        Returns:
+            The matched ``(role, weight)`` pair, or ``None`` when no rule matches.
         """
         remainder = name[2:] if name.startswith("--") else name
 
@@ -639,8 +694,15 @@ class Config(BaseModel):
     def detect_scale(self, name: str) -> ScaleInfo | None:
         """Detect a trailing scale number and identify its family.
 
-        Returns ``None`` when no scale number is present. ``family`` is the
-        remainder once the namespace and the trailing number are stripped.
+        ``family`` is the remainder once the namespace and the trailing number are
+        stripped.
+
+        Args:
+            name: The token name to inspect (a leading ``--`` is stripped first).
+
+        Returns:
+            A `ScaleInfo` describing the family and number, or ``None`` when scale
+            detection is disabled or no scale number is present.
         """
         scale = self.token_vocabulary.scale_detection
         if not scale.enabled:
@@ -685,8 +747,12 @@ class Config(BaseModel):
     def match_relational(self, name: str) -> RelationalInfo | None:
         """Match ``relational_modifiers`` patterns against the post-strip name.
 
-        Returns ``RelationalInfo`` with the captured ``base`` token, the modifier
-        ``type``, and its ``weight``. Returns ``None`` when nothing matches.
+        Args:
+            name: The token name to match (a leading ``--`` is stripped first).
+
+        Returns:
+            A `RelationalInfo` carrying the captured ``base`` token, the modifier ``type``,
+            and its ``weight``, or ``None`` when nothing matches.
         """
         remainder = name[2:] if name.startswith("--") else name
         prefix = self._matched_namespace_prefix(remainder)
@@ -718,6 +784,9 @@ def load_default_config() -> Config:
     directory and whether the package is installed editable, as a wheel, or
     zipped. This is what [`colorsense.analyze`][colorsense.analyze] uses when no ``config_path``
     is given.
+
+    Returns:
+        The validated `Config` loaded from the bundled YAML.
     """
     raw_text = resources.files(_DATA_PACKAGE).joinpath(_BUNDLED_CONFIG).read_text(encoding="utf-8")
     return _build_config(raw_text, f"<bundled {_BUNDLED_CONFIG}>")
@@ -727,9 +796,18 @@ def load_config(path: str | Path) -> Config:
     """Read, validate, and normalize the palette config YAML at ``path``.
 
     For the configuration shipped with the package, prefer
-    [`load_default_config`][colorsense.load_default_config]. Raises a clear
-    `pydantic.ValidationError` (or a wrapping `ValueError`) on malformed YAML or schema violations —
-    never a bare ``KeyError``.
+    [`load_default_config`][colorsense.load_default_config].
+
+    Args:
+        path: Filesystem path to the palette config YAML.
+
+    Returns:
+        The validated `Config` parsed from ``path``.
+
+    Raises:
+        ValueError: If the file cannot be read, or wrapping malformed YAML / a top-level
+            non-mapping.
+        pydantic.ValidationError: On schema violations — never a bare ``KeyError``.
     """
     config_path = Path(path)
     try:
@@ -742,8 +820,16 @@ def load_config(path: str | Path) -> Config:
 def _build_config(raw_text: str, source: str) -> Config:
     """Parse and validate raw YAML text into a [`Config`][colorsense.Config].
 
-    ``source`` is a human-readable label for the origin of ``raw_text`` used in
-    error messages (a file path or a bundled-resource marker).
+    Args:
+        raw_text: The raw YAML document text to parse.
+        source: A human-readable label for the origin of ``raw_text`` used in error
+            messages (a file path or a bundled-resource marker).
+
+    Returns:
+        The validated `Config`.
+
+    Raises:
+        ValueError: On invalid YAML or a top-level value that is not a mapping.
     """
     try:
         data = yaml.safe_load(raw_text)

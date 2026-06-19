@@ -15,11 +15,8 @@ screenshot caps, this bounds host-process memory against a hostile page (one tha
 declares millions of custom properties) — collection stops at the cap, keeping the
 earliest declarations in stylesheet order.
 
-``var(--x)`` aliases are detected from the raw value and recorded in ``alias_target``.
-
-Alias-target naming convention
-------------------------------
-``alias_target`` carries the **leading ``--``** (e.g. ``"--accent"``), matching the
+``var(--x)`` aliases are detected from the raw value and recorded in ``alias_target``,
+which carries the **leading ``--``** (e.g. ``"--accent"``), matching the
 ``TokenRecord.name`` convention so the alias graph can be joined on ``name``.
 """
 
@@ -121,7 +118,15 @@ _COLLECT_TOKENS_JS: str = r"""
 
 
 def _alias_target(raw_value: str) -> str | None:
-    """Return the referenced custom-property name (with leading ``--``) or ``None``."""
+    """Return the first ``var(--x)`` reference's target name, or ``None``.
+
+    Args:
+        raw_value: The raw declared value of a custom property.
+
+    Returns:
+        The referenced custom-property name with its leading ``--`` (e.g.
+        ``"--accent"``), or ``None`` when the value has no ``var()`` reference.
+    """
     match = _VAR_REF_RE.search(raw_value)
     if match is None:
         return None
@@ -136,6 +141,13 @@ async def harvest_tokens(page: Page) -> list[TokenRecord]:
     record's ``resolved`` is the ``:root``-resolved value parsed via `parse_css_color`
     (``None`` if non-color/unresolvable), and ``alias_target`` is set (with leading
     ``--``) when the raw value is a ``var(--x)`` reference.
+
+    Args:
+        page: The live Playwright page to enumerate custom properties from.
+
+    Returns:
+        One `TokenRecord` per declared custom property, in stylesheet order, capped at
+        `_MAX_HARVEST_TOKENS`.
     """
     # Bounded like the DOM evaluate: a wedged renderer must fail, not hang.
     raw_tokens = cast(

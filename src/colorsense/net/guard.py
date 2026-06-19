@@ -72,8 +72,16 @@ def _default_resolver(host: str) -> list[IPAddress]:
 
     Blocking by design — the guard runs it on its own bounded lookup pool on a cache miss,
     so the ``Resolver`` seam stays a plain synchronous callable; the verdict is cached. IP
-    literals pass straight through ``getaddrinfo`` without a network round trip. Raises
-    ``OSError`` on resolution failure — the guard treats that as fail-closed.
+    literals pass straight through ``getaddrinfo`` without a network round trip.
+
+    Args:
+        host: The hostname (or IP literal) to resolve.
+
+    Returns:
+        Every address ``getaddrinfo`` returns for ``host`` (IPv6 zone suffixes stripped).
+
+    Raises:
+        OSError: On resolution failure — the guard treats that as fail-closed.
     """
     infos = socket.getaddrinfo(host, None, proto=socket.IPPROTO_TCP)
     addresses: list[IPAddress] = []
@@ -94,6 +102,12 @@ def _is_public_address(ip: IPAddress) -> bool:
     addresses (``::ffff:a.b.c.d``) are classified as the *embedded* IPv4 address — some
     resolver stacks return them, and the connection goes to the embedded v4 target, so
     the wrapper's own flags must not be what decides.
+
+    Args:
+        ip: A single resolved address to classify.
+
+    Returns:
+        ``True`` if ``ip`` is a globally routable fetch target, else ``False``.
     """
     if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped is not None:
         return _is_public_address(ip.ipv4_mapped)
@@ -194,6 +208,10 @@ class _PrivateNetworkBlocker:
         ``request_filter`` seam (``evaluate_request_filter`` turns it into ``False``, so
         misuse there shows up as requests from the other loop being aborted); the error
         itself is only visible to direct callers.
+
+        Raises:
+            RuntimeError: On detected *concurrent* use from a second event loop while a
+                resolution from the first is still in flight.
         """
         loop = asyncio.get_running_loop()
         if self._loop is None or self._loop is loop:
@@ -282,6 +300,9 @@ class _PrivateNetworkBlocker:
 
         See the ``__init__`` comment for why this is a dedicated bounded pool rather
         than the loop's default ``to_thread`` executor, and for its lifecycle.
+
+        Returns:
+            The lazily-created, predicate-owned DNS lookup pool.
         """
         if self._executor is None:
             self._executor = ThreadPoolExecutor(
@@ -366,27 +387,25 @@ def block_private_networks(
     ``request_filter`` it fails closed instead, so misuse there manifests as requests from
     the other loop being aborted. Create a separate predicate per loop for concurrent use.
 
-    Parameters
-    ----------
-    allowed_hosts:
-        Optional exact (lowercase-compared) hostname allowlist applied *before* resolution:
-        a host not on the list is rejected, and a host on the list must still resolve to
-        only-public addresses. The allowlist narrows the filter, never widens it.
-    resolver:
-        ``host -> [addresses]`` seam, injectable for tests. Stays *synchronous* — the
-        guard runs it on its own bounded lookup pool on a cache miss. Defaults to a
-        blocking ``socket.getaddrinfo`` lookup; raising ``OSError`` fails closed.
-    ttl:
-        Seconds a hostname's verdict is reused before re-resolving. Defaults to
-        `DEFAULT_GUARD_TTL_SECONDS` (60).
-    max_entries:
-        LRU bound on the verdict cache. Defaults to `DEFAULT_GUARD_MAX_ENTRIES`
-        (1024).
-    clock:
-        Monotonic time source for the TTL, injectable for tests.
-    resolve_timeout:
-        Seconds a single lookup may take before the URL fails closed (and the negative
-        verdict is cached). Defaults to `DEFAULT_GUARD_RESOLVE_TIMEOUT_SECONDS` (10).
+    Args:
+        allowed_hosts: Optional exact (lowercase-compared) hostname allowlist applied
+            *before* resolution: a host not on the list is rejected, and a host on the list
+            must still resolve to only-public addresses. The allowlist narrows the filter,
+            never widens it.
+        resolver: ``host -> [addresses]`` seam, injectable for tests. Stays *synchronous* —
+            the guard runs it on its own bounded lookup pool on a cache miss. Defaults to a
+            blocking ``socket.getaddrinfo`` lookup; raising ``OSError`` fails closed.
+        ttl: Seconds a hostname's verdict is reused before re-resolving. Defaults to
+            `DEFAULT_GUARD_TTL_SECONDS` (60).
+        max_entries: LRU bound on the verdict cache. Defaults to
+            `DEFAULT_GUARD_MAX_ENTRIES` (1024).
+        clock: Monotonic time source for the TTL, injectable for tests.
+        resolve_timeout: Seconds a single lookup may take before the URL fails closed (and
+            the negative verdict is cached). Defaults to
+            `DEFAULT_GUARD_RESOLVE_TIMEOUT_SECONDS` (10).
+
+    Returns:
+        An async ``request_filter`` predicate (``await guard(url) -> bool``).
     """
     hosts = None if allowed_hosts is None else frozenset(h.lower() for h in allowed_hosts)
     return _PrivateNetworkBlocker(

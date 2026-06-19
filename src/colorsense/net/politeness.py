@@ -132,10 +132,18 @@ Sleeper = Callable[[float], Awaitable[None]]
 
 
 class RobotsDisallowedError(RuntimeError):
-    """Raised when ``robots.txt`` disallows a URL and the active policy respects it."""
+    """Raised when ``robots.txt`` disallows a URL and the active policy respects it.
+
+    Attributes:
+        url: The disallowed URL.
+    """
 
     def __init__(self, url: str) -> None:
-        """Build the error from the disallowed URL."""
+        """Build the error from the disallowed URL.
+
+        Args:
+            url: The URL ``robots.txt`` disallowed.
+        """
         super().__init__(f"robots.txt disallows fetching {url!r}")
         self.url = url
 
@@ -147,11 +155,18 @@ class UnsupportedSchemeError(ValueError):
     Only ``http``/``https`` URLs are fetchable by default. ``file://`` (a local-file-read
     primitive) is an explicit opt-in via ``PolitenessPolicy(allow_file_urls=True)``; every
     other scheme (``ftp``, ``data``, ``javascript``, scheme-less, ...) is always rejected.
-    The offending URL is available as `url`.
+
+    Attributes:
+        url: The offending URL whose scheme was rejected.
     """
 
     def __init__(self, url: str, *, hint: str | None = None) -> None:
-        """Build the error from the offending URL and an optional hint."""
+        """Build the error from the offending URL and an optional hint.
+
+        Args:
+            url: The URL whose scheme is unsupported.
+            hint: Optional remediation hint appended to the message in parentheses.
+        """
         message = f"unsupported URL scheme for fetching {url!r}"
         if hint:
             message = f"{message} ({hint})"
@@ -160,7 +175,15 @@ class UnsupportedSchemeError(ValueError):
 
 
 def _robots_url_for(url: str) -> str | None:
-    """Return the ``robots.txt`` URL for ``url``'s host, or ``None`` for non-network URLs."""
+    """Return the ``robots.txt`` URL for ``url``'s host, or ``None`` for non-network URLs.
+
+    Args:
+        url: The page URL whose host's ``robots.txt`` location is wanted.
+
+    Returns:
+        The ``http(s)://host/robots.txt`` URL, or ``None`` when ``url`` is not a network
+        URL (no scheme/host to anchor a robots lookup).
+    """
     parts = urlsplit(url)
     if parts.scheme not in _NETWORK_SCHEMES or not parts.netloc:
         return None
@@ -214,8 +237,18 @@ async def _default_robots_loader(
     itself stays gated by the browser-side filter. Without a filter (``None``), redirects
     are simply followed up to the cap.
 
-    ``_transport`` is a private test seam: an injected ``httpx`` transport (e.g.
-    ``httpx.MockTransport``) standing in for the network.
+    Args:
+        robots_url: The ``robots.txt`` URL to fetch.
+        user_agent: The policy's configured wire UA, sent as the ``User-Agent`` header.
+        request_filter: The policy's egress predicate (sync or async) vetting the initial
+            URL and every redirect hop, or ``None`` to follow redirects unfiltered.
+        _transport: Private test seam — an injected ``httpx`` transport (e.g.
+            ``httpx.MockTransport``) standing in for the network.
+
+    Returns:
+        The ``robots.txt`` body text, or ``None`` on any failure (a rejected/raising filter
+        verdict, redirect-cap exhaustion, an oversized body, or any HTTP error) — all
+        treated by callers as "no rules".
     """
     try:
         async with httpx.AsyncClient(
@@ -257,91 +290,96 @@ async def _default_robots_loader(
 
 
 def _cache_key(url: str, theme: Theme, viewport: Viewport) -> tuple[str, str, int, int, float]:
-    """Identify a render by URL + theme + viewport geometry."""
+    """Identify a render by URL + theme + viewport geometry.
+
+    Args:
+        url: The page URL being rendered.
+        theme: The theme the page is rendered under.
+        viewport: The viewport whose width, height, and device scale factor join the key.
+
+    Returns:
+        The render cache key: ``(url, str(theme), width, height, device_scale_factor)``.
+    """
     return (url, str(theme), viewport.width, viewport.height, viewport.device_scale_factor)
 
 
 class PolitenessPolicy:
     """Gate, pace, and cache page renders on behalf of a consumer.
 
-    Parameters
-    ----------
-    user_agent:
-        Identifiable User-Agent sent on the wire for *both* the ``robots.txt`` GET and the
-        page render itself (forwarded to the harvester, which sets it on the browser
-        context). Defaults to `DEFAULT_USER_AGENT`.
-    robots_agent:
-        The product token matched against ``robots.txt`` ``User-agent:`` groups by
-        `can_fetch`. Kept separate from ``user_agent`` so site-specific robots groups
-        still match — see `DEFAULT_ROBOTS_AGENT` (the default, ``"colorsense"``) for
-        the prefix-matching rationale.
-    respect_robots:
-        When ``True`` (default), `can_fetch` consults ``robots.txt`` and `fetch` raises
-        [`RobotsDisallowedError`][colorsense.RobotsDisallowedError] on a disallow. Set ``False`` to
-        bypass the check entirely — the consumer then owns authorization. Disabling robots also
-        disables ``Crawl-delay`` honoring (no ``robots.txt`` is ever fetched).
-    allow_file_urls:
-        Whether `fetch` may render ``file://`` URLs. ``False`` by default —
-        ``file://`` reads arbitrary local files, so it must be an explicit opt-in (the test
-        suite opts in to render its local fixtures). When allowed, ``file://`` still
-        bypasses the robots gate and the rate limiter: it has no host and no robots
-        concept. Schemes other than ``http``/``https``/``file`` are always rejected;
-        rejections raise [`UnsupportedSchemeError`][colorsense.UnsupportedSchemeError].
-    request_filter:
-        Optional synchronous or asynchronous predicate ([`RequestFilter`][colorsense.RequestFilter])
-        over **every HTTP(S) request URL the browser makes** while rendering — the navigation
-        itself *and*
-        all sub-resources (scripts, images, XHR/``fetch`` issued by the page's own JS) — **and**
-        over the policy's own ``robots.txt`` GET (the initial robots URL and each redirect hop it
-        follows; a rejected hop aborts the fetch, which fails open as "no rules" while the
-        navigation stays gated by this same filter browser-side). Returning ``False`` aborts that
-        request. A *sync* predicate is invoked inline on the event loop's request path and must not
-        block (cheap string checks only); an *async* predicate is awaited — the shipped
-        [`colorsense.block_private_networks`][colorsense.block_private_networks] guard is async and
-        resolves hostnames off-loop. This is the in-library mechanism against sub-resource SSRF:
-        validating the navigation URL alone cannot stop the rendered page from requesting internal
-        endpoints (e.g. ``169.254.169.254``). A predicate that *raises* fails closed (the request is
-        aborted). What route interception cannot see is closed rather than filtered: configuring a
-        filter also refuses every WebSocket connection outright (the handshake never goes out), and
-        service workers are always blocked at context creation. ``None`` (default) installs no
-        interception at all — zero overhead.
-    max_concurrent_renders:
-        Optional cap on simultaneous *renders* through this policy — the SECURITY.md §2
-        concurrency bound, shipped as a knob. ``None`` (default) is unbounded, the previous
-        behavior. When set, an `asyncio.Semaphore` bounds concurrent harvester
-        calls. Composition with the other gates: **cache hits never take a slot** (they
-        return before the limiter), **single-flight followers never take a slot** (they
-        await the leader's future), and the throttle/robots wait happens *outside* the
-        slot — the semaphore wraps strictly the render itself, so a leader parked in a
-        long ``Crawl-delay`` sleep does not starve renders to other hosts. The semaphore is
-        created lazily inside the running event loop (and re-created if the policy is later
-        used from a different loop), so one policy can serve sequential ``asyncio.run``
-        calls and two policies never share a limiter. Must be ``>= 1`` when set.
-    min_interval:
-        Minimum seconds between same-host fetches (per-host rate limiter). When the host's
-        ``robots.txt`` declares a ``Crawl-delay`` for this policy's ``robots_agent``, the
-        effective per-host interval is ``max(min_interval, crawl_delay)`` with the crawl
-        delay capped at ``max_crawl_delay``. The delay is learned from the ``robots.txt``
-        fetch itself, which is the host's *first* throttled request — so it applies from
-        the second fetch to that host onward.
-    max_crawl_delay:
-        Upper bound (seconds) on an honored ``robots.txt`` ``Crawl-delay``. Defaults to
-        `DEFAULT_MAX_CRAWL_DELAY` (30.0) so a hostile or typo'd ``robots.txt``
-        cannot stall a pipeline arbitrarily; raise it to honor longer delays.
-    max_cache_entries:
-        Upper bound on the render cache (``_cache``), which holds full `Harvest`
-        objects — the largest things this policy retains. When the cache would exceed this,
-        the least-recently-used entry is evicted (the cache is an `OrderedDict`; a
-        hit moves its key to the most-recently-used end). Defaults to
-        `DEFAULT_MAX_CACHE_ENTRIES`. Pass ``0`` or ``None`` for an unbounded cache
-        (the legacy grow-forever behavior — only sensible for short-lived runs).
-    harvester:
-        The render function, injectable for testing. Defaults to
-        `colorsense.harvest.harvest_page`.
-    robots_loader / clock / sleeper:
-        Injectable async seams for ``robots.txt`` retrieval and sleeping, plus a sync time
-        source — swapped out by the test suite so no real network or wall-clock delay is
-        incurred.
+    Args:
+        user_agent: Identifiable User-Agent sent on the wire for *both* the ``robots.txt``
+            GET and the page render itself (forwarded to the harvester, which sets it on the
+            browser context). Defaults to `DEFAULT_USER_AGENT`.
+        robots_agent: The product token matched against ``robots.txt`` ``User-agent:``
+            groups by `can_fetch`. Kept separate from ``user_agent`` so site-specific robots
+            groups still match — see `DEFAULT_ROBOTS_AGENT` (the default, ``"colorsense"``)
+            for the prefix-matching rationale.
+        respect_robots: When ``True`` (default), `can_fetch` consults ``robots.txt`` and
+            `fetch` raises [`RobotsDisallowedError`][colorsense.RobotsDisallowedError] on a
+            disallow. Set ``False`` to bypass the check entirely — the consumer then owns
+            authorization. Disabling robots also disables ``Crawl-delay`` honoring (no
+            ``robots.txt`` is ever fetched).
+        allow_file_urls: Whether `fetch` may render ``file://`` URLs. ``False`` by default —
+            ``file://`` reads arbitrary local files, so it must be an explicit opt-in (the
+            test suite opts in to render its local fixtures). When allowed, ``file://`` still
+            bypasses the robots gate and the rate limiter: it has no host and no robots
+            concept. Schemes other than ``http``/``https``/``file`` are always rejected;
+            rejections raise [`UnsupportedSchemeError`][colorsense.UnsupportedSchemeError].
+        request_filter: Optional synchronous or asynchronous predicate
+            ([`RequestFilter`][colorsense.RequestFilter]) over **every HTTP(S) request URL
+            the browser makes** while rendering — the navigation itself *and* all
+            sub-resources (scripts, images, XHR/``fetch`` issued by the page's own JS) —
+            **and** over the policy's own ``robots.txt`` GET (the initial robots URL and each
+            redirect hop it follows; a rejected hop aborts the fetch, which fails open as "no
+            rules" while the navigation stays gated by this same filter browser-side).
+            Returning ``False`` aborts that request. A *sync* predicate is invoked inline on
+            the event loop's request path and must not block (cheap string checks only); an
+            *async* predicate is awaited — the shipped
+            [`colorsense.block_private_networks`][colorsense.block_private_networks] guard is
+            async and resolves hostnames off-loop. This is the in-library mechanism against
+            sub-resource SSRF: validating the navigation URL alone cannot stop the rendered
+            page from requesting internal endpoints (e.g. ``169.254.169.254``). A predicate
+            that *raises* fails closed (the request is aborted). What route interception
+            cannot see is closed rather than filtered: configuring a filter also refuses
+            every WebSocket connection outright (the handshake never goes out), and service
+            workers are always blocked at context creation. ``None`` (default) installs no
+            interception at all — zero overhead.
+        max_concurrent_renders: Optional cap on simultaneous *renders* through this policy —
+            the SECURITY.md §2 concurrency bound, shipped as a knob. ``None`` (default) is
+            unbounded, the previous behavior. When set, an `asyncio.Semaphore` bounds
+            concurrent harvester calls. Composition with the other gates: **cache hits never
+            take a slot** (they return before the limiter), **single-flight followers never
+            take a slot** (they await the leader's future), and the throttle/robots wait
+            happens *outside* the slot — the semaphore wraps strictly the render itself, so a
+            leader parked in a long ``Crawl-delay`` sleep does not starve renders to other
+            hosts. The semaphore is created lazily inside the running event loop (and
+            re-created if the policy is later used from a different loop), so one policy can
+            serve sequential ``asyncio.run`` calls and two policies never share a limiter.
+            Must be ``>= 1`` when set.
+        min_interval: Minimum seconds between same-host fetches (per-host rate limiter). When
+            the host's ``robots.txt`` declares a ``Crawl-delay`` for this policy's
+            ``robots_agent``, the effective per-host interval is
+            ``max(min_interval, crawl_delay)`` with the crawl delay capped at
+            ``max_crawl_delay``. The delay is learned from the ``robots.txt`` fetch itself,
+            which is the host's *first* throttled request — so it applies from the second
+            fetch to that host onward.
+        max_crawl_delay: Upper bound (seconds) on an honored ``robots.txt`` ``Crawl-delay``.
+            Defaults to `DEFAULT_MAX_CRAWL_DELAY` (30.0) so a hostile or typo'd
+            ``robots.txt`` cannot stall a pipeline arbitrarily; raise it to honor longer
+            delays.
+        max_cache_entries: Upper bound on the render cache (``_cache``), which holds full
+            `Harvest` objects — the largest things this policy retains. When the cache would
+            exceed this, the least-recently-used entry is evicted (the cache is an
+            `OrderedDict`; a hit moves its key to the most-recently-used end). Defaults to
+            `DEFAULT_MAX_CACHE_ENTRIES`. Pass ``0`` or ``None`` for an unbounded cache (the
+            legacy grow-forever behavior — only sensible for short-lived runs).
+        harvester: The render function, injectable for testing. Defaults to
+            `colorsense.harvest.harvest_page`.
+        robots_loader: Injectable async ``robots.txt`` retrieval seam — swapped out by the
+            test suite so no real network is incurred.
+        clock: Synchronous time source, injectable for tests.
+        sleeper: Injectable async sleep seam — swapped out by the test suite so no real
+            wall-clock delay is incurred.
     """
 
     def __init__(
@@ -419,10 +457,15 @@ class PolitenessPolicy:
     def _validate_scheme(self, url: str) -> None:
         """Reject ``url`` unless its scheme is one the policy can fetch.
 
-        Raises [`UnsupportedSchemeError`][colorsense.UnsupportedSchemeError]:
         ``http``/``https`` are always allowed (the robots/throttle gates apply downstream);
         ``file`` only when this policy opted in via ``allow_file_urls=True``; everything
         else (``ftp``, ``data``, ``javascript``, scheme-less, ...) is always rejected.
+
+        Args:
+            url: The URL whose scheme is checked.
+
+        Raises:
+            UnsupportedSchemeError: When ``url``'s scheme is not fetchable under this policy.
         """
         scheme = urlsplit(url).scheme.lower()
         if scheme in _NETWORK_SCHEMES:
@@ -448,6 +491,13 @@ class PolitenessPolicy:
         robots.txt GET serves them all — the simplified sibling of `fetch`'s render
         coalescing, including its cancellation semantics: a cancelled leader cancels the
         shared future, and followers re-elect instead of inheriting the cancellation.
+
+        Args:
+            robots_url: The ``robots.txt`` URL to load and memoize a parser for.
+
+        Returns:
+            A memoized `RobotFileParser`, or ``None`` when no rules apply (missing,
+            unreachable, or unfetchable ``robots.txt``).
         """
         while True:
             if robots_url in self._robots_cache:
@@ -508,6 +558,12 @@ class PolitenessPolicy:
 
         Non-network URLs (e.g. ``file://`` fixtures) and a disabled robots check always
         return ``True``. A missing/unreachable ``robots.txt`` permits fetching.
+
+        Args:
+            url: The URL whose ``robots.txt`` permission is checked.
+
+        Returns:
+            ``True`` if ``url`` may be fetched under this policy, else ``False``.
         """
         if not self.respect_robots:
             return True
@@ -528,6 +584,12 @@ class PolitenessPolicy:
         The crawl delay is clamped to ``max_crawl_delay`` first (see
         `DEFAULT_MAX_CRAWL_DELAY` for why). With ``respect_robots=False`` no robots
         is ever fetched, ``_crawl_delay`` stays empty, and this reduces to ``min_interval``.
+
+        Args:
+            host: The netloc whose effective pacing interval is wanted.
+
+        Returns:
+            The pacing interval in seconds: ``max(min_interval, capped Crawl-delay)``.
         """
         crawl_delay = self._crawl_delay.get(host)
         if crawl_delay is None:
@@ -546,6 +608,10 @@ class PolitenessPolicy:
         before releasing, so two same-host callers arriving together chain (each waits
         the interval after the previous) instead of both computing a zero wait — yet
         waits for *different* hosts no longer serialize through one global mutex.
+
+        Args:
+            url: The URL whose host's rate limit is enforced (non-network URLs return at
+                once — no host to pace).
         """
         parts = urlsplit(url)
         if parts.scheme not in _NETWORK_SCHEMES or not parts.netloc:
@@ -573,6 +639,10 @@ class PolitenessPolicy:
         an asyncio Semaphore binds to the loop it is first awaited on, so reusing one
         across loops would raise. Re-creation is safe — by the time a new loop runs, no
         task from the old loop can still hold a slot.
+
+        Returns:
+            The render-bounding `asyncio.Semaphore`, or ``None`` when renders are unbounded
+            (``max_concurrent_renders is None``).
         """
         if self.max_concurrent_renders is None:
             return None
@@ -630,6 +700,23 @@ class PolitenessPolicy:
         the render somehow completed first, the re-checking loop serves it from the cache.
         A follower whose *own* task is cancelled still raises ``CancelledError`` normally,
         and the cancelled leader still propagates its own ``CancelledError`` to its caller.
+
+        Args:
+            url: Page to fetch. Its scheme is validated before anything else.
+            theme: The theme to render under (part of the cache key).
+            config: The loaded palette configuration forwarded to the harvester.
+            viewport: The viewport to render at (part of the cache key).
+            browser: Optional shared-browser handle forwarded to the harvester verbatim; the
+                policy never launches or closes it.
+
+        Returns:
+            The `Harvest` for ``url``/``theme``/``viewport`` — freshly rendered, served from
+            the cache, or coalesced onto an in-flight render of the same key.
+
+        Raises:
+            UnsupportedSchemeError: When ``url``'s scheme is not fetchable under this policy.
+            RobotsDisallowedError: When ``robots.txt`` disallows ``url`` and
+                ``respect_robots`` is set.
         """
         # Scheme gate BEFORE the cache lookup — see the docstring for why order matters.
         self._validate_scheme(url)

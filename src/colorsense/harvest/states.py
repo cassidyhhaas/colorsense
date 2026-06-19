@@ -5,9 +5,7 @@ the Chrome DevTools Protocol (``CSS.forcePseudoState``), re-read the computed
 ``background-color``, and if it changed from the resting value we set
 ``has_hover_color_change=True`` and ``hover_bg`` to the parsed hover color.
 
-Why CDP instead of a real mouse hover
--------------------------------------
-Driving Playwright's `hover` per element is
+Why CDP instead of a real mouse hover? Driving Playwright's `hover` per element is
 catastrophically slow on real pages: each call runs actionability checks (scroll-into-view,
 stability, pointer-event eligibility), and hovering one element can open menus/overlays that
 then intercept pointer events on the *next* element, so its checks retry until the hover
@@ -61,10 +59,18 @@ async def probe_hover_states(
     """Probe hover/focus color changes for clickable elements.
 
     ``elements`` and ``selectors`` are positionally aligned (as returned by
-    `colorsense.harvest.dom.harvest_elements`). Returns a new list with
-    ``has_hover_color_change`` / ``hover_bg`` updated on clickable elements that change
-    background color under forced ``:hover``/``:focus``; other elements are returned
-    unchanged.
+    `colorsense.harvest.dom.harvest_elements`).
+
+    Args:
+        page: The live Playwright page the elements were harvested from.
+        elements: The harvested elements, in document order.
+        selectors: CSS selectors positionally aligned with ``elements`` (an empty
+            string marks an element the prober must skip).
+
+    Returns:
+        A new list with ``has_hover_color_change`` / ``hover_bg`` updated on clickable
+        elements that change background color under forced ``:hover``/``:focus``; other
+        elements are returned unchanged.
     """
     updated: list[HarvestedElement] = list(elements)
 
@@ -117,7 +123,15 @@ async def probe_hover_states(
 
 
 async def _open_cdp(page: Page) -> CDPSession | None:
-    """Open a CDP session with the DOM and CSS domains enabled, or ``None`` on failure."""
+    """Open a CDP session with the DOM and CSS domains enabled.
+
+    Args:
+        page: The live Playwright page to attach the CDP session to.
+
+    Returns:
+        The enabled `CDPSession`, or ``None`` if CDP is unavailable (e.g. a non-Chromium
+        engine) so the hover pass can degrade to a no-op.
+    """
     try:
         client = await page.context.new_cdp_session(page)
         await client.send("DOM.enable")
@@ -133,6 +147,12 @@ async def _document_root(client: CDPSession) -> int | None:
     Only the root node is needed — ``DOM.querySelector`` resolves against the backend —
     so the default depth (1) is requested; ``depth: -1`` would serialize the entire DOM
     tree over the CDP transport just to discard it.
+
+    Args:
+        client: An open CDP session with the DOM domain enabled.
+
+    Returns:
+        The document root ``nodeId``, or ``None`` if the ``DOM.getDocument`` send fails.
     """
     try:
         doc = cast(dict[str, Any], await client.send("DOM.getDocument"))
@@ -144,9 +164,17 @@ async def _document_root(client: CDPSession) -> int | None:
 async def _read_hover_bg(client: CDPSession, root: int, selector: str) -> Color | None:
     """Force hover/focus on ``selector`` and return its parsed forced background color.
 
-    Returns ``None`` on any failure (element gone, not resolvable) or if the computed
-    background-color does not parse. The forced pseudo-state is always cleared afterward so
-    one element's hover styling cannot leak into the next element's read.
+    The forced pseudo-state is always cleared afterward so one element's hover styling
+    cannot leak into the next element's read.
+
+    Args:
+        client: An open CDP session with the DOM and CSS domains enabled.
+        root: The document root ``nodeId`` to resolve ``selector`` against.
+        selector: The CSS selector identifying the element to force and read.
+
+    Returns:
+        The parsed forced ``background-color``, or ``None`` on any failure (element gone,
+        not resolvable, or a computed value that does not parse).
     """
     node_id: int | None = None
     try:
@@ -186,7 +214,12 @@ async def _read_hover_bg(client: CDPSession, root: int, selector: str) -> Color 
 
 
 async def _clear_pseudo(client: CDPSession, node_id: int | None) -> None:
-    """Best-effort reset of any forced pseudo-state on ``node_id``."""
+    """Best-effort reset of any forced pseudo-state on ``node_id``.
+
+    Args:
+        client: An open CDP session with the CSS domain enabled.
+        node_id: The node whose forced pseudo-classes to clear; a no-op when ``None``.
+    """
     if node_id is None:
         return
     with contextlib.suppress(Exception):
