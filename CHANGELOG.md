@@ -16,6 +16,13 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   (the two absolute detection thresholds). Optional, so existing configs still validate.
 - **`eval/calibrate_thresholds.py`**: an offline harness that sweeps `theta_present` per role
   against the ground-truth must-keep set and reports the recall/precision knee (tuning-spec §5).
+- **`eval/fit_aggregation.py`**: an offline learning-to-rank harness that fits the per-role
+  salience aggregation `(lambda, beta)` against the ground-truth must-keep set — choosing them on
+  threshold-free NDCG/top-1 ranking quality (ties broken toward the saturating `beta -> 1`, since
+  `sigma_i < 1` makes `beta < 1` *inflate* the corroboration tail) — then re-fits `theta_present`
+  jointly for the recall/noise knee, holding `theta_noise` fixed as the physical anchor
+  (tuning-spec §2, §5, §7). Prints the before/after panel via the real scorer and a
+  tail-inflation diagnostic.
 
 ### Fixed
 
@@ -53,13 +60,21 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
     display-normalized salience share (not a pooled posterior); `ColorUsage.prominence` is now the
     color's maximum role-salience, globally normalized (not a blended `0.7*area + 0.3*mass` scalar).
   - The new tuning surface (`alpha`, per-role `lambda`/`beta`, `theta_noise`/`theta_present`,
-    modulator ranges) lives in the `detection:` config section, seeded with pre-fit starting values;
-    `theta_present` is fit per role from the ground-truth must-keep set. On the offline 10-site
-    quality panel the rewrite holds parity with the prior pipeline (recall 218/232, role winners
-    74/77, NOISE 74). Known follow-ups (deferred): the per-role `lambda`/`beta` are hand-set, not
-    learning-to-rank-fit, and the `surface` role recalls ~70% of must-keep colors — both are
-    aggregation-bound, not threshold-bound. See `docs/design/detection-ranking-redesign.md` and
-    `docs/design/tuning-spec.md`.
+    modulator ranges) lives in the `detection:` config section. The per-role element-role
+    `(lambda, beta)` are now **learning-to-rank-fit** and `theta_present` re-fit jointly via
+    `eval/fit_aggregation.py` (replacing the pre-fit hand-set starting values); `theta_noise` stays
+    the physical anchor and the area-ranked roles' `theta_present` are unchanged (their `S_measured`
+    is screenshot area, so `lambda`/`beta` never enter it). On the offline 10-site quality panel
+    this **improves ranking/precision at held recall**: role winners 74/77 → 75/77 and NOISE
+    74 → 69, with recall 218/232 and family-bleed 0 unchanged.
+  - **Correction to a prior limitation note.** The two known recall regressions are **not**
+    aggregation-bound: the fit confirmed `(lambda, beta)` cannot move recall, because every miss is
+    either *fusion-bound* (no evidence record in the target role — the near-white/near-black
+    inventory cluster-merge guards collapse e.g. `#030712`/`#f9f9f9` surfaces, or the element was
+    mis-classified) or a *single instance below the `theta_noise` floor* (no corroboration tail for
+    `(lambda, beta)` to reshape, and `theta_noise` is the fixed anchor). The `surface` role's ~70%
+    must-keep recall is therefore an **inventory/`theta_noise`** limitation, tracked separately, not
+    an aggregation one. See `docs/design/detection-ranking-redesign.md` and `docs/design/tuning-spec.md`.
 
 - **Every field on the `models.py` contracts now carries an explicit `pydantic.Field`** with a
   description, validation bounds, and (where useful) examples. Numeric fields gained range

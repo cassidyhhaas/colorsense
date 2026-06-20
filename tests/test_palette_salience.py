@@ -215,21 +215,25 @@ def test_default_config_detection_section() -> None:
     assert detection.sibling.exponent == pytest.approx(0.25)
     assert detection.contrast.slope == pytest.approx(0.05)
 
+    # (lambda, beta, theta_present) are the fitted values from `eval/fit_aggregation.py`
+    # (theta_noise held fixed as the physical anchor). The `lambda` YAML key loads into
+    # the `lambda_` field.
     cta = detection.roles[UsageRole.CTA]
-    # The `lambda` YAML key loads into the `lambda_` field.
-    assert cta.lambda_ == pytest.approx(0.2)
-    assert cta.beta == pytest.approx(0.5)
+    assert cta.lambda_ == pytest.approx(0.3)
+    assert cta.beta == pytest.approx(0.7)
     assert cta.theta_noise == pytest.approx(0.0001)
-    # theta_present for cta is the calibrated value (3.0x theta_noise = 0.0003).
-    assert cta.theta_present == pytest.approx(0.0003)
+    assert cta.theta_present == pytest.approx(0.000265051)
 
     text = detection.roles[UsageRole.TEXT]
-    assert text.lambda_ == pytest.approx(1.0)
-    assert text.beta == pytest.approx(0.9)
+    # text/link/border land at beta=0.5: inflating the headcount tail is exactly the
+    # "most-USED color wins" behavior wanted for aggregate element roles.
+    assert text.lambda_ == pytest.approx(0.85)
+    assert text.beta == pytest.approx(0.5)
 
     surface = detection.roles[UsageRole.SURFACE]
     assert surface.theta_noise == pytest.approx(0.005)
-    # theta_present for surface is the calibrated value (3.0x theta_noise = 0.015).
+    # surface is area-ranked: lambda/beta are inert, so its prior calibrated theta_present
+    # is kept unchanged by the aggregation fit.
     assert surface.theta_present == pytest.approx(0.015)
 
 

@@ -45,7 +45,16 @@ uv run python eval/score.py --json          # machine-readable
 
 uv run python eval/probe.py github '#08872b'  # authoring aid: is this color real? (see below)
 uv run python eval/harvest_panel.py         # re-capture frozen harvests (needs network + Chromium)
+
+uv run python eval/calibrate_thresholds.py  # sweep theta_present per role; report the knee
+uv run python eval/fit_aggregation.py       # learning-to-rank fit of per-role (lambda, beta)
+uv run python eval/fit_aggregation.py --tail-report   # + the beta tail-inflation diagnostic
 ```
+
+`calibrate_thresholds.py` and `fit_aggregation.py` are **in-sample** calibration harnesses over
+the 10 quality sites (the goldens regression + `score.py` are the out-of-sample check). The first
+fits `theta_present` at fixed aggregation; the second fits the aggregation `(lambda, beta)` on
+ranking quality and re-fits `theta_present` jointly, holding `theta_noise` as the physical anchor.
 
 `score.py` always exits 0 — it is a **report for human review on palette-affecting PRs**,
 not a CI gate. Run it on `main` for a baseline and on your branch, and compare by eye. Making

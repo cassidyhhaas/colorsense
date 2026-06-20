@@ -493,12 +493,23 @@ detection:
   # action: aggregate — the most-repeated secondary button color.
   # text/link/border: near-sum — the most-USED color, so a lone huge headline does
   # not outrank body text.
+  #
+  # ELEMENT roles (cta/action/text/link/border): (lambda, beta) FIT and theta_present
+  # RE-FIT (theta_noise held as the physical anchor) by `eval/fit_aggregation.py` against
+  # the labeled must-keep set. (lambda, beta) maximize threshold-free NDCG/top-1 ranking
+  # quality, ties broken toward the saturating end (beta -> 1, since sigma_i < 1 means
+  # beta < 1 *inflates* the tail); theta_present is the recall/noise knee at that aggregation.
+  # text/link/border land at beta=0.5 because inflating the headcount tail is exactly the
+  # "most-USED color wins" behavior wanted there.
+  # AREA-RANKED roles (page/surface/banner): area-sum (1, 1) and the prior calibrated
+  # theta_present, UNCHANGED — their S_measured is screenshot area, so lambda/beta never
+  # enter it and there is no coupling forcing a re-fit (see calibrate_thresholds.py).
   roles:
-    page:    {lambda: 1.0, beta: 1.0, theta_noise: 0.005,  theta_present: 0.04}
-    surface: {lambda: 1.0, beta: 1.0, theta_noise: 0.005,  theta_present: 0.015}
-    banner:  {lambda: 1.0, beta: 1.0, theta_noise: 0.005,  theta_present: 0.04}
-    cta:     {lambda: 0.2, beta: 0.5, theta_noise: 0.0001, theta_present: 0.0003}
-    action:  {lambda: 0.7, beta: 0.8, theta_noise: 0.0001, theta_present: 0.0001}
-    text:    {lambda: 1.0, beta: 0.9, theta_noise: 0.0001, theta_present: 0.0012}
-    link:    {lambda: 1.0, beta: 0.9, theta_noise: 0.0001, theta_present: 0.0002}
-    border:  {lambda: 1.0, beta: 0.9, theta_noise: 0.0001, theta_present: 0.0001}
+    page:    {lambda: 1.0,  beta: 1.0, theta_noise: 0.005,  theta_present: 0.04}
+    surface: {lambda: 1.0,  beta: 1.0, theta_noise: 0.005,  theta_present: 0.015}
+    banner:  {lambda: 1.0,  beta: 1.0, theta_noise: 0.005,  theta_present: 0.04}
+    cta:     {lambda: 0.3,  beta: 0.7, theta_noise: 0.0001, theta_present: 0.000265051}
+    action:  {lambda: 0.5,  beta: 0.8, theta_noise: 0.0001, theta_present: 0.000126289}
+    text:    {lambda: 0.85, beta: 0.5, theta_noise: 0.0001, theta_present: 0.0108257}
+    link:    {lambda: 0.3,  beta: 0.5, theta_noise: 0.0001, theta_present: 0.000978974}
+    border:  {lambda: 0.85, beta: 0.5, theta_noise: 0.0001, theta_present: 0.000131443}
