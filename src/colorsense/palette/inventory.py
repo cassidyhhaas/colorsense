@@ -163,6 +163,21 @@ _EXACT_COLOR_FAMILIES: frozenset[PropertyFamily] = frozenset(
 # solid near-black CTA backgrounds get the check. The radius matches the text/border check's 3.0
 # ΔE2000 *denoising* threshold: it splits `#030711`/`#050505` (4.33) while keeping genuine
 # near-black anti-alias variants merged (`#000000`/`#010101` is 0.16, `#08090b`/`#050505` is 1.05).
+#
+# Soundness of the 3.0 threshold at L <= 0.15 (the `detection-ranking-redesign.md` §5.3/§9.6 metric
+# caveat: CIEDE2000 over-reports near black). Investigated on the frozen eval panel and found to be
+# *metric-neutral*: disco's `#030711`/`#050505` is the ONLY near-black pair on the whole corpus that
+# carries CTA/action mass and so actually fires this check, and every candidate metric — a raised
+# ΔE2000 threshold, an OKLab-chroma-plane test, a lightness-Δ-capped split — agrees with 3.0 on that
+# one pair, so the panel score is identical for all of them. There is therefore no measured basis to
+# adopt a more complex metric, and 3.0 has corpus margin (the real should-merge anti-alias pairs top
+# out at ~2.19 ΔE2000; the disco split is 4.33). The caveat is real: tailwind's `#020618`/`#030712`,
+# two dark-navy quantizer variants of one surface (OKLab 0.015, equal lightness), over-report at
+# 3.62 > 3.0 — but it is contained by the CTA/action scoping above, not the threshold value: that
+# pair carries no CTA/action mass, so it merges anyway. If a future page ever puts a CTA on a navy
+# surface, the prepared fix is an OKLab-chroma-plane distinctness test (split only on a genuine tint
+# difference, sidestepping CIEDE2000's lightness coupling). See `tests/test_palette_inventory.py`
+# (`test_near_black_guard_keeps_corpus_anti_alias_pairs_merged`, the tailwind over-report tests).
 NEAR_BLACK_MAX_LIGHTNESS: float = 0.15
 NEAR_BLACK_MERGE_MAX_DE2000: float = 3.0
 

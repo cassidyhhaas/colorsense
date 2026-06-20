@@ -937,3 +937,70 @@ def test_background_pool_merges_distinct_near_blacks_without_cta_mass() -> None:
     assert len(clusters) == 1
     assert clusters[0].member_count == 2
     assert clusters[0].color.hex == _NB_SURFACE  # max-area member wins
+
+
+# --- Near-black metric: margin & over-report regression tests ------------------------------
+# These pin the empirical findings of the L<=0.15 CIEDE2000 soundness investigation (see the
+# `NEAR_BLACK_MERGE_MAX_DE2000` comment in inventory.py and detection-ranking-redesign.md
+# §5.3/§9.6). They guard the two ends of the threshold against drift: that the real corpus's
+# anti-alias/quantization near-black pairs stay *below* 3.0 (the threshold is not too low), and
+# that the one real corpus pair the metric *over-reports* above 3.0 is still kept merged by the
+# CTA/action scoping rather than by the threshold value.
+
+# Real OKLab-near near-black pairs harvested from the frozen panel that are genuine
+# anti-alias / median-cut-quantizer variants of ONE surface — they must stay merged. The
+# largest (github's `#000000`/`#000005`, dE2000 ~2.06) is the corpus's worst should-merge
+# case and sits a comfortable ~1.3 dE2000 below the 3.0 threshold; the disco should-SPLIT
+# pair is 4.33, so 3.0 has corpus margin on both sides.
+_CORPUS_NEAR_BLACK_MERGE_PAIRS = [
+    ("#000000", "#000005"),  # github   dE2000 2.06 (corpus max should-merge)
+    ("#000000", "#010005"),  # github   dE2000 2.19
+    ("#060709", "#070907"),  # linear   dE2000 1.85
+    ("#010101", "#08080a"),  # resend   dE2000 1.42
+]
+
+
+@pytest.mark.parametrize(("a", "b"), _CORPUS_NEAR_BLACK_MERGE_PAIRS)
+def test_near_black_guard_keeps_corpus_anti_alias_pairs_merged(a: str, b: str) -> None:
+    # Lower-margin guard: every real corpus anti-alias near-black pair stays under the 3.0
+    # threshold, so the predicate does NOT flag them distinct (3.0 is not accidentally too low).
+    ca, cb = _color(a), _color(b)
+    assert ca.lightness <= NEAR_BLACK_MAX_LIGHTNESS and cb.lightness <= NEAR_BLACK_MAX_LIGHTNESS
+    assert delta_e(ca, cb) <= MAX_BG_MATCH_DELTA_E  # OKLab would join them in the bg pool...
+    assert ciede2000(ca, cb) <= NEAR_BLACK_MERGE_MAX_DE2000  # ...and CIEDE2000 agrees (margin)
+    assert not _is_distinct_near_black_pair(ca, cb)
+
+
+# tailwind's two dark-navy surface variants. They are perceptually ONE color (OKLab 0.015,
+# identical lightness — a quantizer blend), yet CIEDE2000 over-reports them at 3.62 > 3.0:
+# the concrete corpus instance of the design-doc caveat that CIEDE2000 over-reports near
+# black. The guard's CTA/action scoping — not the 3.0 value — is what keeps them merged.
+_TW_NAVY_A = "#020618"
+_TW_NAVY_B = "#030712"
+
+
+def test_near_black_guard_overreports_tailwind_navy_pair() -> None:
+    # The predicate alone DOES flag the pair distinct: dE2000 3.62 clears the 3.0 threshold
+    # even though the two are an OKLab-near, equal-lightness quantizer blend of one navy
+    # surface. This pins the known over-report so a future threshold change is a conscious one.
+    a, b = _color(_TW_NAVY_A), _color(_TW_NAVY_B)
+    assert delta_e(a, b) <= MAX_CLUSTER_MERGE_DELTA_E  # OKLab: one color
+    assert abs(a.lightness - b.lightness) < 0.01  # equal lightness: the diff is a faint tint
+    assert ciede2000(a, b) > NEAR_BLACK_MERGE_MAX_DE2000  # ...yet CIEDE2000 over-reports
+    assert _is_distinct_near_black_pair(a, b)
+
+
+def test_near_black_overreport_pair_still_merges_without_cta_mass() -> None:
+    # End-to-end safety net: despite the over-report above, two tailwind-navy screenshot bins
+    # carrying no CTA/action mass still MERGE into one surface cluster. The CTA/action scoping
+    # (not the threshold value) is what contains the over-report on real page/surface colors.
+    harvest = _harvest(
+        [
+            ScreenshotBin(color=_color(_TW_NAVY_B), area_fraction=0.6),
+            ScreenshotBin(color=_color(_TW_NAVY_A), area_fraction=0.4),
+        ]
+    )
+    clusters = build_inventory(harvest, [])
+    assert len(clusters) == 1
+    assert clusters[0].member_count == 2
+    assert clusters[0].color.hex == _TW_NAVY_B  # max-area member wins
