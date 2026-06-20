@@ -852,6 +852,15 @@ class RoleEvidence(BaseModel):
         le=1.0,
         examples=[0.31],
     )
+    components: dict[ComponentType, float] = Field(
+        default_factory=dict,
+        description=(
+            "Raw summed component mass that contributed this color to this role: which "
+            "[`ComponentType`][colorsense.ComponentType]s routed mass here (un-normalized). The "
+            "detection stage normalizes these to ~1.0 per slot for the output models."
+        ),
+        examples=[{"cta_bg": 1.4}],
+    )
     streams: tuple[EvidenceStream, ...] = Field(
         default=(),
         description=(

@@ -306,19 +306,24 @@ def _nearest_mergeable_near_white_entry(
 class _Entry:
     """A mutable working color entry: a color, its area weight and its raw vote mass.
 
-    ``role_instances`` is an additional, defaulted field used only by the successor fusion
-    module (`colorsense.palette.fusion`): it records the per-instance salience sigma_i routed
-    to this entry, keyed by usage role. `build_inventory` never reads or writes it, so its
-    presence is invisible to the shipping inventory path.
+    ``role_instances`` and ``role_components`` are additional, defaulted fields used only by
+    the successor fusion module (`colorsense.palette.fusion`): ``role_instances`` records the
+    per-instance salience sigma_i routed to this entry keyed by usage role, and
+    ``role_components`` records the raw summed component mass (``mass * weight``) routed to
+    this entry, keyed by usage role then component type. `build_inventory` never reads or
+    writes either, so their presence is invisible to the shipping inventory path.
     """
 
-    __slots__ = ("area_weight", "color", "role_instances", "vote_mass")
+    __slots__ = ("area_weight", "color", "role_components", "role_instances", "vote_mass")
 
     def __init__(self, color: Color, area_weight: float) -> None:
         self.color = color
         self.area_weight = area_weight
         self.vote_mass: dict[ComponentType, float] = defaultdict(float)
         self.role_instances: dict[UsageRole, list[float]] = defaultdict(list)
+        self.role_components: dict[UsageRole, dict[ComponentType, float]] = defaultdict(
+            lambda: defaultdict(float)
+        )
 
 
 def _find(parent: list[int], i: int) -> int:

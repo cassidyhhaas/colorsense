@@ -312,17 +312,32 @@ def build_evidence(
                         sigma = role_mass * pi_i * weight
                         target.role_instances[role].append(sigma)
 
+                    # Accumulate the raw component mass that routed to each role (the public
+                    # diagnostic carried onto RoleEvidence.components). Mirrors the vote-mass
+                    # accumulation above but bucketed per role: each routed component's
+                    # ``mass * weight`` is added under the role it maps to.
+                    for component, mass in route_mass.items():
+                        component_role = USAGE_ROLE_BY_COMPONENT_TYPE.get(component)
+                        if component_role is not None:
+                            target.role_components[component_role][component] += mass * weight
+
     records: list[RoleEvidence] = []
     for family in (PropertyFamily.BACKGROUND, PropertyFamily.TEXT, PropertyFamily.BORDER):
         for group in _cluster_groups(pools[family], family):
             representative = _group_representative(group, family)
             area = sum(entry.area_weight for entry in group)
 
-            # Collect, per role, every member instance salience.
+            # Collect, per role, every member instance salience and the summed component mass.
             saliences_by_role: dict[UsageRole, list[float]] = defaultdict(list)
+            components_by_role: dict[UsageRole, dict[ComponentType, float]] = defaultdict(
+                lambda: defaultdict(float)
+            )
             for entry in group:
                 for role, saliences in entry.role_instances.items():
                     saliences_by_role[role].extend(saliences)
+                for role, component_mass in entry.role_components.items():
+                    for component, mass in component_mass.items():
+                        components_by_role[role][component] += mass
 
             for role, saliences in saliences_by_role.items():
                 # Drop exact zeros so a phantom instance never pads the distribution, then sort
@@ -343,6 +358,11 @@ def build_evidence(
                         role=role,
                         instance_saliences=instance_saliences,
                         area=area,
+                        components={
+                            component: mass
+                            for component, mass in components_by_role.get(role, {}).items()
+                            if mass > 0.0
+                        },
                         streams=tuple(streams),
                     )
                 )
