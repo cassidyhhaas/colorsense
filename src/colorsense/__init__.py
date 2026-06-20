@@ -6,15 +6,15 @@ to call [`analyze`][colorsense.analyze] and to consume its typed result is re-ex
 `colorsense.models`, but importing from the package root is preferred; internal modules
 (e.g. ``colorsense.pipeline``) and the assembly models are not part of the public surface.
 
-Entry point
------------
+The entry point:
+
 * [`analyze`][colorsense.analyze] — the one-call **async** pipeline: ``result = await
   analyze(url)``.
 * The ``colorsense`` console script (`colorsense.cli`) wraps it for the command
   line — a convenience entry point; its symbols are not re-exported here.
 
-Result & contracts
-------------------
+The result and its contracts:
+
 * [`AnalysisResult`][colorsense.AnalysisResult] — the typed result, with
   [`RunMetadata`][colorsense.RunMetadata] provenance.
 * [`ThemePalette`][colorsense.ThemePalette] — everything derived per theme. Its **canonical
@@ -36,8 +36,8 @@ Result & contracts
   [`TokenSemanticRole`][colorsense.TokenSemanticRole] — the enums that key the result (e.g.
   ``usage.mapping[UsageRole.CTA]``).
 
-Inputs & policy
----------------
+Inputs and policy:
+
 * [`LIGHT_AND_DARK`][colorsense.LIGHT_AND_DARK] / [`DEFAULT_VIEWPORT`][colorsense.DEFAULT_VIEWPORT]
   — presets for the ``themes`` and ``viewport`` arguments (the default is light only).
 * [`Config`][colorsense.Config] / [`load_default_config`][colorsense.load_default_config] /

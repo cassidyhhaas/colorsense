@@ -2,8 +2,8 @@
 
 The palette stages repeatedly answer the same shape of question — "is any candidate
 color within ΔE radius *r* of this target?" / "which candidate is nearest within *r*?"
-— and historically each site re-implemented the loop inline, which let the tie-break and
-first-vs-nearest semantics drift apart silently. This module centralizes those loops.
+This module is the single home for those radius-join loops, so their metric and
+tie-break semantics stay identical across every call site.
 
 Matching metric
 ---------------
@@ -16,9 +16,9 @@ radius constants themselves stay at the call sites, tuned to this OKLab scale.
 
 Tie-break semantics
 -------------------
-`nearest_within` reproduces the historical inline ``<=`` convention exactly: the running
-best distance starts at the radius (so a candidate exactly at the radius matches), and the
-comparison is ``<=``, so among candidates at the minimal distance the **last** one wins.
+`nearest_within` uses a ``<=`` comparison against a running best that starts at the radius,
+so a candidate exactly at the radius matches and, among candidates at the minimal distance,
+the **last** one wins.
 Callers that need to filter the candidate set (and recover the original index) should
 pre-filter into a list of ``(original_index, value)`` pairs and remap the returned index.
 """

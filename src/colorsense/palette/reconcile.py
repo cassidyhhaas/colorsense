@@ -135,12 +135,19 @@ class _IntentGroup:
 
 
 def _group_by_color(eligible: list[ClassifiedToken]) -> list[_IntentGroup]:
-    r"""Fold ``eligible`` tokens into `_IntentGroup`\ s by nearest color.
+    """Fold ``eligible`` tokens into `_IntentGroup` objects by nearest color.
 
     Tokens are processed sorted by ``record.name`` for determinism; a token joins an
     existing group when within `MAX_TOKEN_MERGE_DELTA_E` of the group's color, else starts a
-    new group anchored on its own resolved color. Callers must pre-filter to tokens
-    with a resolved color.
+    new group anchored on its own resolved color.
+
+    Args:
+        eligible: Classified tokens to group; callers must pre-filter to tokens with a
+            resolved color.
+
+    Returns:
+        One `_IntentGroup` per distinct (approximate) color.
+
     """
     groups: list[_IntentGroup] = []
     for token in sorted(eligible, key=lambda t: t.record.name):
@@ -162,6 +169,13 @@ def _aggregate_intent(tokens: list[ClassifiedToken]) -> list[_IntentGroup]:
     these are the tokens that can shape pooling. Relational and (excluded) status tokens
     carry empty usage intent by construction and are handled separately in divergence
     (`_aggregate_relational`, and the all-resolved-colors membership test).
+
+    Args:
+        tokens: All classified tokens for the site.
+
+    Returns:
+        One `_IntentGroup` per distinct color among the pooling-eligible tokens.
+
     """
     return _group_by_color(
         [t for t in tokens if t.record.resolved is not None and len(t.usage_intent) > 0]
@@ -176,6 +190,14 @@ def _aggregate_relational(tokens: list[ClassifiedToken]) -> list[_IntentGroup]:
     and never shape pooling — but they are direct author intent (`HIGH_INTENT_ORIGINS`)
     and must still be able to raise declared-but-unused. The empty-usage-intent filter keeps a
     (hand-constructed) intent-bearing relational token from being reported twice.
+
+    Args:
+        tokens: All classified tokens for the site.
+
+    Returns:
+        One `_IntentGroup` per distinct color among the resolved relational tokens that
+        carry no usage intent.
+
     """
     return _group_by_color(
         [
@@ -189,7 +211,15 @@ def _aggregate_relational(tokens: list[ClassifiedToken]) -> list[_IntentGroup]:
 
 
 def _clamp_alpha(alpha: float) -> float:
-    """Clamp ``alpha`` into ``[0, 1]`` (out-of-range values are silently clamped)."""
+    """Clamp ``alpha`` into ``[0, 1]``.
+
+    Args:
+        alpha: The intent-vs-usage pooling weight (may be out of range).
+
+    Returns:
+        ``alpha`` clamped to ``[0, 1]``; out-of-range values are silently clamped.
+
+    """
     if alpha < 0.0:
         return 0.0
     if alpha > 1.0:
@@ -207,19 +237,27 @@ def reconcile(
     """Fuse declared intent (``tokens``) with measured ``usage`` by log-linear pooling.
 
     The pipeline is aggregation (`_aggregate_intent`) → per-role pooling
-    (`_pool_role`) → divergence (`_build_divergence`).
+    (`_pool_role`) → divergence (`_build_divergence`). The posterior universe is the
+    measured usage entries, so every posterior entry carries its measured entry's ``area``
+    and non-empty ``components``; a declared color with no measured match never appears in
+    the posterior and is reported via divergence instead.
 
-    Returns a posterior [`UsagePalette`][colorsense.UsagePalette] and a deterministic list of
-    [`DivergenceItem`][colorsense.DivergenceItem]. ``alpha`` weights intent vs. usage and is clamped
-    to ``[0, 1]``. The posterior universe is the measured usage entries, so every posterior entry
-    carries its measured entry's ``area`` and non-empty ``components``; a declared color with no
-    measured match never appears in the posterior and is reported via divergence instead.
+    Args:
+        usage: The measured role-keyed usage projection from `build_usage`.
+        tokens: All classified declared tokens for the site.
+        alpha: Weight on declared intent vs. measured usage, clamped to ``[0, 1]``
+            (``0`` → pure usage, ``1`` → pure intent).
+        measured_colors: When given, the FULL measured color inventory (every cluster
+            color, pre-prune) used for the declared-but-unused membership test. ``usage``
+            entries are post-prune, so testing against them alone would report a declared
+            color that genuinely rendered — just below every role's prune threshold — as
+            "unused in render". ``None`` falls back to the usage entries (all colors that
+            survived pruning).
 
-    ``measured_colors``, when given, is the FULL measured color inventory (every cluster
-    color, pre-prune) used for the declared-but-unused membership test: ``usage`` entries
-    are post-prune, so testing against them alone would report a declared color that
-    genuinely rendered — just below every role's prune threshold — as "unused in
-    render". ``None`` falls back to the usage entries (all colors that survived pruning).
+    Returns:
+        The posterior [`UsagePalette`][colorsense.UsagePalette] and a deterministic list of
+        [`DivergenceItem`][colorsense.DivergenceItem].
+
     """
     alpha = _clamp_alpha(alpha)
     groups = _aggregate_intent(tokens)
@@ -238,8 +276,12 @@ def reconcile(
 class _PoolCandidate:
     """One measured usage entry in a role's pooling universe.
 
-    Carries its matched declared-intent share (``0.0`` when no declared group is within
-    `MAX_MEASURED_MATCH_DELTA_E`).
+    Attributes:
+        measured: The measured usage entry being pooled.
+        p_usage: Its measured in-role probability.
+        p_intent: Its matched declared-intent share (``0.0`` when no declared group is
+            within `MAX_MEASURED_MATCH_DELTA_E`).
+
     """
 
     measured: UsageEntry
@@ -264,6 +306,19 @@ def _pool_role(
     mode for unmeasured roles: with zero measurement the posterior collapses to
     ``intent**alpha``, a near-uniform spread where everything survives pruning; see
     docs/how-it-works.md.)
+
+    Args:
+        role: The usage role to pool.
+        usage: The measured role-keyed usage projection.
+        groups: The declared-intent color groups (parallel to ``intents``).
+        intents: Each group's normalized per-role intent distribution (parallel to
+            ``groups``).
+        alpha: The intent-vs-usage pooling weight, already clamped to ``[0, 1]``.
+
+    Returns:
+        The pooled, pruned, renormalized `UsageEntry` list for the role, sorted by
+        ``(-probability, hex)``; ``[]`` when the role has no measured entries.
+
     """
     usage_entries = usage.mapping.get(role, ())
     if not usage_entries:
@@ -339,6 +394,19 @@ def _build_divergence(
     The "unused in render" membership test prefers ``measured_colors`` (the pre-prune
     inventory — see `reconcile`) so a sub-threshold-but-rendered declared color is not
     misreported as unused.
+
+    Args:
+        usage: The measured role-keyed usage projection.
+        tokens: All classified declared tokens for the site.
+        groups: The declared-intent color groups (parallel to ``intents``).
+        intents: Each group's normalized per-role intent distribution (parallel to
+            ``groups``).
+        measured_colors: The full pre-prune measured inventory for the membership test,
+            or ``None`` to fall back to the post-prune ``usage`` colors.
+
+    Returns:
+        The divergence items, sorted by ``(note, hex)``.
+
     """
     usage_colors: list[Color] = (
         list(measured_colors)

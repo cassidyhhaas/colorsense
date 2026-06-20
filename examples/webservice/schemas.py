@@ -76,6 +76,13 @@ def shape_response(result: AnalysisResult) -> AnalyzeResponse:
     valuable to library consumers, noise to a palette API. Keep hex/probability/area per
     entry for the role-keyed usage view, plus the color-keyed index trimmed to
     hex/prominence/area and its usage-role slots.
+
+    Args:
+        result: The full analysis result to trim.
+
+    Returns:
+        The trimmed per-theme response payload.
+
     """
     themes = {
         theme.value: ThemeOut(

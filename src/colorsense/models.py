@@ -3,55 +3,7 @@
 These models are the single shared-contract surface for the pipeline. This file is
 **frozen** by design: downstream code must not modify it. A change to a contract here
 must be made centrally and re-validated against every dependent module, never patched
-locally by a consumer. (Most recent central change:
-``HarvestedElement`` gained ``effective_bg: Color | None = None`` and
-``effective_bg_from_clickable: bool = False`` — the element's *composited* background
-(the first fully-opaque ``background-color`` found walking the element and its ancestors
-to the document root) and whether the ancestor that contributed it is itself
-clickable/button-styled. They give downstream classification the theme/contrast-relative
-context an inline element's own (usually transparent) ``bg`` lacks — distinguishing a
-genuine inline link, whose text sits on a passive page/section surface, from a CTA-button
-*label*, whose text sits on the button's own interactive fill. Both mirror the
-``has_text``/``input_type`` precedent (defaulted, the DOM harvester always sets them;
-``effective_bg`` is ``None`` only when no opaque background exists up the chain) and were
-re-validated against ``harvest.dom``, ``classify.components``, and every test constructing
-``HarvestedElement``. Previous central change: the **usage-role payload redesign** —
-the old 4-value ``UsageCategory`` (surface/text/interactive/border) was deleted and
-replaced by the 8-value developer-facing ``UsageRole``
-(page/surface/banner/cta/action/text/link/border), plus a first-class ``PropertyFamily``
-(background/text/border) rollup axis and the code-level ``UsageRole.property_family`` mapping.
-The result
-tree gained a **color-keyed canonical index** (``ColorUsage`` carrying ``Usage`` slots and
-an overall ``prominence``) alongside the re-keyed role-keyed projection (``UsagePalette``
-of ``UsageEntry``). The legacy 60/30/10 view (``RoleResults``/``Composition`` plus its
-``fit_score`` and the ``PaletteRole``/``PaletteCandidate`` taxonomy) was **dropped
-entirely**: it is a consumer-side re-categorization, not the library's job, and keeping it
-let 60/30/10-shaped logic leak into the primary views — so the response now focuses on the
-color-keyed index and the role-keyed projection. ``ThemePalette`` now carries
-``colors``/``usage``/``divergence``/``tokens``; ``DivergenceItem`` re-keyed its
-``category: UsageCategory`` field to ``role: UsageRole`` — re-validated against
-``pipeline``, ``cli``, ``classify.tokens``, ``config``, ``palette.usage``,
-``palette.reconcile``, and the ``examples`` package.
-Previous central change: ``HarvestedElement`` gained
-``input_type: str | None = None`` — the lowercased ``type`` attribute of an ``<input>``
-element, ``None`` for non-inputs and for inputs with no/empty ``type`` attribute; mirrors
-the ``has_box_shadow``/``has_text`` precedent (defaulted, the DOM harvester always sets
-it) — re-validated against ``harvest.dom``, ``classify.components``, and every test
-constructing ``HarvestedElement``. Previous central change: ``HarvestedElement`` gained
-``has_text: bool = False`` — true iff the element has a direct child text node with
-non-whitespace content; mirrors the ``has_box_shadow`` precedent (default ``False``, the
-DOM harvester always sets it) — re-validated against ``harvest.dom``,
-``classify.components``, and every test constructing ``HarvestedElement``. Previous
-central change: the usage-keyed palette redesign —
-``UsageCategory``/``UsageEntry``/``UsagePalette``/``DesignToken`` added, ``ThemePalette``
-gained ``usage``/``fit_score``/``divergence``/``tokens``, ``DivergenceItem`` re-keyed to
-``UsageCategory``, ``PaletteCandidate.evidence`` and ``AnalysisResult``'s
-``fit_score``/``divergence``/``tokens``/``status_colors`` removed,
-``RunMetadata.single_theme`` removed, ``ClassifiedToken``/``TokenRecord`` made
-internal-only and ``ComponentType`` made public — re-validated against ``pipeline``,
-``cli``, ``classify.tokens``, ``classify.components``, ``palette.inventory``,
-``palette.usage``, ``palette.roles``, ``palette.reconcile``, and the ``harvest``
-package.)
+locally by a consumer.
 
 Value objects (``Color``, ``BoundingBox``, ``Viewport``) are immutable. The **public result tree**
 reachable from [`AnalysisResult`][colorsense.AnalysisResult] is also immutable: every output model
@@ -113,8 +65,12 @@ class PropertyFamily(StrEnum):
 
     Coarser than [`UsageRole`][colorsense.UsageRole]: every role belongs to exactly one
     family (the mapping is [`UsageRole.property_family`][colorsense.UsageRole.property_family]).
-    ``background`` covers ``background-color`` / ``background-image``, ``text`` covers
-    ``color``, and ``border`` covers ``border-color``.
+
+    Attributes:
+        BACKGROUND: ``background-color`` / ``background-image`` fills.
+        TEXT: The ``color`` property (typography).
+        BORDER: The ``border-color`` property.
+
     """
 
     BACKGROUND = "background"
@@ -130,16 +86,18 @@ class UsageRole(StrEnum):
     [`Usage`][colorsense.Usage] slot of the color-keyed index. It splits the two axes the
     old 4-value usage taxonomy conflated — *which CSS property paints the color* (the
     [`PropertyFamily`][colorsense.PropertyFamily] rollup) versus *what kind of element it
-    is* — so that, e.g., link text and CTA button backgrounds no longer share one slot:
+    is* — so that, e.g., link text and CTA button backgrounds no longer share one slot.
 
-    * ``page`` — the base canvas (the page background).
-    * ``surface`` — raised content backgrounds: cards, modals, hero, inputs.
-    * ``banner`` — chrome-bar backgrounds: header, nav, footer.
-    * ``cta`` — the primary action background (CTA buttons).
-    * ``action`` — secondary action backgrounds: secondary buttons, badges.
-    * ``text`` — body/heading typography at every layer.
-    * ``link`` — link color (typography of anchors).
-    * ``border`` — borders and dividers.
+    Attributes:
+        PAGE: The base canvas (the page background).
+        SURFACE: Raised content backgrounds: cards, modals, hero, inputs.
+        BANNER: Chrome-bar backgrounds: header, nav, footer.
+        CTA: The primary action background (CTA buttons).
+        ACTION: Secondary action backgrounds: secondary buttons, badges.
+        TEXT: Body/heading typography at every layer.
+        LINK: Link color (typography of anchors).
+        BORDER: Borders and dividers.
+
     """
 
     PAGE = "page"
@@ -162,6 +120,12 @@ class UsageRole(StrEnum):
         (``page``/``surface``/``banner``/``cta``/``action``) by a background property. ``link``
         is a text role even though it names an interactive element, because a link's painted
         color is its typography color, not its (usually transparent) background.
+
+        Returns:
+            [`PropertyFamily.TEXT`][colorsense.PropertyFamily] for ``text``/``link``,
+            [`PropertyFamily.BORDER`][colorsense.PropertyFamily] for ``border``, and
+            [`PropertyFamily.BACKGROUND`][colorsense.PropertyFamily] for every other role.
+
         """
         if self in (UsageRole.TEXT, UsageRole.LINK):
             return PropertyFamily.TEXT
@@ -171,7 +135,23 @@ class UsageRole(StrEnum):
 
 
 class TokenSemanticRole(StrEnum):
-    """Semantic role inferred for a declared design token (CSS custom property)."""
+    """Semantic role inferred for a declared design token (CSS custom property).
+
+    Attributes:
+        BRAND_PRIMARY: Primary brand color.
+        BRAND_SECONDARY: Secondary brand color.
+        BRAND_ACCENT: Accent brand color.
+        INTERACTIVE: Interactive-element color (links, controls).
+        SURFACE_BASE: Base page/surface background.
+        SURFACE_RAISED: Raised surface background (cards, modals).
+        TEXT_BODY: Body text color.
+        NEUTRAL: Neutral/gray with no specific role.
+        BORDER: Border/divider color.
+        TEXT_ON: Foreground meant to sit on a colored fill (an "on" color).
+        STATUS: Status color (success/warning/error/info).
+        IGNORE: Not a meaningful palette token (filtered out).
+
+    """
 
     BRAND_PRIMARY = "brand_primary"
     BRAND_SECONDARY = "brand_secondary"
@@ -194,6 +174,30 @@ class ComponentType(StrEnum):
     [`Usage`][colorsense.Usage]``.components`` on the color-keyed index and
     [`UsageEntry`][colorsense.UsageEntry]``.components`` on the role-keyed projection —
     naming which component types contributed a color to a usage role.
+
+    Attributes:
+        PAGE_BG: Page background.
+        PAGE_TEXT: Page body text.
+        HEADER_BG: Header background.
+        HEADER_TEXT: Header text.
+        NAV_BG: Nav background.
+        NAV_TEXT: Nav text.
+        FOOTER_BG: Footer background.
+        FOOTER_TEXT: Footer text.
+        HERO_BG: Hero background.
+        HERO_TEXT: Hero text.
+        CARD_BG: Card background.
+        CARD_TEXT: Card text.
+        CTA_BG: Primary call-to-action button background.
+        CTA_TEXT: Primary call-to-action button text/label.
+        LINK: Hyperlink text color.
+        BUTTON_SECONDARY: Secondary button background.
+        MODAL_BG: Modal/dialog background.
+        INPUT_BG: Form input background.
+        BORDER: Border/divider color.
+        BADGE: Badge/chip/pill background.
+        THIRD_PARTY: Color from an embedded third-party widget.
+
     """
 
     PAGE_BG = "page_bg"
@@ -235,6 +239,12 @@ class ComponentType(StrEnum):
         per-family attribution (``palette/inventory.py``). The two partitions MUST stay
         identical, so both read this one property — it lives here in the shared-contracts module
         so neither importer creates a cross-layer dependency.
+
+        Returns:
+            [`PropertyFamily.TEXT`][colorsense.PropertyFamily] for ``*_text`` components and
+            ``link``, [`PropertyFamily.BORDER`][colorsense.PropertyFamily] for ``border``, and
+            [`PropertyFamily.BACKGROUND`][colorsense.PropertyFamily] for every other component.
+
         """
         if self.value.endswith("_text") or self is ComponentType.LINK:
             return PropertyFamily.TEXT
@@ -256,6 +266,15 @@ def is_pill_shape(width: float, height: float, min_corner_radius: float) -> bool
     lives here in the shared-contracts module — like the ``property_family`` routing — so
     neither layer has to import the other (``harvest`` and ``classify`` must not depend on each
     other) and the two cannot drift out of sync.
+
+    Args:
+        width: Box width in CSS pixels.
+        height: Box height in CSS pixels.
+        min_corner_radius: Smallest of the four computed corner radii in CSS pixels.
+
+    Returns:
+        ``True`` if the box is a fully-rounded pill (excluding circles), else ``False``.
+
     """
     return height > 0.0 and min_corner_radius >= height / 2.0 and width > height
 
@@ -274,12 +293,28 @@ def is_circle_shape(width: float, height: float, min_corner_radius: float) -> bo
     the component classifier share one definition and cannot drift out of sync. The 1px
     tolerance absorbs sub-pixel layout rounding (a ``size-2.5`` dot computes to 10.0x10.0,
     but fractional widths occur) without admitting plainly non-square rects.
+
+    Args:
+        width: Box width in CSS pixels.
+        height: Box height in CSS pixels.
+        min_corner_radius: Smallest of the four computed corner radii in CSS pixels.
+
+    Returns:
+        ``True`` if the box is a fully-rounded square circle/dot (within a 1px tolerance),
+        else ``False``.
+
     """
     return height > 0.0 and min_corner_radius >= height / 2.0 and abs(width - height) <= 1.0
 
 
 class Theme(StrEnum):
-    """Color scheme a site is rendered under."""
+    """Color scheme a site is rendered under.
+
+    Attributes:
+        LIGHT: Light color scheme (the default).
+        DARK: Dark color scheme (``prefers-color-scheme: dark``).
+
+    """
 
     LIGHT = "light"
     DARK = "dark"
@@ -302,11 +337,43 @@ class Color(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    hex: str
-    lightness: float
-    chroma: float
-    hue: float
-    alpha: float = 1.0
+    hex: str = Field(
+        description=(
+            "Opaque normalized lowercase 7-char sRGB hex (``#rrggbb``); alpha is never "
+            "encoded here (it lives in ``alpha``)."
+        ),
+        pattern=r"^#[0-9a-f]{6}$",
+        examples=["#1f6feb", "#ffffff", "#0d1117"],
+    )
+    lightness: float = Field(
+        description="OKLCH lightness of the (composited) color; 0.0 is black, 1.0 is white.",
+        ge=0.0,
+        le=1.0,
+        examples=[0.62],
+    )
+    chroma: float = Field(
+        description=(
+            "OKLCH chroma (saturation) of the (composited) color; 0.0 is achromatic. "
+            "Unbounded above, though sRGB colors rarely exceed ~0.4."
+        ),
+        ge=0.0,
+        examples=[0.18],
+    )
+    hue: float = Field(
+        description=(
+            "OKLCH hue angle in degrees; achromatic colors are normalized to 0.0 (never NaN)."
+        ),
+        ge=0.0,
+        lt=360.0,
+        examples=[256.3],
+    )
+    alpha: float = Field(
+        default=1.0,
+        description="Source alpha: 0.0 is fully transparent, 1.0 is fully opaque.",
+        ge=0.0,
+        le=1.0,
+        examples=[1.0],
+    )
 
 
 class BoundingBox(BaseModel):
@@ -314,10 +381,32 @@ class BoundingBox(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    x: float
-    y: float
-    width: float
-    height: float
+    x: float = Field(
+        description=(
+            "Left edge in CSS pixels, relative to the document origin; may be negative for "
+            "elements scrolled or positioned off the left of the viewport."
+        ),
+        examples=[0.0],
+    )
+    y: float = Field(
+        description=(
+            "Top edge in CSS pixels, relative to the document origin; may be negative for "
+            "elements above the viewport."
+        ),
+        examples=[120.0],
+    )
+    width: float = Field(
+        description=(
+            "Box width in CSS pixels. Harvested element boxes are non-negative (zero-area "
+            "elements are filtered), but externally-supplied mask boxes may be degenerate, so "
+            "no lower bound is enforced here."
+        ),
+        examples=[1280.0],
+    )
+    height: float = Field(
+        description="Box height in CSS pixels (degenerate mask boxes may be non-positive).",
+        examples=[64.0],
+    )
 
 
 class Viewport(BaseModel):
@@ -325,9 +414,21 @@ class Viewport(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    width: int
-    height: int
-    device_scale_factor: float
+    width: int = Field(
+        description="Viewport width in CSS pixels.",
+        ge=1,
+        examples=[1280],
+    )
+    height: int = Field(
+        description="Viewport height in CSS pixels.",
+        ge=1,
+        examples=[800],
+    )
+    device_scale_factor: float = Field(
+        description="Device pixel ratio (DIP→raster multiplier); 1.0 is non-retina, 2.0 is retina.",
+        gt=0.0,
+        examples=[1.0],
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -344,12 +445,36 @@ class TokenRecord(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    name: str
-    raw_value: str
-    resolved: Color | None
-    scope: str
-    media: str | None = None
-    alias_target: str | None = None
+    name: str = Field(
+        description="Declared CSS custom property name, including the leading ``--``.",
+        examples=["--fgColor-default"],
+    )
+    raw_value: str = Field(
+        description="The property's declared value text, before color resolution.",
+        examples=["var(--base-color-neutral-emphasis)", "#1f6feb"],
+    )
+    resolved: Color | None = Field(
+        description="The token's value resolved to a color, or ``None`` if it is not a color.",
+    )
+    scope: str = Field(
+        description="CSS selector the declaration is scoped to (e.g. ``:root``).",
+        examples=[":root"],
+    )
+    media: str | None = Field(
+        default=None,
+        description=(
+            "Media query the declaration sits under, or ``None`` for an unconditional rule."
+        ),
+        examples=["(prefers-color-scheme: dark)"],
+    )
+    alias_target: str | None = Field(
+        default=None,
+        description=(
+            "Name of the token this one aliases via ``var(...)``, or ``None`` if the value is "
+            "not a bare alias."
+        ),
+        examples=["--base-color-neutral-emphasis"],
+    )
 
 
 class HarvestedElement(BaseModel):
@@ -387,49 +512,157 @@ class HarvestedElement(BaseModel):
     page); empty for those, and for solid-background and no-gradient elements.
     """
 
-    tag: str
-    role: str | None
-    id: str | None
-    class_tokens: list[str] = Field(default_factory=list)
-    bounding_box: BoundingBox
-    position: str
-    bg: Color | None
-    text: Color | None
-    border: Color | None
-    input_type: str | None = None
-    min_corner_radius: float = 0.0
-    bg_gradient_stops: tuple[Color, ...] = ()
-    effective_bg: Color | None = None
-    effective_bg_from_clickable: bool = False
-    has_box_shadow: bool = False
-    has_text: bool = False
-    is_iframe: bool
-    cross_origin: bool
-    shadow_host: bool
-    clickable: bool
-    has_hover_color_change: bool
-    hover_bg: Color | None
-    vendor_match: bool
-    visible: bool
-    aria_hidden: bool
+    tag: str = Field(
+        description="Lowercased HTML tag name of the element.",
+        examples=["div", "a", "button"],
+    )
+    role: str | None = Field(
+        description="The element's ARIA ``role`` attribute, or ``None`` if unset.",
+        examples=["button"],
+    )
+    id: str | None = Field(
+        description="The element's ``id`` attribute, or ``None`` if unset.",
+    )
+    class_tokens: list[str] = Field(
+        default_factory=list,
+        description="The element's ``class`` attribute split into individual tokens.",
+        examples=[["btn", "btn-primary"]],
+    )
+    bounding_box: BoundingBox = Field(
+        description="The element's layout rectangle from ``getBoundingClientRect()``.",
+    )
+    position: str = Field(
+        description="Computed CSS ``position`` value.",
+        examples=["static", "fixed", "absolute"],
+    )
+    bg: Color | None = Field(
+        description="Computed ``background-color``, or ``None`` if it paints nothing.",
+    )
+    text: Color | None = Field(
+        description="Computed text ``color``, or ``None`` if absent.",
+    )
+    border: Color | None = Field(
+        description=(
+            "Computed border color when the element paints a border (width > 0), else ``None``."
+        ),
+    )
+    input_type: str | None = Field(
+        default=None,
+        description=(
+            "Lowercased ``type`` attribute for an ``<input>`` with a non-empty type; ``None`` "
+            "for non-inputs and inputs with no declared type."
+        ),
+        examples=["text", "checkbox"],
+    )
+    min_corner_radius: float = Field(
+        default=0.0,
+        description=(
+            "Smallest of the four computed corner radii in CSS pixels (percentage radii "
+            "resolved against width); ``>= height/2`` signals a fully-rounded pill/chip."
+        ),
+        ge=0.0,
+        examples=[0.0],
+    )
+    bg_gradient_stops: tuple[Color, ...] = Field(
+        default=(),
+        description=(
+            "Opaque color stops of a gradient that fills a clickable pill (CTA); empty for "
+            "every other element."
+        ),
+    )
+    effective_bg: Color | None = Field(
+        default=None,
+        description=(
+            "First fully-opaque background found walking the element and its ancestors to the "
+            "document root; ``None`` when no opaque background exists up the chain."
+        ),
+    )
+    effective_bg_from_clickable: bool = Field(
+        default=False,
+        description=(
+            "Whether the ancestor that contributed ``effective_bg`` is itself "
+            "clickable/button-styled."
+        ),
+    )
+    has_box_shadow: bool = Field(
+        default=False,
+        description="Whether the element paints a non-``none`` ``box-shadow``.",
+    )
+    has_text: bool = Field(
+        default=False,
+        description=(
+            "Whether the element has at least one direct child text node with non-whitespace "
+            "content (descendant text does not count)."
+        ),
+    )
+    is_iframe: bool = Field(
+        description="Whether the element is an ``<iframe>``.",
+    )
+    cross_origin: bool = Field(
+        description="Whether the element is a cross-origin frame (its contents are not readable).",
+    )
+    shadow_host: bool = Field(
+        description="Whether the element hosts a shadow root.",
+    )
+    clickable: bool = Field(
+        description="Whether the element is interactive (link, button, or button-styled).",
+    )
+    has_hover_color_change: bool = Field(
+        description="Whether hovering the element changes one of its measured colors.",
+    )
+    hover_bg: Color | None = Field(
+        description="Background color measured under hover, or ``None`` if no hover change.",
+    )
+    vendor_match: bool = Field(
+        description="Whether the element matched a known third-party/vendor widget.",
+    )
+    visible: bool = Field(
+        description="Whether the element is visible (rendered and non-zero area).",
+    )
+    aria_hidden: bool = Field(
+        description="Whether the element is hidden from assistive technology (``aria-hidden``).",
+    )
 
 
 class ScreenshotBin(BaseModel):
     """A quantized screenshot color and the fraction of page area it covers."""
 
-    color: Color
-    area_fraction: float
+    color: Color = Field(
+        description="The quantized bin color.",
+    )
+    area_fraction: float = Field(
+        description="Fraction of kept (masked) page area this color covers; bins sum to ~1.0.",
+        ge=0.0,
+        le=1.0,
+        examples=[0.42],
+    )
 
 
 class Harvest(BaseModel):
     """Everything extracted from a single rendered page under one theme."""
 
-    url: str
-    theme: Theme
-    viewport: Viewport
-    tokens: list[TokenRecord] = Field(default_factory=list)
-    elements: list[HarvestedElement] = Field(default_factory=list)
-    screenshot_bins: list[ScreenshotBin] = Field(default_factory=list)
+    url: str = Field(
+        description="The analyzed page URL.",
+        examples=["https://example.com/"],
+    )
+    theme: Theme = Field(
+        description="Color scheme the page was rendered under.",
+    )
+    viewport: Viewport = Field(
+        description="Viewport the page was rendered at.",
+    )
+    tokens: list[TokenRecord] = Field(
+        default_factory=list,
+        description="Declared CSS custom properties harvested from the page.",
+    )
+    elements: list[HarvestedElement] = Field(
+        default_factory=list,
+        description="Visible DOM elements with their measured computed colors.",
+    )
+    screenshot_bins: list[ScreenshotBin] = Field(
+        default_factory=list,
+        description="Area-weighted quantized colors from the masked full-page screenshot.",
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -444,6 +677,14 @@ class TokenOrigin(StrEnum):
     scale > fallback, with alias inheritance). Reconciliation uses it to gate
     declared-but-unused divergence to high-intent tokens (``relational`` / ``name_rule``)
     only — scale members, alias followers, and fallbacks are not author intent signals.
+
+    Attributes:
+        RELATIONAL: Inferred from a relation to other tokens (highest intent).
+        NAME_RULE: Inferred from the token's name.
+        SCALE: A member of a detected color scale.
+        ALIAS: Inherited from an aliased token via ``var(...)``.
+        FALLBACK: No signal matched (lowest intent).
+
     """
 
     RELATIONAL = "relational"
@@ -463,18 +704,43 @@ class ClassifiedToken(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    record: TokenRecord
-    semantic_role: TokenSemanticRole
-    weight: float
-    usage_intent: dict[UsageRole, float] = Field(default_factory=dict)
-    origin: TokenOrigin = TokenOrigin.FALLBACK
+    record: TokenRecord = Field(
+        description="The declared token this classification describes.",
+    )
+    semantic_role: TokenSemanticRole = Field(
+        description="The semantic role inferred for the token.",
+    )
+    weight: float = Field(
+        description="Internal classification scoring weight (relative confidence/intent mass).",
+        ge=0.0,
+        examples=[1.0],
+    )
+    usage_intent: dict[UsageRole, float] = Field(
+        default_factory=dict,
+        description=(
+            "Per-[`UsageRole`][colorsense.UsageRole] intent distribution (each value in "
+            "``[0, 1]``), the token's expected usage."
+        ),
+    )
+    origin: TokenOrigin = Field(
+        default=TokenOrigin.FALLBACK,
+        description="Which classification path produced this token, used for divergence gating.",
+    )
 
 
 class ClassifiedElement(BaseModel):
     """A harvested element with a probability distribution over component types."""
 
-    element: HarvestedElement
-    component_distribution: dict[ComponentType, float] = Field(default_factory=dict)
+    element: HarvestedElement = Field(
+        description="The harvested element being classified.",
+    )
+    component_distribution: dict[ComponentType, float] = Field(
+        default_factory=dict,
+        description=(
+            "Normalized probability distribution over [`ComponentType`][colorsense.ComponentType] "
+            "(each value in ``[0, 1]``, summing to ~1.0 when non-empty)."
+        ),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -491,11 +757,33 @@ class ColorCluster(BaseModel):
     colors within a category, so both are carried.
     """
 
-    color: Color
-    area_weight: float
-    member_count: int
-    component_mix: dict[ComponentType, float] = Field(default_factory=dict)
-    component_mass: dict[ComponentType, float] = Field(default_factory=dict)
+    color: Color = Field(
+        description="The cluster's representative color.",
+    )
+    area_weight: float = Field(
+        description="Screenshot area fraction the cluster covers (raw, non-negative).",
+        ge=0.0,
+        examples=[0.31],
+    )
+    member_count: int = Field(
+        description="Number of perceptually-near colors merged into this cluster.",
+        ge=1,
+        examples=[12],
+    )
+    component_mix: dict[ComponentType, float] = Field(
+        default_factory=dict,
+        description=(
+            "Per-cluster normalized component distribution (each value in ``[0, 1]``, "
+            "summing to ~1.0 when non-empty)."
+        ),
+    )
+    component_mass: dict[ComponentType, float] = Field(
+        default_factory=dict,
+        description=(
+            "Same component sums kept raw (un-normalized vote mass), preserving cross-cluster "
+            "magnitude."
+        ),
+    )
 
 
 class Usage(BaseModel):
@@ -514,10 +802,31 @@ class Usage(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    role: UsageRole
-    property_family: PropertyFamily
-    weight: float
-    components: dict[ComponentType, float] = Field(default_factory=dict)
+    role: UsageRole = Field(
+        description="The usage role this slot describes.",
+    )
+    property_family: PropertyFamily = Field(
+        description=(
+            "Rollup family for ``role`` (denormalized — always ``role.property_family``)."
+        ),
+    )
+    weight: float = Field(
+        description=(
+            "This role's share of the color's total routed mass; a color's ``weight`` values "
+            "sum to ~1.0."
+        ),
+        ge=0.0,
+        le=1.0,
+        examples=[0.7],
+    )
+    components: dict[ComponentType, float] = Field(
+        default_factory=dict,
+        description=(
+            "Normalized evidence: which component types contributed the color to this role "
+            "(each value in ``[0, 1]``, summing to ~1.0 when non-empty)."
+        ),
+        examples=[{"card_bg": 0.7, "modal_bg": 0.3}],
+    )
 
 
 class ColorUsage(BaseModel):
@@ -534,10 +843,33 @@ class ColorUsage(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    color: Color
-    prominence: float
-    area: float
-    usages: tuple[Usage, ...] = Field(default_factory=tuple)
+    color: Color = Field(
+        description="The measured color this inventory entry describes.",
+    )
+    prominence: float = Field(
+        description=(
+            "Overall ranking signal blending area-truth (primary) with routed vote mass "
+            "(secondary); the ``colors`` tuple is sorted by it, descending."
+        ),
+        ge=0.0,
+        le=1.0,
+        examples=[0.83],
+    )
+    area: float = Field(
+        description=(
+            "Raw screenshot area fraction the color's cluster covers "
+            "(auditable, not a probability)."
+        ),
+        ge=0.0,
+        le=1.0,
+        examples=[0.31],
+    )
+    usages: tuple[Usage, ...] = Field(
+        default_factory=tuple,
+        description=(
+            "Every usage role the color appears in, most-used first (``weight`` descending)."
+        ),
+    )
 
 
 class UsageEntry(BaseModel):
@@ -552,10 +884,34 @@ class UsageEntry(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    color: Color
-    probability: float
-    area: float
-    components: dict[ComponentType, float] = Field(default_factory=dict)
+    color: Color = Field(
+        description="The color this role entry describes.",
+    )
+    probability: float = Field(
+        description=(
+            "Posterior prominence of this color within its role; entries of one role sum to ~1.0."
+        ),
+        ge=0.0,
+        le=1.0,
+        examples=[0.55],
+    )
+    area: float = Field(
+        description=(
+            "Raw screenshot area fraction the color's cluster covers "
+            "(auditable, not a probability)."
+        ),
+        ge=0.0,
+        le=1.0,
+        examples=[0.31],
+    )
+    components: dict[ComponentType, float] = Field(
+        default_factory=dict,
+        description=(
+            "Normalized evidence: which component types contributed this color to this role "
+            "(each value in ``[0, 1]``, summing to ~1.0 when non-empty)."
+        ),
+        examples=[{"card_bg": 0.7, "modal_bg": 0.3}],
+    )
 
 
 class UsagePalette(BaseModel):
@@ -569,11 +925,22 @@ class UsagePalette(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    mapping: dict[UsageRole, tuple[UsageEntry, ...]] = Field(default_factory=dict)
+    mapping: dict[UsageRole, tuple[UsageEntry, ...]] = Field(
+        default_factory=dict,
+        description=(
+            "Colors painting each [`UsageRole`][colorsense.UsageRole]; guaranteed to contain "
+            "every role (an unused role maps to ``()``)."
+        ),
+    )
 
     @model_validator(mode="after")
     def _backfill_roles(self) -> UsagePalette:
-        """Ensure every [`UsageRole`][colorsense.UsageRole] is present (``()`` if absent)."""
+        """Ensure every [`UsageRole`][colorsense.UsageRole] is present (``()`` if absent).
+
+        Returns:
+            This model, with ``mapping`` backfilled so every role is a key.
+
+        """
         # ``frozen=True`` blocks reassigning ``mapping`` itself, but the dict it points to
         # is a regular (non-deep-frozen) dict, so in-place backfill is sound.
         for role in UsageRole:
@@ -591,9 +958,16 @@ class DesignToken(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    name: str
-    color: Color
-    semantic_role: TokenSemanticRole
+    name: str = Field(
+        description="Declared property name, including the leading ``--``.",
+        examples=["--fgColor-default"],
+    )
+    color: Color = Field(
+        description="The token's value resolved in the rendered theme.",
+    )
+    semantic_role: TokenSemanticRole = Field(
+        description="The inferred semantic role for the token.",
+    )
 
 
 class DivergenceItem(BaseModel):
@@ -605,9 +979,16 @@ class DivergenceItem(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    role: UsageRole
-    color: Color
-    note: str
+    role: UsageRole = Field(
+        description="The usage role the discrepancy was found under.",
+    )
+    color: Color = Field(
+        description="The declared-but-unused or used-but-undeclared color.",
+    )
+    note: str = Field(
+        description="Human-readable explanation of the discrepancy.",
+        examples=["declared as brand_primary but not measured in use"],
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -635,11 +1016,33 @@ class ThemePalette(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    theme: Theme
-    colors: tuple[ColorUsage, ...] = Field(default_factory=tuple)
-    usage: UsagePalette
-    divergence: tuple[DivergenceItem, ...] = Field(default_factory=tuple)
-    tokens: tuple[DesignToken, ...] | None = None
+    theme: Theme = Field(
+        description="The theme this palette was derived for.",
+    )
+    colors: tuple[ColorUsage, ...] = Field(
+        default_factory=tuple,
+        description=(
+            "Canonical color-keyed index: every measured color with where it is used, ranked "
+            "by ``prominence`` (third-party-dominated colors excluded)."
+        ),
+    )
+    usage: UsagePalette = Field(
+        description=(
+            "Role-keyed projection: which colors paint each usage role "
+            "(measured pooled with token intent)."
+        ),
+    )
+    divergence: tuple[DivergenceItem, ...] = Field(
+        default_factory=tuple,
+        description="Declared-vs-measured discrepancies, keyed by usage role.",
+    )
+    tokens: tuple[DesignToken, ...] | None = Field(
+        default=None,
+        description=(
+            "Declared design tokens, opt-in: ``None`` means tokens were not requested; ``()`` "
+            "means requested but none were usable."
+        ),
+    )
 
 
 class RunMetadata(BaseModel):
@@ -652,10 +1055,27 @@ class RunMetadata(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    themes_requested: tuple[Theme, ...] = Field(default_factory=tuple)
-    themes_analyzed: tuple[Theme, ...] = Field(default_factory=tuple)
-    user_agent: str = ""
-    respect_robots: bool = True
+    themes_requested: tuple[Theme, ...] = Field(
+        default_factory=tuple,
+        description="Themes the caller requested.",
+        examples=[("light", "dark")],
+    )
+    themes_analyzed: tuple[Theme, ...] = Field(
+        default_factory=tuple,
+        description=(
+            "Themes actually analyzed; a run reduced to a single theme iff this has length 1 "
+            "(perceptually-identical later themes are collapsed away)."
+        ),
+        examples=[("light",)],
+    )
+    user_agent: str = Field(
+        default="",
+        description="User-Agent string used for fetches.",
+    )
+    respect_robots: bool = Field(
+        default=True,
+        description="Whether robots.txt was honored for this run.",
+    )
 
 
 class AnalysisResult(BaseModel):
@@ -673,8 +1093,24 @@ class AnalysisResult(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    url: str
-    viewport: Viewport
-    themes: dict[Theme, ThemePalette] = Field(default_factory=dict)
-    third_party_colors: tuple[Color, ...] = Field(default_factory=tuple)
-    metadata: RunMetadata = Field(default_factory=RunMetadata)
+    url: str = Field(
+        description="The analyzed page URL.",
+        examples=["https://example.com/"],
+    )
+    viewport: Viewport = Field(
+        description="Viewport the page was rendered at.",
+    )
+    themes: dict[Theme, ThemePalette] = Field(
+        default_factory=dict,
+        description="Per-theme analysis, keyed by [`Theme`][colorsense.Theme].",
+    )
+    third_party_colors: tuple[Color, ...] = Field(
+        default_factory=tuple,
+        description=(
+            "Colors attributed to third-party/vendor widgets, held out of the per-theme index."
+        ),
+    )
+    metadata: RunMetadata = Field(
+        default_factory=RunMetadata,
+        description="Provenance for the run (themes requested/analyzed, fetch policy).",
+    )

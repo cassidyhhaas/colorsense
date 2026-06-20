@@ -19,7 +19,13 @@ import shlex
 
 
 def allowed_hosts_from_env() -> frozenset[str] | None:
-    """Read the optional comma-separated exact-hostname allowlist; ``None`` = no allowlist."""
+    """Read the optional comma-separated exact-hostname allowlist; ``None`` = no allowlist.
+
+    Returns:
+        The lowercased exact-hostname allowlist, or ``None`` when the env var is unset
+        or empty (meaning any public host is allowed).
+
+    """
     raw = os.environ.get("COLORSENSE_ALLOWED_HOSTS", "")
     hosts = frozenset(host.strip().lower() for host in raw.split(",") if host.strip())
     return hosts or None
@@ -51,7 +57,15 @@ ANALYZE_DEADLINE_SECONDS = float(os.environ.get("COLORSENSE_DEADLINE_SECONDS", "
 
 
 def browser_args_from_env() -> tuple[str, ...]:
-    """Extra Chromium launch args from the env, shlex-split (see comment above)."""
+    """Extra Chromium launch args from the env, shlex-split (see comment above).
+
+    Returns:
+        The shlex-split extra Chromium launch args (defaulting to the 512 MB V8 heap cap).
+
+    Raises:
+        ValueError: If ``COLORSENSE_BROWSER_ARGS`` has unbalanced shell quoting.
+
+    """
     raw = os.environ.get("COLORSENSE_BROWSER_ARGS", "--js-flags=--max-old-space-size=512")
     return tuple(shlex.split(raw))
 

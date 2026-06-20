@@ -34,7 +34,12 @@ POLICY = PolitenessPolicy(
 
 
 def print_palette(result: AnalysisResult) -> None:
-    """Print the color-keyed index and the role-keyed usage view."""
+    """Print the color-keyed index and the role-keyed usage view.
+
+    Args:
+        result: The analysis result to render to stdout.
+
+    """
     print(result.url)
     for theme, palette in result.themes.items():
         print(f"  [{theme}]")
@@ -57,7 +62,12 @@ def print_palette(result: AnalysisResult) -> None:
 
 
 async def main(urls: tuple[str, ...]) -> None:
-    """Analyze each URL in turn with one shared policy and print its palette."""
+    """Analyze each URL in turn with one shared policy and print its palette.
+
+    Args:
+        urls: The URLs to analyze, in order.
+
+    """
     # Sequential on purpose: one shared policy paces and caches the fetches; analyze()
     # itself already renders a page's themes concurrently in one shared browser.
     for url in urls:

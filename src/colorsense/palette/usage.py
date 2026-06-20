@@ -19,8 +19,8 @@ Both preserve the design's actual structure: a neutral-layered design's gray
 text/border hierarchy appears directly, rather than being flattened into a coarse
 aesthetic split.
 
-Design notes
-------------
+Design notes:
+
 * The two public entry points (`build_usage`, `build_color_index`) take *only* the cluster
   list (no [`Config`][colorsense.Config]); every threshold is a documented, module-level
   **tunable** constant.
@@ -150,6 +150,14 @@ def _build_usage_role_by_component_type() -> dict[ComponentType, UsageRole]:
     A component appearing under two roles (or `COMPONENT_TYPES_BY_USAGE_ROLE` drifting from the
     taxonomy) would be a silent routing bug; the assertion turns it into a load-time
     failure. ``cta_text`` and ``third_party`` are intentionally unrouted.
+
+    Returns:
+        The component-type → usage-role mapping (the inverse of
+        `COMPONENT_TYPES_BY_USAGE_ROLE`).
+
+    Raises:
+        AssertionError: If any component type is routed to more than one usage role.
+
     """
     inverse: dict[ComponentType, UsageRole] = {}
     for role, component_types in COMPONENT_TYPES_BY_USAGE_ROLE.items():
@@ -195,6 +203,14 @@ def _split_masses_by_role(
     A color used in multiple ways (e.g. the same gray as text *and* border) correctly
     lands in multiple roles, each with its respective component masses. Components with
     no role (``cta_text``, ``third_party``) are dropped.
+
+    Args:
+        component_mass: Raw per-component vote mass for one cluster.
+
+    Returns:
+        Per-usage-role component masses; roles with no contributing component are absent
+        (zero-or-negative masses are dropped).
+
     """
     split: dict[UsageRole, dict[ComponentType, float]] = {}
     for comp, mass in component_mass.items():
@@ -215,9 +231,13 @@ def _split_masses_by_role(
 class _ScoredCluster(NamedTuple):
     """A cluster scored for one role: its prominence and the per-component masses behind it.
 
-    ``masses`` is the cluster's component masses routed to this one role (a slice of
-    `_split_masses_by_role`); ``prominence`` is the role-appropriate ranking signal
-    (screenshot area for surface roles, ``log1p`` of vote mass for element roles).
+    Attributes:
+        cluster: The scored color cluster.
+        prominence: The role-appropriate ranking signal (screenshot area for surface
+            roles, ``log1p`` of vote mass for element roles).
+        masses: The cluster's component masses routed to this one role (a slice of
+            `_split_masses_by_role`).
+
     """
 
     cluster: ColorCluster
@@ -232,15 +252,21 @@ def _build_entries(
 ) -> tuple[UsageEntry, ...]:
     """Normalize prominence scores into probabilities, prune, renormalize, and rank.
 
-    ``scored`` is the role's `_ScoredCluster` list (one per participating cluster). The
-    prune/renormalize/argmax-fallback step is the shared `prune_distribution` (which also
-    covers the all-zero-prominence background case — every score ties, so the smallest hex
-    wins outright); output is sorted by ``(-probability, hex)``.
+    The prune/renormalize/argmax-fallback step is the shared `prune_distribution` (which
+    also covers the all-zero-prominence background case — every score ties, so the
+    smallest hex wins outright).
 
-    ``exempt_by_mass`` enables the `MIN_EXEMPT_VOTE_MASS` exemption: an entry whose raw
-    in-role vote mass clears that floor survives the share prune regardless of dilution. It
-    is set only for element-color roles (where prominence is ``log1p(vote mass)``); the
-    area-ranked structural-surface roles pass it ``False`` and stay on pure share.
+    Args:
+        scored: The role's `_ScoredCluster` list (one per participating cluster).
+        exempt_by_mass: Enables the `MIN_EXEMPT_VOTE_MASS` exemption — an entry whose raw
+            in-role vote mass clears that floor survives the share prune regardless of
+            dilution. Set only for element-color roles (where prominence is
+            ``log1p(vote mass)``); the area-ranked structural-surface roles pass ``False``
+            and stay on pure share.
+
+    Returns:
+        The surviving `UsageEntry` colors, sorted by ``(-probability, hex)``.
+
     """
     mass_exempt = (
         [sum(s.masses.values()) >= MIN_EXEMPT_VOTE_MASS for s in scored] if exempt_by_mass else None
@@ -283,9 +309,16 @@ def build_usage(clusters: list[ColorCluster]) -> UsagePalette:
     for every other (element-color) role (see `_AREA_RANKED_ROLES`) — normalized to
     probabilities, pruned below `MIN_PROBABILITY_SHARE` (an element-color entry whose raw vote
     mass clears `MIN_EXEMPT_VOTE_MASS` is exempt — see that constant), and ranked by
-    ``(-probability, hex)``. The argmax is kept if pruning empties the role. A role
-    with no mass anywhere maps to ``()`` (the [`UsagePalette`][colorsense.UsagePalette]
-    validator backfills it). An empty cluster list yields an empty (all-``()``) palette.
+    ``(-probability, hex)``. The argmax is kept if pruning empties the role.
+
+    Args:
+        clusters: The fused color inventory from `build_inventory`.
+
+    Returns:
+        The measured role-keyed usage projection. A role with no mass anywhere maps to
+        ``()`` (the [`UsagePalette`][colorsense.UsagePalette] validator backfills it); an
+        empty cluster list yields an empty (all-``()``) palette.
+
     """
     per_role: dict[UsageRole, list[_ScoredCluster]]
     per_role = {role: [] for role in UsageRole}
@@ -317,9 +350,12 @@ def build_usage(clusters: list[ColorCluster]) -> UsagePalette:
 class _MergedColor(NamedTuple):
     """One color for the index: all clusters sharing its exact hex fused into one record.
 
-    ``role_masses`` is the merged per-role component masses, ``total_mass`` their summed
-    routed vote mass (precomputed for the log1p normalization), and ``area`` the largest
-    member ``area_weight``.
+    Attributes:
+        color: The shared representative color.
+        area: The largest member ``area_weight``.
+        role_masses: The merged per-role component masses.
+        total_mass: The summed routed vote mass (precomputed for the log1p normalization).
+
     """
 
     color: Color
@@ -332,8 +368,15 @@ def _blend_prominence(area_norm: float, mass_norm: float) -> float:
     """Blend normalized area and normalized vote mass into the overall ranking signal.
 
     A convex combination (see `PROMINENCE_AREA_WEIGHT`): monotonic in both inputs,
-    weighted toward area. Both inputs are pre-normalized to ``[0, 1]`` across the cluster
-    set by the caller, so the result is in ``[0, 1]``.
+    weighted toward area.
+
+    Args:
+        area_norm: The cluster's area, pre-normalized to ``[0, 1]`` across the set.
+        mass_norm: The cluster's log1p-damped vote mass, pre-normalized to ``[0, 1]``.
+
+    Returns:
+        The blended prominence in ``[0, 1]``.
+
     """
     return PROMINENCE_AREA_WEIGHT * area_norm + (1.0 - PROMINENCE_AREA_WEIGHT) * mass_norm
 
@@ -343,9 +386,17 @@ def _build_color_usages(
 ) -> tuple[Usage, ...]:
     """Build a color's `Usage` slots from its per-role component masses.
 
-    ``weight`` is the role's total mass over the color's total routed mass (so the slots'
-    weights sum to ~1.0); ``components`` is the per-ComponentType normalized mass within
-    the role. Sorted by ``(-weight, role.value)``.
+    Each slot's ``weight`` is the role's total mass over the color's total routed mass
+    (so the slots' weights sum to ~1.0); its ``components`` is the per-ComponentType
+    normalized mass within the role.
+
+    Args:
+        role_masses: The color's per-role component masses.
+
+    Returns:
+        One `Usage` slot per role the color appears in, sorted by ``(-weight, role.value)``;
+        ``()`` when the color has no routed mass.
+
     """
     total_routed = sum(sum(masses.values()) for masses in role_masses.values())
     if total_routed <= 0.0:
@@ -386,8 +437,15 @@ def build_color_index(clusters: list[ColorCluster]) -> tuple[ColorUsage, ...]:
     ``AnalysisResult.third_party_colors``), emit a [`ColorUsage`][colorsense.ColorUsage]
     whose ``usages`` describe every role the color appears in and whose ``prominence``
     blends the group's normalized area with its normalized (``log1p``-damped) total routed
-    vote mass (see `_blend_prominence`). The tuple is sorted by ``prominence`` descending,
-    ``hex`` tiebreak. An empty cluster list yields ``()``.
+    vote mass (see `_blend_prominence`).
+
+    Args:
+        clusters: The fused, family-segregated color inventory from `build_inventory`.
+
+    Returns:
+        The canonical color-keyed index, sorted by ``prominence`` descending with a
+        ``hex`` tiebreak. An empty cluster list yields ``()``.
+
     """
     # Group clusters by exact hex (first-seen order over the inventory's stable sort),
     # merging same-hex clusters across families into one color.

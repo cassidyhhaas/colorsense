@@ -61,7 +61,20 @@ def _version_callback(value: bool) -> None:
 
 
 def _parse_viewport(value: str, scale: float) -> Viewport:
-    """Parse ``WxH`` (plus the ``--scale`` factor) into a [`Viewport`][colorsense.Viewport]."""
+    """Parse ``WxH`` (plus the ``--scale`` factor) into a [`Viewport`][colorsense.Viewport].
+
+    Args:
+        value: The ``WIDTHxHEIGHT`` string (e.g. ``"1280x800"``).
+        scale: The device scale factor from ``--scale``.
+
+    Returns:
+        The parsed `Viewport`.
+
+    Raises:
+        typer.BadParameter: On a malformed ``WxH`` string, non-positive dimensions, or a
+            non-positive scale.
+
+    """
     width_text, sep, height_text = value.lower().partition("x")
     if not sep or not width_text.strip().isdigit() or not height_text.strip().isdigit():
         raise typer.BadParameter(
@@ -80,6 +93,10 @@ def _print_palette(result: AnalysisResult) -> None:
 
     Covers the color-keyed index, the role-keyed usage view, divergence, and
     (when requested) the declared tokens.
+
+    Args:
+        result: The analysis result to render to stdout.
+
     """
     typer.echo(result.url)
     for theme, palette in result.themes.items():
@@ -130,7 +147,23 @@ async def _run(
     include_tokens: bool,
     json_output: bool,
 ) -> int:
-    """Analyze ``urls`` sequentially through one shared policy; return the failure count."""
+    """Analyze ``urls`` sequentially through one shared policy; return the failure count.
+
+    Args:
+        urls: The URLs to analyze, in order.
+        policy: The shared fetch policy applied to every URL.
+        themes: The themes to render per URL.
+        viewport: The viewport to render at.
+        config_path: Optional palette config YAML overriding the bundled default.
+        max_total_seconds: Optional overall per-URL deadline.
+        browser_args: Extra Chromium launch arguments, passed verbatim.
+        include_tokens: Whether to include the declared design tokens per theme.
+        json_output: When ``True``, emit JSON to stdout instead of the human summary.
+
+    Returns:
+        The number of URLs that failed (the process exit-status driver).
+
+    """
     failures = 0
     results: list[AnalysisResult] = []
     for url in urls:

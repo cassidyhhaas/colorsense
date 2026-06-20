@@ -21,7 +21,21 @@ router = APIRouter()
 
 @router.post("/analyze")
 async def analyze_palette(request: AnalyzeRequest) -> AnalyzeResponse:
-    """Analyze one untrusted URL and return its trimmed palette."""
+    """Analyze one untrusted URL and return its trimmed palette.
+
+    Args:
+        request: The POST body carrying the user-supplied URL to analyze.
+
+    Returns:
+        The trimmed per-theme palette for the analyzed URL.
+
+    Raises:
+        HTTPException: 400 if the URL fails pre-call validation or uses an
+            unsupported scheme, 403 if the target's robots.txt disallows the fetch,
+            502 if the page fails to load or render, or 504 if the analysis exceeds
+            the configured deadline.
+
+    """
     # Pre-call validation first: nothing browser-shaped happens for input that fails the
     # cheap checks (scheme, userinfo, allowlist). Address-level checks are NOT done here —
     # they would only cover the initial URL; the policy's request_filter covers every hop.

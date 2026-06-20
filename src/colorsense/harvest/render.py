@@ -69,6 +69,15 @@ async def evaluate_request_filter(request_filter: RequestFilter, url: str) -> bo
     this function rather than being coerced to ``False``. That is fail-closed too — the
     caller never receives a ``True`` it didn't earn, and the request never proceeds; see
     `_route_handler` for what that means on the browser route path.
+
+    Args:
+        request_filter: The egress predicate to apply (sync or async).
+        url: The request URL to vet.
+
+    Returns:
+        ``True`` to permit the request, ``False`` to abort it — including whenever the
+        predicate raises (fail closed).
+
     """
     try:
         verdict = request_filter(url)
@@ -234,9 +243,17 @@ def normalize_browser_args(browser_args: Sequence[str]) -> tuple[str, ...]:
     passed **verbatim** to Chromium — no attempt is made to validate or allowlist the flags
     themselves. Only obviously broken input is rejected, *before* any browser is involved:
 
-    * a bare string (almost certainly a forgotten one-tuple: pass ``("--flag",)``, not
-      ``"--flag"``) raises `TypeError`;
-    * any non-string entry raises `TypeError`.
+    Args:
+        browser_args: Extra Chromium launch arguments, passed verbatim.
+
+    Returns:
+        The arguments as a tuple.
+
+    Raises:
+        TypeError: If ``browser_args`` is a bare string (almost certainly a forgotten
+            one-tuple: pass ``("--flag",)``, not ``"--flag"``), or if any entry is not a
+            string.
+
     """
     if isinstance(browser_args, str):
         raise TypeError(
@@ -273,6 +290,14 @@ def _route_handler(
     proceeds — and the situation only arises at teardown/cancellation, when the Playwright
     ``Route`` may no longer be safely usable anyway, which is why the handler deliberately
     does NOT catch the cancellation to abort the route.
+
+    Args:
+        request_filter: The egress predicate every routed request is vetted against.
+
+    Returns:
+        An async ``context.route`` handler that continues permitted requests and aborts
+        the rest.
+
     """
 
     async def handle(route: Route) -> None:
@@ -297,6 +322,10 @@ async def _refuse_web_socket(ws_route: WebSocketRoute) -> None:
     extraction, mirroring the data:/blob: abort rationale in ``net/guard.py``.
     Installed (against all URLs) only when a ``request_filter`` is configured, alongside
     the HTTP route.
+
+    Args:
+        ws_route: The intercepted WebSocket route to close without connecting.
+
     """
     await ws_route.close()
 
@@ -318,16 +347,16 @@ class SharedBrowser:
             await harvest_page(url, Theme.LIGHT, config, viewport, browser=shared)
             await harvest_page(url, Theme.DARK, config, viewport, browser=shared)
 
-    Parameters
-    ----------
-    browser_args:
-        Extra command-line arguments appended to the library's own launch arguments and
-        passed **verbatim** to the Chromium launch (the library does not validate or
-        allowlist the flags — mechanism, not policy). Canonical use case:
-        ``("--js-flags=--max-old-space-size=512",)`` caps each renderer process's V8 heap
-        at 512 MB. Note this bounds the **JS heap only**, not total renderer memory —
-        container/cgroup limits remain the enforceable bound (see ``SECURITY.md`` §2).
-        Non-string entries (or a bare string) raise `TypeError` at construction.
+    Args:
+        browser_args: Extra command-line arguments appended to the library's own launch
+            arguments and passed **verbatim** to the Chromium launch (the library does not
+            validate or allowlist the flags — mechanism, not policy). Canonical use case:
+            ``("--js-flags=--max-old-space-size=512",)`` caps each renderer process's V8
+            heap at 512 MB. Note this bounds the **JS heap only**, not total renderer
+            memory — container/cgroup limits remain the enforceable bound (see
+            ``SECURITY.md`` §2). Non-string entries (or a bare string) raise `TypeError`
+            at construction.
+
     """
 
     def __init__(self, *, browser_args: Sequence[str] = ()) -> None:
@@ -372,8 +401,15 @@ class SharedBrowser:
 
         Launch failures propagate as Playwright errors (callers such as
         `harvest_page` wrap them into the public
-        [`RenderError`][colorsense.RenderError]). After teardown this raises
-        `RuntimeError` rather than silently relaunching a browser nobody closes.
+        [`RenderError`][colorsense.RenderError]).
+
+        Returns:
+            The shared `Browser`, launched on first use and reused thereafter.
+
+        Raises:
+            RuntimeError: If called after teardown, rather than silently relaunching a
+                browser nobody closes.
+
         """
         async with self._lock:
             if self._closed:
@@ -397,39 +433,39 @@ class RenderSession:
             page = session.page  # run module JS against it
             consent = session.consent_boxes
 
-    Parameters
-    ----------
-    user_agent:
-        When not ``None``, the User-Agent string set on the browser context, so page
-        navigations identify themselves with it instead of the stock headless-Chromium UA.
-        The politeness layer passes its configured wire UA through here. ``None`` (the
-        default) keeps Playwright's stock UA.
-    request_filter:
-        When not ``None``, a [`RequestFilter`][colorsense.RequestFilter] — a sync or async predicate
-        over every request URL the browser makes (the navigation and all sub-resources), installed
-        as a ``context.route`` interceptor: requests for which it returns ``False`` — or for which
-        it raises (fail closed) — are aborted. A sync predicate runs inline on the event loop and
-        must not block; an async one is awaited. WebSocket handshakes are not routable through
-        ``context.route``, so when a filter is configured they are refused outright rather than
-        filtered (see `_refuse_web_socket`); service workers are blocked unconditionally at
-        context creation. ``None`` (the default) installs no routes at all, so the unfiltered
-        path has zero interception overhead.
-    browser:
-        When not ``None``, an externally owned `Browser` the
-        session opens its context inside instead of launching its own Chromium (the per-
-        session knobs — color scheme, viewport, UA, egress route — all live on the
-        `BrowserContext`, so sessions sharing one browser stay
-        fully isolated). The session then owns only its context: teardown closes the
-        context but never the external browser, whose lifecycle stays with the caller
-        (see `SharedBrowser`). ``None`` (the default) launches and tears down a
-        dedicated Playwright + Chromium pair as before.
-    browser_args:
-        Extra Chromium launch arguments for the session's **own** launch, appended to the
-        library's launch arguments and passed verbatim (see
-        `SharedBrowser` for the canonical V8-heap-cap use case and caveats). Launch
-        arguments only exist at launch time, so combining a non-empty ``browser_args`` with
-        an external ``browser`` (already launched, by someone else) raises
-        `ValueError` — put the args on the `SharedBrowser` instead.
+    Args:
+        theme: The color scheme the context renders under.
+        viewport: The viewport (size and device scale factor) to render at.
+        user_agent: When not ``None``, the User-Agent string set on the browser context,
+            so page navigations identify themselves with it instead of the stock
+            headless-Chromium UA. The politeness layer passes its configured wire UA
+            through here. ``None`` (the default) keeps Playwright's stock UA.
+        request_filter: When not ``None``, a
+            [`RequestFilter`][colorsense.RequestFilter] — a sync or async predicate over
+            every request URL the browser makes (the navigation and all sub-resources),
+            installed as a ``context.route`` interceptor: requests for which it returns
+            ``False`` — or for which it raises (fail closed) — are aborted. A sync
+            predicate runs inline on the event loop and must not block; an async one is
+            awaited. WebSocket handshakes are not routable through ``context.route``, so
+            when a filter is configured they are refused outright rather than filtered (see
+            `_refuse_web_socket`); service workers are blocked unconditionally at context
+            creation. ``None`` (the default) installs no routes at all, so the unfiltered
+            path has zero interception overhead.
+        browser: When not ``None``, an externally owned `Browser` the session opens its
+            context inside instead of launching its own Chromium (the per-session knobs —
+            color scheme, viewport, UA, egress route — all live on the `BrowserContext`,
+            so sessions sharing one browser stay fully isolated). The session then owns
+            only its context: teardown closes the context but never the external browser,
+            whose lifecycle stays with the caller (see `SharedBrowser`). ``None`` (the
+            default) launches and tears down a dedicated Playwright + Chromium pair as
+            before.
+        browser_args: Extra Chromium launch arguments for the session's **own** launch,
+            appended to the library's launch arguments and passed verbatim (see
+            `SharedBrowser` for the canonical V8-heap-cap use case and caveats). Launch
+            arguments only exist at launch time, so combining a non-empty ``browser_args``
+            with an external ``browser`` (already launched, by someone else) raises
+            `ValueError` — put the args on the `SharedBrowser` instead.
+
     """
 
     def __init__(
@@ -574,12 +610,13 @@ class RenderSession:
         is guarded
         with a timeout/try-except so ``file://`` pages that never report idle do not hang.
 
-        Parameters
-        ----------
-        nav_timeout_ms:
-            Per-navigation timeout in milliseconds, passed explicitly to ``page.goto``.
-            Defaults to `DEFAULT_NAV_TIMEOUT_MS`. Exceeding it raises a Playwright
-            ``TimeoutError`` (wrapped as [`RenderError`][colorsense.RenderError] upstream).
+        Args:
+            url: The URL to navigate to.
+            nav_timeout_ms: Per-navigation timeout in milliseconds, passed explicitly to
+                ``page.goto``. Defaults to `DEFAULT_NAV_TIMEOUT_MS`. Exceeding it raises a
+                Playwright ``TimeoutError`` (wrapped as
+                [`RenderError`][colorsense.RenderError] upstream).
+
         """
         page = self.page
         await page.goto(url, wait_until="load", timeout=nav_timeout_ms)
@@ -614,6 +651,10 @@ class RenderSession:
         then warn and render without the CSS (computed colors may be read mid-transition —
         degraded, but far better than failing the whole analysis). A double insert from a
         retry after a spurious rejection is harmless: the CSS is idempotent.
+
+        Args:
+            page: The live Playwright page to inject the disabling CSS into.
+
         """
         last_error: Exception | None = None
         for _attempt in range(2):
@@ -634,7 +675,12 @@ class RenderSession:
         )
 
     async def _detect_consent_boxes(self) -> list[BoundingBox]:
-        """Return bounding boxes of consent/overlay banners without clicking them."""
+        """Detect consent/overlay banners without clicking them.
+
+        Returns:
+            Bounding boxes (CSS px) of detected banners; empty on a best-effort failure.
+
+        """
         return await self._detect_boxes(_CONSENT_BOXES_JS)
 
     async def _detect_media_boxes(self) -> list[BoundingBox]:
@@ -646,6 +692,11 @@ class RenderSession:
         page declaring hundreds of thousands of ``<img>`` tags cannot blow up the mask loop.
         See `_MEDIA_BOXES_JS` for the maskable-vs-kept predicate (gradients and inline
         ``<svg>`` are deliberately kept).
+
+        Returns:
+            Bounding boxes (CSS px) of detected raster media, capped at `_MAX_MEDIA_BOXES`;
+            empty on a best-effort failure.
+
         """
         return await self._detect_boxes(_MEDIA_BOXES_JS, _MAX_MEDIA_BOXES)
 
@@ -657,6 +708,14 @@ class RenderSession:
         non-list result, or a hostile page returning malformed entries — degrades to an
         empty list rather than raising, since masking is a refinement, not a hard
         requirement of the harvest.
+
+        Args:
+            js: The in-page JS payload returning a list of ``{x, y, w, h}`` dicts.
+            *args: Extra arguments forwarded to ``page.evaluate`` (e.g. a box cap).
+
+        Returns:
+            The parsed `BoundingBox` objects, or an empty list on any best-effort failure.
+
         """
         try:
             raw = await asyncio.wait_for(self.page.evaluate(js, *args), _BEST_EFFORT_TIMEOUT_S)

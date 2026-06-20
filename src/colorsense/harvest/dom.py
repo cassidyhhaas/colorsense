@@ -65,6 +65,16 @@ def _is_interactive_pill(
     dividers (not clickable). The pill test is the shared `models.is_pill_shape` (all four
     corners fully rounded, wider than tall), which `classify.components._is_pill` also uses,
     so the two share one definition rather than being hand-synced.
+
+    Args:
+        clickable: Whether the element renders as interactive (the `clickable` rule).
+        min_corner_radius: Smallest of the four computed corner radii in CSS pixels.
+        width: Element width in CSS pixels.
+        height: Element height in CSS pixels.
+
+    Returns:
+        ``True`` when the element is both clickable and a pill shape, else ``False``.
+
     """
     return clickable and is_pill_shape(width, height, min_corner_radius)
 
@@ -81,6 +91,16 @@ def _gradient_fill_stops(bg: Color | None, raw_colors: Sequence[str]) -> tuple[C
     rather than a fill. A merely *partly*-transparent stop is kept; the inventory later
     scales its mass by its alpha. Stops are deduped by opaque hex (a repeated brand color
     counts once) and capped at `_MAX_GRADIENT_STOPS`.
+
+    Args:
+        bg: The element's computed ``background-color`` (a solid fill suppresses the
+            gradient).
+        raw_colors: The gradient's raw computed color stops, in source order.
+
+    Returns:
+        The opaque fill stops as a tuple, or ``()`` when the gradient is decorative rather
+        than a fill.
+
     """
     if is_painting(bg):
         return ()
@@ -346,7 +366,17 @@ _COLLECT_DOM_JS: str = r"""
 
 
 def _vendor_match(blob: str, vendor_prefixes: Sequence[str]) -> bool:
-    """Return ``True`` if the lowercased id/class/src blob contains any vendor prefix."""
+    """Whether the element's id/class/src blob matches any configured vendor prefix.
+
+    Args:
+        blob: The lowercased id/class/src blob exported from the in-page JS.
+        vendor_prefixes: Vendor prefixes from the component-classifier config.
+
+    Returns:
+        ``True`` if the blob contains any vendor prefix (case-insensitively), else
+        ``False``.
+
+    """
     return any(prefix.lower() in blob for prefix in vendor_prefixes)
 
 
@@ -356,10 +386,16 @@ async def harvest_elements(
 ) -> tuple[list[HarvestedElement], list[str]]:
     """Harvest visible DOM elements with computed colors and structural flags.
 
-    Returns the elements alongside a parallel list of CSS selectors (one per element) so
-    pseudo-state probing can re-target the same elements. A selector is either uniquely
-    resolvable to its element or the empty string (probing skips it); the payload is
-    capped at `_MAX_HARVEST_ELEMENTS` records (largest area wins).
+    Args:
+        page: The live Playwright page to walk.
+        vendor_prefixes: Vendor prefixes used to flag third-party elements.
+
+    Returns:
+        The harvested elements alongside a parallel list of CSS selectors (one per
+        element) so pseudo-state probing can re-target the same elements. A selector is
+        either uniquely resolvable to its element or the empty string (probing skips it);
+        the payload is capped at `_MAX_HARVEST_ELEMENTS` records (largest area wins).
+
     """
     # ``wait_for`` bounds the evaluate (Playwright gives it no timeout of its own); a
     # wedged renderer surfaces as TimeoutError -> RenderError instead of a hung harvest.
