@@ -428,7 +428,7 @@ def _build_divergence(
             continue
         if not group.high_intent:
             continue
-        if group.token_weight < DECLARE_MIN_WEIGHT:
+        if group.token_weight <= DECLARE_MIN_WEIGHT:
             continue
         if matches_any_usage(group.color):
             continue
@@ -446,7 +446,7 @@ def _build_divergence(
     # ``--on-primary`` deserves a report. They are foreground/text colors by
     # construction (the ``text_on`` channel), so the item is attributed to ``text``.
     for group in _aggregate_relational(tokens):
-        if group.token_weight < DECLARE_MIN_WEIGHT:
+        if group.token_weight <= DECLARE_MIN_WEIGHT:
             continue
         if matches_any_usage(group.color):
             continue
