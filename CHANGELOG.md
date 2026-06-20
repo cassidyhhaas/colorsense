@@ -7,6 +7,18 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- **`HarvestedElement` again loads harvests serialized under the legacy `rect` key.** The
+  `rect` → `bounding_box` rename had no read compatibility, so frozen harvest corpora captured
+  before it (notably the offline `eval/harvests/*.json.gz` quality panel) failed to validate.
+  The field now accepts both `bounding_box` and `rect` on input via a validation alias
+  (`populate_by_name` keeps the canonical name usable in code); serialization is unchanged.
+- **Zero-weight fallback tokens no longer surface as declared-but-unused divergences.** The
+  `DECLARE_MIN_WEIGHT` gate in `palette/reconcile.py` tested `token_weight < 0.0`, which can
+  never fire (weights are non-negative; the fallback rung emits weight 0). Corrected to
+  `<= 0.0` so weightless fallbacks are excluded as intended.
+
 ### Changed
 
 - **Every field on the `models.py` contracts now carries an explicit `pydantic.Field`** with a

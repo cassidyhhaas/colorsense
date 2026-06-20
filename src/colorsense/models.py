@@ -34,7 +34,7 @@ from __future__ import annotations
 
 from enum import StrEnum
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
 
 __all__ = [
     "AnalysisResult",
@@ -480,6 +480,11 @@ class TokenRecord(BaseModel):
 class HarvestedElement(BaseModel):
     """A rendered DOM element and its measured computed colors + structural flags.
 
+    The ``bounding_box`` field also accepts the legacy key ``rect`` on input (with
+    ``populate_by_name`` so the canonical name still works in code). This keeps frozen
+    harvest corpora captured before the ``rect`` -> ``bounding_box`` rename loadable —
+    notably the ``eval/harvests/*.json.gz`` panel, which cannot be regenerated offline.
+
     ``border`` is the computed border color only when the element actually paints a
     border (border width > 0); borderless elements carry ``None``. ``has_box_shadow``
     defaults to ``False`` (mirroring ``has_hover_color_change``'s harvest-time default)
@@ -512,6 +517,8 @@ class HarvestedElement(BaseModel):
     page); empty for those, and for solid-background and no-gradient elements.
     """
 
+    model_config = ConfigDict(populate_by_name=True)
+
     tag: str = Field(
         description="Lowercased HTML tag name of the element.",
         examples=["div", "a", "button"],
@@ -529,6 +536,7 @@ class HarvestedElement(BaseModel):
         examples=[["btn", "btn-primary"]],
     )
     bounding_box: BoundingBox = Field(
+        validation_alias=AliasChoices("bounding_box", "rect"),
         description="The element's layout rectangle from ``getBoundingClientRect()``.",
     )
     position: str = Field(
