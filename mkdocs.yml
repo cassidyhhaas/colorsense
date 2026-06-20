@@ -51,6 +51,9 @@ plugins:
             show_signature_annotations: true
             signature_crossrefs: true
             filters: ["!^_"]
+            extensions:
+              - griffe_pydantic:
+                  schema: true
 
 markdown_extensions:
   - admonition
