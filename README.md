@@ -98,10 +98,12 @@ The default output is a human-readable palette summary; `--json` emits the full
   re-parsing hex strings.
 - **Light and dark themes** — opt into dark mode rendering; near-identical light/dark
   renders collapse to a single reported theme.
-- **Declared vs. rendered reconciliation** — declared design-token intent is pooled into
-  the usage view, with per-theme `divergence` reporting high-intent tokens declared but
-  unused and prominent colors used but undeclared. Opt into the token list itself with
-  `analyze(url, include_tokens=True)`.
+- **Token-aware detection** — declared design-token intent acts as a bounded re-ranker
+  (never a veto or gate): each measured color's salience is multiplied by f = 1 + α·q_intent,
+  so a declared color can be rescued at the margin or settle a tie, but an undeclared but
+  heavily-used color is never suppressed. Per-theme `divergence` reports high-intent tokens
+  declared but unused and prominent rendered colors used but undeclared. Opt into the
+  token list itself with `analyze(url, include_tokens=True)`.
 - **Status-color filtering** — success/error/warning tokens are detected and kept out of
   the palette views, so an error banner never masquerades as a brand accent (they surface
   in the opt-in token list with `semantic_role=status`).

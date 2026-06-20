@@ -11,7 +11,7 @@
         "surface",
         "text"
       ],
-      "top_color_top_role": "surface",
+      "top_color_top_role": "text",
       "top_usage_colors": {
         "border": [
           "#d1d9e0"

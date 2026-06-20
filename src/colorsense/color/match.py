@@ -9,8 +9,8 @@ Matching metric
 ---------------
 The matching metric is **OKLab ``deltaEOK``** (`colorsense.color.primitives.delta_e`),
 baked in here as THE convention for radius joins. This is deliberate and measured: OKLab
-outperforms CIEDE2000 on the full eval panel for these usage/reconcile join loops, so the
-helper hard-codes it rather than taking a pluggable metric. (CIEDE2000 remains the right
+outperforms CIEDE2000 on the full eval panel for these inventory/fusion/detect join loops,
+so the helper hard-codes it rather than taking a pluggable metric. (CIEDE2000 remains the right
 choice for color *identity* questions — see `primitives.ciede2000` — but not here.) The
 radius constants themselves stay at the call sites, tuned to this OKLab scale.
 

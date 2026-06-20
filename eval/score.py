@@ -71,9 +71,8 @@ from colorsense.models import (
     UsageRole,
     Viewport,
 )
-from colorsense.palette.inventory import build_inventory
-from colorsense.palette.reconcile import reconcile
-from colorsense.palette.usage import build_color_index, build_usage
+from colorsense.palette.detect import detect
+from colorsense.palette.fusion import build_evidence
 
 EVAL_DIR = Path(__file__).parent
 HARVEST_DIR = EVAL_DIR / "harvests"
@@ -252,16 +251,12 @@ def _run_pipeline(harvest: Harvest, viewport: Viewport) -> ThemePalette:
     config = load_default_config()
     classified_tokens = classify_tokens(harvest.tokens, config)
     classified_elements = classify_components(harvest.elements, config, viewport)
-    clusters = build_inventory(harvest, classified_elements)
-    color_index = build_color_index(clusters)
-    measured_usage = build_usage(clusters)
-    posterior_usage, divergence = reconcile(
-        measured_usage, classified_tokens, measured_colors=[c.color for c in clusters]
-    )
+    evidence = build_evidence(harvest, classified_elements, config, viewport)
+    usage, color_index, divergence = detect(evidence, classified_tokens, config)
     return ThemePalette(
         theme=harvest.theme,
         colors=color_index,
-        usage=posterior_usage,
+        usage=usage,
         divergence=tuple(divergence),
         tokens=None,
     )

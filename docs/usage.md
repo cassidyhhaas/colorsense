@@ -129,6 +129,9 @@ excluded (they ride on `result.third_party_colors`). Each `ColorUsage` carries:
 
 - **`color`** — a `Color` (sRGB `hex` plus cached OKLCH coordinates).
 - **`prominence`** — the overall ranking signal in `[0, 1]`; the list is sorted by it.
+  Computed as the color's maximum role-salience across all roles it was detected in,
+  globally normalized. Dominant backgrounds rank high; zero-area brand accents that
+  strongly fill their role are not buried.
 - **`area`** — the raw screenshot area fraction the color covers.
 - **`usages`** — a tuple of `Usage` slots, most-used first, each with the `role`
   ([`UsageRole`](#usage-the-role-keyed-projection)), its `property_family`
@@ -143,22 +146,24 @@ for color in result.themes[theme].colors:
 
 #### `usage` — the role-keyed projection
 
-What colors paint each usage role, reconciled against the site's declared design tokens.
-Walk `palette.usage.mapping[role]` — the mapping always contains every `UsageRole`
-(`page`, `surface`, `banner`, `cta`, `action`, `text`, `link`, `border`), with an empty
-tuple when nothing was detected. Every entry is backed by **measured** rendering evidence:
-the reconciled view only ever re-weights colors that actually rendered in the role, so a
-declared color with no measured match never appears as an entry (such intent can surface
-through `divergence`, provided the declared color isn't perceptually matched by measured
-usage in some other role), and `components` is never empty. Each `UsageEntry` carries:
+What colors paint each usage role, with declared design-token intent used as a bounded
+re-ranker. Walk `palette.usage.mapping[role]` — the mapping always contains every
+`UsageRole` (`page`, `surface`, `banner`, `cta`, `action`, `text`, `link`, `border`),
+with an empty tuple when nothing was detected. Every entry is backed by **measured**
+rendering evidence: a declared color with no measured salience above the detection floor
+never appears as an entry (such intent can surface through `divergence`, provided the
+declared color isn't perceptually matched by measured usage in some other role), and
+`components` is never empty. Each `UsageEntry` carries:
 
 - **`color`** — a `Color`: an sRGB `hex` string plus cached **OKLCH** coordinates
   (`lightness`, `chroma`, `hue`) of the composited color, and the source `alpha`. `hex` is
   what you paint with; the OKLCH coordinates make it easy to derive your own theme-matched
   colors — sort by perceptual lightness, build accessible tints/shades, or compute
   contrast — without re-parsing the hex.
-- **`probability`** — the color's prominence within its role (entries of one role
-  sum to ~1); entries rank by it, so `entries[0]` is the best pick.
+- **`probability`** — the color's display-normalized salience share within its role
+  (entries of one role sum to ~1); entries rank by it, so `entries[0]` is the best pick.
+  This is a relative ranking signal — a higher value means stronger measured presence
+  plus any intent boost — not a calibrated probability.
 - **`area`** — the raw fraction of page (screenshot) area the color covers, an auditable
   signal alongside the probability.
 - **`components`** — normalized evidence: which `ComponentType`s contributed the color to

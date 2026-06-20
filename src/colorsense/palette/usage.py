@@ -1,126 +1,36 @@
-"""Usage assembly: the canonical color-keyed index and the role-keyed projection.
+"""Role/component taxonomy: the shared mapping from component types to usage roles.
 
-Two complementary views are built here from the same `ColorCluster` list:
+This module defines the authoritative usage-role → component-type collapse used across
+the pipeline. It is a fixed code-level convention — not a tunable weight — exactly like
+the inventory's component → property-family routing (``ComponentType.property_family``):
+it describes what the taxonomy *means*.
 
-* **The role-keyed projection** ([`UsagePalette`][colorsense.UsagePalette], via
-  `build_usage`): per [`UsageRole`][colorsense.UsageRole]
-  (page/surface/banner/cta/action/text/link/border), a probability-ranked list of
-  [`UsageEntry`][colorsense.UsageEntry] colors. Answers "which colors paint each role?".
-* **The canonical color-keyed index** (a [`ColorUsage`][colorsense.ColorUsage] tuple, via
-  `build_color_index`): per measured color, every role it appears in plus an overall
-  ``prominence`` ranking. Answers "how is each color used?". Because the inventory now
-  clusters per [`PropertyFamily`][colorsense.PropertyFamily], one hex can appear as
-  several clusters (e.g. the same gray as a text cluster *and* a border cluster, or
-  ``#ffffff`` as both a background bin and a text color); `build_color_index` groups
-  clusters by **exact** ``Color.hex`` so each distinct color surfaces once, listing all
-  its usages.
+``cta_text`` and ``third_party`` are deliberately absent from every role:
+``cta_text`` is the button-label sink (a button-styled element's text color is part of
+the CTA, not an independent palette role, so it carries no usage); ``third_party`` flows
+to ``AnalysisResult.third_party_colors`` instead. The inverse
+(`USAGE_ROLE_BY_COMPONENT_TYPE`) is built once and asserted to partition every routed
+component to exactly one role.
 
-Both preserve the design's actual structure: a neutral-layered design's gray
-text/border hierarchy appears directly, rather than being flattened into a coarse
-aesthetic split.
+The role-keyed and color-keyed **views** of the palette (previously ``build_usage`` and
+``build_color_index``) now live in `palette/detect.py`, produced directly from the
+per-``(color, role)`` evidence records that `palette/fusion.py` accumulates.
 
-Design notes:
-
-* The two public entry points (`build_usage`, `build_color_index`) take *only* the cluster
-  list (no [`Config`][colorsense.Config]); every threshold is a documented, module-level
-  **tunable** constant.
-* `COMPONENT_TYPES_BY_USAGE_ROLE` — the usage-role → component-type collapse — is a fixed code-level
-  convention, exactly like the inventory's component → property-family routing
-  (``ComponentType.property_family``): it describes what the taxonomy *means*, not a tunable
-  weight,
-  so it lives in code rather than the YAML config. ``cta_text`` and ``third_party`` are
-  deliberately absent from every role: ``cta_text`` is the button-LABEL sink — a
-  button-styled element's text color is part of the CTA, not an independent palette role,
-  so it carries no usage (the classifier routes button-styled anchors' labels there); and
-  ``third_party`` flows to ``AnalysisResult.third_party_colors`` instead. The inverse
-  (`USAGE_ROLE_BY_COMPONENT_TYPE`) is built once and asserted to partition every routed component to
-  exactly one role.
-* Role-keyed prominence is scored differently for *surface* roles vs *element* roles,
-  deliberately (see `_AREA_RANKED_ROLES`; worked examples in docs/how-it-works.md):
-    - **structural-surface roles** (page/surface/banner): prominence ∝ the cluster's
-      screenshot ``area_weight``. Area is authoritative for surfaces — vote counts would let
-      repeated small elements outrank the page background — and a dominant-area cluster
-      anchors the ranking, so the result is both correct and stable across OSes. Only
-      clusters with nonzero vote mass in the role participate; a zero-area cluster scores 0
-      and prunes naturally unless it is the argmax fallback.
-    - **element-color roles** (cta/action/text/link/border): prominence ∝ ``log1p`` of the
-      cluster's raw in-role vote mass. These paint negligible screenshot area, so area would
-      be wrong twice over — it buries the brand color under the page background (an
-      area-ranked ``cta`` collapses to the page-background hex) and it is OS-non-deterministic
-      (which near-zero-area button forms its own median-cut bin flips across OSes). Vote mass
-      is DOM-derived, so it ranks the real element color — and the primary button over the
-      secondary — correctly and stably. ``log1p`` damps it **sub-linearly** so that element
-      *count* (e.g. many neutral "ghost" buttons) cannot drown a high-confidence brand color;
-      it is monotonic, so within-role *ordering* is unchanged and only the shares compress.
-* Color-keyed ``prominence`` blends area-truth and vote mass (see `_blend_prominence` /
-  `PROMINENCE_AREA_WEIGHT`): a first-cut heuristic, monotonic in both, weighted toward
-  area so dominant backgrounds rank high while zero-area brand accents are not buried.
-* Everything is deterministic: iteration is over stable sort orders, ties are broken by
-  color ``hex`` (smallest wins — the shared `prune_distribution` convention), and there
-  is no randomness.
+The split into surface-ranked vs element-ranked scoring signal is captured in
+`_AREA_RANKED_ROLES`: page/surface/banner are scored by screenshot area; every other role
+is scored by peak-instance salience (see `detect.py`).
 """
 
 from __future__ import annotations
 
-import math
-from typing import NamedTuple
-
 from colorsense.models import (
-    Color,
-    ColorCluster,
-    ColorUsage,
     ComponentType,
-    Usage,
-    UsageEntry,
-    UsagePalette,
     UsageRole,
 )
-from colorsense.palette._pruning import prune_distribution
 
-__all__ = ["COMPONENT_TYPES_BY_USAGE_ROLE", "build_color_index", "build_usage"]
+__all__ = ["COMPONENT_TYPES_BY_USAGE_ROLE"]
 
 CT = ComponentType
-
-# ---------------------------------------------------------------------------
-# Tunable constants (all module-level and documented).
-# ---------------------------------------------------------------------------
-
-# Entries below this within-role probability share are pruned (then survivors are
-# renormalized). If pruning would empty a non-empty role, the argmax entry is kept
-# at probability 1.0 instead (the shared `prune_distribution` step, used by every
-# palette ranking stage). This is the *relative* prune gate; `MIN_EXEMPT_VOTE_MASS`
-# below is the *absolute* escape hatch from it.
-MIN_PROBABILITY_SHARE: float = 0.02
-
-# Absolute vote-mass floor that EXEMPTS an element-color entry from the
-# `MIN_PROBABILITY_SHARE` prune. That share gate is a *relative* threshold, so its meaning
-# drifts with the number of entries: when a role accumulates many colors (e.g. the
-# near-white text guard in `inventory.py` splits one near-white cluster into several),
-# every entry's share shrinks and a genuine low-mass color can fall below
-# `MIN_PROBABILITY_SHARE` purely from dilution, not from being any less real. An entry
-# carrying at least this much raw in-role vote mass has independent, DOM-derived evidence
-# that it genuinely paints the role, so it survives the share prune regardless. Calibrated
-# on the quality eval panel: the lowest-mass genuine element-role color (resend's
-# ``#46fea5`` neon-green accent text, mass 0.89) sits just above the noise floor below it
-# (mass 0.76), so ~one element's worth of confident vote separates real low-mass colors
-# from dilution-pruned artifacts. Applies ONLY to element-color roles, where prominence is
-# ``log1p(vote mass)`` — the area-ranked structural-surface roles (see `_AREA_RANKED_ROLES`)
-# rank by screenshot area and are deliberately left on pure share (mass is not their
-# ranking signal).
-MIN_EXEMPT_VOTE_MASS: float = 0.8
-
-# Color-keyed prominence blend weight on the (normalized) area term; the remaining
-# ``1 - PROMINENCE_AREA_WEIGHT`` weights the (normalized, log1p-damped) total routed vote
-# mass. Both terms are normalized to [0, 1] across the cluster set before blending, so the
-# blend is a convex combination in [0, 1]. Tilted toward area so the dominant page/surface
-# backgrounds top the ranking, while the vote-mass term keeps zero-area brand accents
-# (CTA/link colors, which carry mass but no screenshot area) from sinking to the bottom.
-#
-# FIRST-CUT HEURISTIC: this constant (and the blend shape) is an initial, intentionally
-# simple monotonic choice — it has NOT been empirically tuned the way the role taxonomy
-# was against the 12-site corpus. Revisit it with measured data; the intent (area primary,
-# vote mass secondary, both monotonic) is the contract, not the exact 0.7.
-PROMINENCE_AREA_WEIGHT: float = 0.7
 
 # Usage-role -> component-type collapse. A fixed code-level convention (see the module
 # docstring). ``cta_text`` and ``third_party`` map to NO role and are excluded from both
@@ -174,322 +84,13 @@ def _build_usage_role_by_component_type() -> dict[ComponentType, UsageRole]:
 USAGE_ROLE_BY_COMPONENT_TYPE: dict[ComponentType, UsageRole] = _build_usage_role_by_component_type()
 
 # Roles whose role-keyed prominence is the cluster's screenshot ``area_weight`` rather than
-# its vote mass. These name the structural *surfaces* of a layout — the page canvas, raised
-# surfaces (cards/modals/hero/inputs), and header/nav/footer bands — where the right question
-# is "how much screen does this color cover" and a dominant-area cluster anchors the ranking,
-# so area is both correct and stable.
+# its peak-instance salience. These name the structural *surfaces* of a layout — the page canvas,
+# raised surfaces (cards/modals/hero/inputs), and header/nav/footer bands — where the right
+# question is "how much screen does this color cover".
 #
 # Every OTHER role names an *element* color (cta/action button fills, text, links, borders),
-# ranked by ``log1p`` of in-role vote mass. These paint negligible screenshot area, so area
-# is the wrong signal twice over: (1) it is **incorrect** — the page background out-areas
-# every button, so an area-ranked ``cta``/``action`` collapses to the page-background hex and
-# the actual brand CTA color is pruned below `MIN_PROBABILITY_SHARE`; (2) it is
-# **non-deterministic** — which of two near-zero-area buttons forms its own median-cut
-# screenshot bin (→ area) flips across OSes on identical input. Vote mass is DOM-derived
-# (computed colors, not rendered pixels), so it is stable across OSes and ranks the brand CTA
-# — and the primary button over the secondary — correctly. (Note the cta/action *property
-# family* stays ``background`` for the ``UsageRole.property_family`` rollups and the
-# color-keyed index; only their *ranking signal* differs.)
+# ranked by peak-instance salience (see `detect.py`). These paint negligible screenshot area,
+# so area is the wrong signal.
 _AREA_RANKED_ROLES: frozenset[UsageRole] = frozenset(
     {UsageRole.PAGE, UsageRole.SURFACE, UsageRole.BANNER}
 )
-
-
-def _split_masses_by_role(
-    component_mass: dict[ComponentType, float],
-) -> dict[UsageRole, dict[ComponentType, float]]:
-    """Bucket a raw ``component_mass`` mapping into per-usage-role component masses.
-
-    A color used in multiple ways (e.g. the same gray as text *and* border) correctly
-    lands in multiple roles, each with its respective component masses. Components with
-    no role (``cta_text``, ``third_party``) are dropped.
-
-    Args:
-        component_mass: Raw per-component vote mass for one cluster.
-
-    Returns:
-        Per-usage-role component masses; roles with no contributing component are absent
-        (zero-or-negative masses are dropped).
-
-    """
-    split: dict[UsageRole, dict[ComponentType, float]] = {}
-    for comp, mass in component_mass.items():
-        if mass <= 0.0:
-            continue
-        role = USAGE_ROLE_BY_COMPONENT_TYPE.get(comp)
-        if role is None:
-            continue
-        split.setdefault(role, {})[comp] = mass
-    return split
-
-
-# ---------------------------------------------------------------------------
-# Role-keyed projection (UsagePalette).
-# ---------------------------------------------------------------------------
-
-
-class _ScoredCluster(NamedTuple):
-    """A cluster scored for one role: its prominence and the per-component masses behind it.
-
-    Attributes:
-        cluster: The scored color cluster.
-        prominence: The role-appropriate ranking signal (screenshot area for surface
-            roles, ``log1p`` of vote mass for element roles).
-        masses: The cluster's component masses routed to this one role (a slice of
-            `_split_masses_by_role`).
-
-    """
-
-    cluster: ColorCluster
-    prominence: float
-    masses: dict[ComponentType, float]
-
-
-def _build_entries(
-    scored: list[_ScoredCluster],
-    *,
-    exempt_by_mass: bool,
-) -> tuple[UsageEntry, ...]:
-    """Normalize prominence scores into probabilities, prune, renormalize, and rank.
-
-    The prune/renormalize/argmax-fallback step is the shared `prune_distribution` (which
-    also covers the all-zero-prominence background case — every score ties, so the
-    smallest hex wins outright).
-
-    Args:
-        scored: The role's `_ScoredCluster` list (one per participating cluster).
-        exempt_by_mass: Enables the `MIN_EXEMPT_VOTE_MASS` exemption — an entry whose raw
-            in-role vote mass clears that floor survives the share prune regardless of
-            dilution. Set only for element-color roles (where prominence is
-            ``log1p(vote mass)``); the area-ranked structural-surface roles pass ``False``
-            and stay on pure share.
-
-    Returns:
-        The surviving `UsageEntry` colors, sorted by ``(-probability, hex)``.
-
-    """
-    mass_exempt = (
-        [sum(s.masses.values()) >= MIN_EXEMPT_VOTE_MASS for s in scored] if exempt_by_mass else None
-    )
-    kept = prune_distribution(
-        scored,
-        [s.prominence for s in scored],
-        min_share=MIN_PROBABILITY_SHARE,
-        tie_key=lambda s: s.cluster.color.hex,
-        protected=mass_exempt,
-    )
-
-    entries: list[UsageEntry] = []
-    for scored_cluster, prob in kept:
-        mass_total = sum(scored_cluster.masses.values())
-        components = (
-            {comp: mass / mass_total for comp, mass in scored_cluster.masses.items()}
-            if mass_total > 0.0
-            else {}
-        )
-        entries.append(
-            UsageEntry(
-                color=scored_cluster.cluster.color,
-                probability=prob,
-                area=scored_cluster.cluster.area_weight,
-                components=components,
-            )
-        )
-    entries.sort(key=lambda e: (-e.probability, e.color.hex))
-    return tuple(entries)
-
-
-def build_usage(clusters: list[ColorCluster]) -> UsagePalette:
-    """Build the **measured** role-keyed usage projection from the color inventory.
-
-    For each usage role, the participating clusters (those with nonzero raw vote mass routed
-    to the role via `COMPONENT_TYPES_BY_USAGE_ROLE`) are scored by prominence — screenshot
-    area for the structural-surface roles (``page``/``surface``/``banner``), ``log1p`` of
-    in-role vote mass
-    for every other (element-color) role (see `_AREA_RANKED_ROLES`) — normalized to
-    probabilities, pruned below `MIN_PROBABILITY_SHARE` (an element-color entry whose raw vote
-    mass clears `MIN_EXEMPT_VOTE_MASS` is exempt — see that constant), and ranked by
-    ``(-probability, hex)``. The argmax is kept if pruning empties the role.
-
-    Args:
-        clusters: The fused color inventory from `build_inventory`.
-
-    Returns:
-        The measured role-keyed usage projection. A role with no mass anywhere maps to
-        ``()`` (the [`UsagePalette`][colorsense.UsagePalette] validator backfills it); an
-        empty cluster list yields an empty (all-``()``) palette.
-
-    """
-    per_role: dict[UsageRole, list[_ScoredCluster]]
-    per_role = {role: [] for role in UsageRole}
-
-    # Stable iteration: clusters sorted by (-area_weight, hex), matching inventory order.
-    for cluster in sorted(clusters, key=lambda c: (-c.area_weight, c.color.hex)):
-        for role, masses in _split_masses_by_role(cluster.component_mass).items():
-            if role in _AREA_RANKED_ROLES:
-                # Structural surface: area-proportional (see `_AREA_RANKED_ROLES`).
-                prominence = cluster.area_weight
-            else:
-                # Element color: sub-linear in vote mass (see `_AREA_RANKED_ROLES`).
-                prominence = math.log1p(sum(masses.values()))
-            per_role[role].append(_ScoredCluster(cluster, prominence, masses))
-
-    mapping = {
-        role: _build_entries(scored, exempt_by_mass=role not in _AREA_RANKED_ROLES)
-        for role, scored in per_role.items()
-        if scored
-    }
-    return UsagePalette(mapping=mapping)
-
-
-# ---------------------------------------------------------------------------
-# Color-keyed canonical index (ColorUsage tuple).
-# ---------------------------------------------------------------------------
-
-
-class _MergedColor(NamedTuple):
-    """One color for the index: all clusters sharing its exact hex fused into one record.
-
-    Attributes:
-        color: The shared representative color.
-        area: The largest member ``area_weight``.
-        role_masses: The merged per-role component masses.
-        total_mass: The summed routed vote mass (precomputed for the log1p normalization).
-
-    """
-
-    color: Color
-    area: float
-    role_masses: dict[UsageRole, dict[ComponentType, float]]
-    total_mass: float
-
-
-def _blend_prominence(area_norm: float, mass_norm: float) -> float:
-    """Blend normalized area and normalized vote mass into the overall ranking signal.
-
-    A convex combination (see `PROMINENCE_AREA_WEIGHT`): monotonic in both inputs,
-    weighted toward area.
-
-    Args:
-        area_norm: The cluster's area, pre-normalized to ``[0, 1]`` across the set.
-        mass_norm: The cluster's log1p-damped vote mass, pre-normalized to ``[0, 1]``.
-
-    Returns:
-        The blended prominence in ``[0, 1]``.
-
-    """
-    return PROMINENCE_AREA_WEIGHT * area_norm + (1.0 - PROMINENCE_AREA_WEIGHT) * mass_norm
-
-
-def _build_color_usages(
-    role_masses: dict[UsageRole, dict[ComponentType, float]],
-) -> tuple[Usage, ...]:
-    """Build a color's `Usage` slots from its per-role component masses.
-
-    Each slot's ``weight`` is the role's total mass over the color's total routed mass
-    (so the slots' weights sum to ~1.0); its ``components`` is the per-ComponentType
-    normalized mass within the role.
-
-    Args:
-        role_masses: The color's per-role component masses.
-
-    Returns:
-        One `Usage` slot per role the color appears in, sorted by ``(-weight, role.value)``;
-        ``()`` when the color has no routed mass.
-
-    """
-    total_routed = sum(sum(masses.values()) for masses in role_masses.values())
-    if total_routed <= 0.0:
-        return ()
-
-    usages: list[Usage] = []
-    for role, masses in role_masses.items():
-        role_mass = sum(masses.values())
-        if role_mass <= 0.0:
-            continue
-        components = {comp: mass / role_mass for comp, mass in masses.items()}
-        usages.append(
-            Usage(
-                role=role,
-                property_family=role.property_family,
-                weight=role_mass / total_routed,
-                components=components,
-            )
-        )
-    usages.sort(key=lambda u: (-u.weight, u.role.value))
-    return tuple(usages)
-
-
-def build_color_index(clusters: list[ColorCluster]) -> tuple[ColorUsage, ...]:
-    """Build the canonical color-keyed index from the (family-segregated) color inventory.
-
-    The inventory clusters per [`PropertyFamily`][colorsense.PropertyFamily], so a single
-    color can arrive as several clusters (the same gray as a text cluster and a border
-    cluster, or ``#ffffff`` as both a background bin and a text color). To present **each
-    distinct color once**, clusters are first grouped by **exact** ``Color.hex`` and merged:
-    component masses are summed, area is the max member ``area_weight``, and the shared hex
-    is the representative. Exact equality is intentional — it fully preserves
-    family-distinct hexes (e.g. ``#e5e5ea`` border vs ``#ffffff`` bg), which already
-    differ; perceptually-near-but-distinct colors stay separate.
-
-    For each merged group with at least one routed usage (``cta_text``/``third_party``-only
-    groups are dropped — third-party colors surface via
-    ``AnalysisResult.third_party_colors``), emit a [`ColorUsage`][colorsense.ColorUsage]
-    whose ``usages`` describe every role the color appears in and whose ``prominence``
-    blends the group's normalized area with its normalized (``log1p``-damped) total routed
-    vote mass (see `_blend_prominence`).
-
-    Args:
-        clusters: The fused, family-segregated color inventory from `build_inventory`.
-
-    Returns:
-        The canonical color-keyed index, sorted by ``prominence`` descending with a
-        ``hex`` tiebreak. An empty cluster list yields ``()``.
-
-    """
-    # Group clusters by exact hex (first-seen order over the inventory's stable sort),
-    # merging same-hex clusters across families into one color.
-    clusters_by_hex: dict[str, list[ColorCluster]] = {}
-    for cluster in sorted(clusters, key=lambda c: (-c.area_weight, c.color.hex)):
-        clusters_by_hex.setdefault(cluster.color.hex, []).append(cluster)
-
-    # Per merged color: summed component mass, max area, routed role masses; drop colors
-    # with no routed usage (e.g. third-party-only).
-    merged_colors: list[_MergedColor] = []
-    for members in clusters_by_hex.values():
-        merged_mass: dict[ComponentType, float] = {}
-        for cluster in members:
-            for comp, mass in cluster.component_mass.items():
-                merged_mass[comp] = merged_mass.get(comp, 0.0) + mass
-        role_masses = _split_masses_by_role(merged_mass)
-        total_mass = sum(sum(m.values()) for m in role_masses.values())
-        if not role_masses or total_mass <= 0.0:
-            continue
-        # Members share the hex; any color is representative (use the first, in sort order).
-        color = members[0].color
-        area = max(cluster.area_weight for cluster in members)
-        merged_colors.append(_MergedColor(color, area, role_masses, total_mass))
-
-    if not merged_colors:
-        return ()
-
-    # Normalize area and log1p(vote mass) to [0, 1] across the merged-color set.
-    max_area = max((merged.area for merged in merged_colors), default=0.0)
-    damped_masses = [math.log1p(merged.total_mass) for merged in merged_colors]
-    max_damped = max(damped_masses, default=0.0)
-
-    color_usages: list[ColorUsage] = []
-    for merged, damped in zip(merged_colors, damped_masses, strict=True):
-        area_norm = merged.area / max_area if max_area > 0.0 else 0.0
-        mass_norm = damped / max_damped if max_damped > 0.0 else 0.0
-        color_usages.append(
-            ColorUsage(
-                color=merged.color,
-                prominence=_blend_prominence(area_norm, mass_norm),
-                area=merged.area,
-                usages=_build_color_usages(merged.role_masses),
-            )
-        )
-
-    color_usages.sort(key=lambda cu: (-cu.prominence, cu.color.hex))
-    return tuple(color_usages)

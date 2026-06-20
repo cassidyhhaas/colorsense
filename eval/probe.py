@@ -64,9 +64,9 @@ from colorsense.classify.tokens import classify_tokens
 from colorsense.color.primitives import delta_e, parse_css_color
 from colorsense.config import load_default_config
 from colorsense.models import Color, Harvest
+from colorsense.palette.detect import detect
+from colorsense.palette.fusion import build_evidence
 from colorsense.palette.inventory import build_inventory
-from colorsense.palette.reconcile import reconcile
-from colorsense.palette.usage import build_color_index, build_usage
 
 HARVEST_DIR = Path(__file__).parent / "harvests"
 
@@ -97,13 +97,12 @@ def _dump_output(name: str, harvest: Harvest) -> list[Color]:
     cfg = load_default_config()
     ct = classify_tokens(harvest.tokens, cfg)
     ce = classify_components(harvest.elements, cfg, harvest.viewport)
+    evidence = build_evidence(harvest, ce, cfg, harvest.viewport)
+    usage, color_index, _ = detect(evidence, ct, cfg)
     clusters = build_inventory(harvest, ce)
-    color_index = build_color_index(clusters)
-    usage = build_usage(clusters)
-    posterior, _ = reconcile(usage, ct, measured_colors=[c.color for c in clusters])
     print(f"\n===== {name}  ({len(harvest.elements)} elements) =====")
     print("--- usage (role -> colors -> components) ---")
-    for role, entries in posterior.mapping.items():
+    for role, entries in usage.mapping.items():
         if not entries:
             print(f"  {role.value:8}: (empty)")
             continue

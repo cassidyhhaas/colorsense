@@ -99,6 +99,7 @@ python_version = "3.12"
 # FastAPI types.
 files = ["src", "examples"]
 strict = true
+warn_unreachable = true
 warn_unused_ignores = true
 warn_redundant_casts = true
 plugins = ["pydantic.mypy"]

@@ -30,7 +30,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel
 
-from colorsense.config import ChannelRoute, Config, UsageIntent
+from colorsense.config import ChannelRoute, Config
 from colorsense.models import (
     ClassifiedToken,
     TokenOrigin,
@@ -144,9 +144,8 @@ def _usage_intent_for_role(role: TokenSemanticRole, config: Config) -> dict[Usag
     if isinstance(row, ChannelRoute):
         return {}
 
-    if not isinstance(row, UsageIntent):  # pragma: no cover - defensive
-        return {}
-
+    # `row` is now exactly `UsageIntent` (the only other arm of the closed
+    # `UsageIntentOrChannel` union), so its distribution is the usage intent.
     return dict(row.distribution)
 
 

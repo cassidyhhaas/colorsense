@@ -7,7 +7,74 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **New `detection:` configuration section** (`data/palette_config.yaml` + `DetectionConfig` in
+  `config.py`): the tuning surface for the detection-plus-ranking model — `alpha` (the intent
+  boost cap), the three bounded salience modulators (`position`/`sibling`/`contrast`), and a
+  per-`UsageRole` table of `lambda`/`beta` (salience aggregation) and `theta_noise`/`theta_present`
+  (the two absolute detection thresholds). Optional, so existing configs still validate.
+- **`eval/calibrate_thresholds.py`**: an offline harness that sweeps `theta_present` per role
+  against the ground-truth must-keep set and reports the recall/precision knee (tuning-spec §5).
+- **`eval/fit_aggregation.py`**: an offline learning-to-rank harness that fits the per-role
+  salience aggregation `(lambda, beta)` against the ground-truth must-keep set — choosing them on
+  threshold-free NDCG/top-1 ranking quality (ties broken toward the saturating `beta -> 1`, since
+  `sigma_i < 1` makes `beta < 1` *inflate* the corroboration tail) — then re-fits `theta_present`
+  jointly for the recall/noise knee, holding `theta_noise` fixed as the physical anchor
+  (tuning-spec §2, §5, §7). Prints the before/after panel via the real scorer and a
+  tail-inflation diagnostic.
+
+### Fixed
+
+- **`HarvestedElement` again loads harvests serialized under the legacy `rect` key.** The
+  `rect` → `bounding_box` rename had no read compatibility, so frozen harvest corpora captured
+  before it (notably the offline `eval/harvests/*.json.gz` quality panel) failed to validate.
+  The field now accepts both `bounding_box` and `rect` on input via a validation alias
+  (`populate_by_name` keeps the canonical name usable in code); serialization is unchanged.
+- **Zero-weight fallback tokens no longer surface as declared-but-unused divergences.** The
+  `DECLARE_MIN_WEIGHT` gate tested `token_weight < 0.0`, which can never fire (weights are
+  non-negative; the fallback rung emits weight 0). Corrected to `<= 0.0` so weightless fallbacks
+  are excluded as intended; the corrected gate carries forward into the new divergence logic.
+
 ### Changed
+
+- **BREAKING (behavior): rewrote the semantic-assignment half of the pipeline to a
+  detection-plus-ranking model.** The result-tree *shapes* are unchanged, but the values and the
+  math that produces them are different. Presence in a usage role is now an **absolute, per-`(color,
+  role)` detection decision** rather than a share of a normalized, competitive distribution:
+  - `palette/fusion.py` (`build_evidence`) replaces the summed-mass fusion output with one
+    `RoleEvidence` per `(canonical color, role)`, preserving the per-instance salience distribution
+    (`sigma_i = p_role * pi_i`, area-driven with bounded position/sibling/contrast modulators).
+    `inventory.build_inventory` is retained as the internal color-identity layer (perceptual
+    clustering, near-white/near-black guards) and third-party-color source.
+  - `palette/detect.py` (`detect`) replaces `build_usage` + `build_color_index` + `reconcile`: it
+    computes measured salience (peak-dominant for element roles, screenshot area for surface roles),
+    folds declared intent in as a **bounded multiplier** `f = 1 + alpha*q_intent` that re-ranks and
+    rescues at the margin but never vetoes or manufactures a color, applies a **two-gate** test
+    (`S_measured >= theta_noise` and `S_final >= theta_present`, both absolute and `K`-independent),
+    ranks survivors, and normalizes to a display share **last**. Divergences fall out of the same pass.
+  - **Removed** `palette/reconcile.py` (log-linear pooling, `+1/K` smoothing, the `epsilon` floor,
+    the `(p)^(1-alpha)` tempering exponent, the relative prune floor and min-exempt-mass exemption),
+    `palette/_pruning.py`, and the `build_usage` / `build_color_index` functions.
+  - **Changed field semantics** (shapes unchanged): `UsageEntry.probability` is now a
+    display-normalized salience share (not a pooled posterior); `ColorUsage.prominence` is now the
+    color's maximum role-salience, globally normalized (not a blended `0.7*area + 0.3*mass` scalar).
+  - The new tuning surface (`alpha`, per-role `lambda`/`beta`, `theta_noise`/`theta_present`,
+    modulator ranges) lives in the `detection:` config section. The per-role element-role
+    `(lambda, beta)` are now **learning-to-rank-fit** and `theta_present` re-fit jointly via
+    `eval/fit_aggregation.py` (replacing the pre-fit hand-set starting values); `theta_noise` stays
+    the physical anchor and the area-ranked roles' `theta_present` are unchanged (their `S_measured`
+    is screenshot area, so `lambda`/`beta` never enter it). On the offline 10-site quality panel
+    this **improves ranking/precision at held recall**: role winners 74/77 → 75/77 and NOISE
+    74 → 69, with recall 218/232 and family-bleed 0 unchanged.
+  - **Correction to a prior limitation note.** The two known recall regressions are **not**
+    aggregation-bound: the fit confirmed `(lambda, beta)` cannot move recall, because every miss is
+    either *fusion-bound* (no evidence record in the target role — the near-white/near-black
+    inventory cluster-merge guards collapse e.g. `#030712`/`#f9f9f9` surfaces, or the element was
+    mis-classified) or a *single instance below the `theta_noise` floor* (no corroboration tail for
+    `(lambda, beta)` to reshape, and `theta_noise` is the fixed anchor). The `surface` role's ~70%
+    must-keep recall is therefore an **inventory/`theta_noise`** limitation, tracked separately, not
+    an aggregation one. See `docs/design/detection-ranking-redesign.md` and `docs/design/tuning-spec.md`.
 
 - **Every field on the `models.py` contracts now carries an explicit `pydantic.Field`** with a
   description, validation bounds, and (where useful) examples. Numeric fields gained range

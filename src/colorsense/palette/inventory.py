@@ -38,7 +38,7 @@ representative is chosen by what is authoritative for that family: ``background`
 largest area weight (hex tiebreak), ``text``/``border`` by largest in-family vote mass
 (hex tiebreak). The flat union of all three pools' `ColorCluster`s is returned; because
 each cluster's ``component_mass`` only contains its own family's components (by
-construction), the downstream usage/reconcile/third-party stages operate on the flat
+construction), the downstream fusion/detect/third-party stages operate on the flat
 list unchanged.
 
 Perceptual distance is measured exclusively with
@@ -66,6 +66,7 @@ from colorsense.models import (
     Harvest,
     HarvestedElement,
     PropertyFamily,
+    UsageRole,
 )
 
 __all__ = ["build_inventory"]
@@ -162,6 +163,21 @@ _EXACT_COLOR_FAMILIES: frozenset[PropertyFamily] = frozenset(
 # solid near-black CTA backgrounds get the check. The radius matches the text/border check's 3.0
 # ΔE2000 *denoising* threshold: it splits `#030711`/`#050505` (4.33) while keeping genuine
 # near-black anti-alias variants merged (`#000000`/`#010101` is 0.16, `#08090b`/`#050505` is 1.05).
+#
+# Soundness of the 3.0 threshold at L <= 0.15 (the `detection-ranking-redesign.md` §5.3/§9.6 metric
+# caveat: CIEDE2000 over-reports near black). Investigated on the frozen eval panel and found to be
+# *metric-neutral*: disco's `#030711`/`#050505` is the ONLY near-black pair on the whole corpus that
+# carries CTA/action mass and so actually fires this check, and every candidate metric — a raised
+# ΔE2000 threshold, an OKLab-chroma-plane test, a lightness-Δ-capped split — agrees with 3.0 on that
+# one pair, so the panel score is identical for all of them. There is therefore no measured basis to
+# adopt a more complex metric, and 3.0 has corpus margin (the real should-merge anti-alias pairs top
+# out at ~2.19 ΔE2000; the disco split is 4.33). The caveat is real: tailwind's `#020618`/`#030712`,
+# two dark-navy quantizer variants of one surface (OKLab 0.015, equal lightness), over-report at
+# 3.62 > 3.0 — but it is contained by the CTA/action scoping above, not the threshold value: that
+# pair carries no CTA/action mass, so it merges anyway. If a future page ever puts a CTA on a navy
+# surface, the prepared fix is an OKLab-chroma-plane distinctness test (split only on a genuine tint
+# difference, sidestepping CIEDE2000's lightness coupling). See `tests/test_palette_inventory.py`
+# (`test_near_black_guard_keeps_corpus_anti_alias_pairs_merged`, the tailwind over-report tests).
 NEAR_BLACK_MAX_LIGHTNESS: float = 0.15
 NEAR_BLACK_MERGE_MAX_DE2000: float = 3.0
 
@@ -303,14 +319,26 @@ def _nearest_mergeable_near_white_entry(
 
 
 class _Entry:
-    """A mutable working color entry: a color, its area weight and its raw vote mass."""
+    """A mutable working color entry: a color, its area weight and its raw vote mass.
 
-    __slots__ = ("area_weight", "color", "vote_mass")
+    ``role_instances`` and ``role_components`` are additional, defaulted fields used only by
+    the successor fusion module (`colorsense.palette.fusion`): ``role_instances`` records the
+    per-instance salience sigma_i routed to this entry keyed by usage role, and
+    ``role_components`` records the raw summed component mass (``mass * weight``) routed to
+    this entry, keyed by usage role then component type. `build_inventory` never reads or
+    writes either, so their presence is invisible to the shipping inventory path.
+    """
+
+    __slots__ = ("area_weight", "color", "role_components", "role_instances", "vote_mass")
 
     def __init__(self, color: Color, area_weight: float) -> None:
         self.color = color
         self.area_weight = area_weight
         self.vote_mass: dict[ComponentType, float] = defaultdict(float)
+        self.role_instances: dict[UsageRole, list[float]] = defaultdict(list)
+        self.role_components: dict[UsageRole, dict[ComponentType, float]] = defaultdict(
+            lambda: defaultdict(float)
+        )
 
 
 def _find(parent: list[int], i: int) -> int:
@@ -447,21 +475,24 @@ def _union_merges_distinct_near_black_cta_pair(
     )
 
 
-def _cluster_pool(entries: list[_Entry], family: PropertyFamily) -> list[ColorCluster]:
-    """Union-find cluster one family's entry pool into `ColorCluster`s.
+def _cluster_groups(entries: list[_Entry], family: PropertyFamily) -> list[list[_Entry]]:
+    """Union-find group one family's entry pool into perceptual clusters (pure grouping only).
 
-    Representative selection is family-specific: ``background`` picks the largest area
-    weight (hex tiebreak — area is authoritative for surfaces); ``text``/``border`` pick
-    the largest in-family vote mass (hex tiebreak — they paint no screenshot area).
+    The side-effect-free grouping core shared by `_cluster_pool` (the shipping inventory path)
+    and `colorsense.palette.fusion.build_evidence` (the successor). It applies the family's
+    distinctness guards exactly as `_cluster_pool` did inline — the near-white check for
+    text/border families and the near-black CTA/action check for the background family — so the
+    grouping is identical to the inventory path, only its consumption differs.
 
     Args:
         entries: The family's working entry pool to cluster.
         family: The [`PropertyFamily`][colorsense.PropertyFamily] the pool belongs to
-            (selects the representative rule and which distinctness check applies).
+            (selects which distinctness check applies).
 
     Returns:
-        The family's `ColorCluster`s, pre-sorted by ``(-area_weight, hex)``; ``[]`` for an
-        empty pool.
+        One ``list[_Entry]`` per perceptual cluster (group membership only — no representative
+        selection or aggregation); ``[]`` for an empty pool. Group order follows union-find root
+        order, which is deterministic for a given input.
 
     """
     entry_count = len(entries)
@@ -499,19 +530,52 @@ def _cluster_pool(entries: list[_Entry], family: PropertyFamily) -> list[ColorCl
     groups: dict[int, list[int]] = defaultdict(list)
     for i in range(entry_count):
         groups[_find(parent, i)].append(i)
+    return [[entries[i] for i in members] for members in groups.values()]
 
+
+def _group_representative(group: list[_Entry], family: PropertyFamily) -> _Entry:
+    """The representative entry of one perceptual cluster (shared family-specific rule).
+
+    The single source of truth for picking a cluster's canonical color, shared by
+    `_cluster_pool` and `colorsense.palette.fusion.build_evidence`: ``background`` picks the
+    largest area weight (smallest hex breaks ties and the all-zero case); ``text``/``border``
+    pick the largest in-family vote mass (hex tiebreak — they paint no screenshot area).
+
+    Args:
+        group: The cluster's member entries (non-empty).
+        family: The [`PropertyFamily`][colorsense.PropertyFamily] selecting the rule.
+
+    Returns:
+        The member chosen as the cluster's representative.
+
+    """
+    if family is PropertyFamily.BACKGROUND:
+        # Area truth: largest area weight, ties (and all-zero) broken by smallest hex.
+        return min(group, key=lambda entry: (-entry.area_weight, entry.color.hex))
+    # Text/border paint no area: rank by in-family vote mass, hex tiebreak.
+    return min(group, key=lambda entry: (-_total_vote_mass(entry), entry.color.hex))
+
+
+def _cluster_pool(entries: list[_Entry], family: PropertyFamily) -> list[ColorCluster]:
+    """Union-find cluster one family's entry pool into `ColorCluster`s.
+
+    Representative selection is family-specific: ``background`` picks the largest area
+    weight (hex tiebreak — area is authoritative for surfaces); ``text``/``border`` pick
+    the largest in-family vote mass (hex tiebreak — they paint no screenshot area).
+
+    Args:
+        entries: The family's working entry pool to cluster.
+        family: The [`PropertyFamily`][colorsense.PropertyFamily] the pool belongs to
+            (selects the representative rule and which distinctness check applies).
+
+    Returns:
+        The family's `ColorCluster`s, pre-sorted by ``(-area_weight, hex)``; ``[]`` for an
+        empty pool.
+
+    """
     clusters: list[ColorCluster] = []
-    for members in groups.values():
-        group = [entries[i] for i in members]
-
-        if family is PropertyFamily.BACKGROUND:
-            # Area truth: largest area weight, ties (and all-zero) broken by smallest hex.
-            representative = min(group, key=lambda entry: (-entry.area_weight, entry.color.hex))
-        else:
-            # Text/border paint no area: rank by in-family vote mass, hex tiebreak.
-            representative = min(
-                group, key=lambda entry: (-_total_vote_mass(entry), entry.color.hex)
-            )
+    for group in _cluster_groups(entries, family):
+        representative = _group_representative(group, family)
 
         total_area = sum(entry.area_weight for entry in group)
 
