@@ -85,6 +85,7 @@ def _bg_fill_colors(element: HarvestedElement) -> list[Color]:
     Returns:
         The opaque fill color(s) the background paints, or ``[]`` when the element paints
         no background at all.
+
     """
     bg = element.bg
     if bg is not None and is_painting(bg):
@@ -199,6 +200,7 @@ def _is_distinct_near_black_pair(a: Color, b: Color) -> bool:
     Returns:
         ``True`` if both are near-black yet CIEDE2000-distinct (must not merge), else
         ``False``.
+
     """
     return (
         a.lightness <= NEAR_BLACK_MAX_LIGHTNESS
@@ -225,6 +227,7 @@ def _nearest_mergeable_near_black_entry(
     Returns:
         The index of the nearest permitted entry, or ``None`` (a fresh entry) when every
         in-radius entry is a forbidden near-black pair.
+
     """
     nearest_index: int | None = None
     nearest_distance = radius
@@ -260,6 +263,7 @@ def _is_distinct_near_white_pair(a: Color, b: Color) -> bool:
     Returns:
         ``True`` if both are near-white yet CIEDE2000-distinct (must not merge), else
         ``False``.
+
     """
     return (
         a.lightness >= NEAR_WHITE_MIN_LIGHTNESS
@@ -286,6 +290,7 @@ def _nearest_mergeable_near_white_entry(
     Returns:
         The index of the nearest permitted entry, or ``None`` (a fresh entry) when every
         in-radius entry is a forbidden near-white pair.
+
     """
     nearest_index: int | None = None
     nearest_distance = radius
@@ -317,6 +322,7 @@ def _find(parent: list[int], i: int) -> int:
 
     Returns:
         The representative root index of ``i``'s set.
+
     """
     root = i
     while parent[root] != root:
@@ -333,6 +339,7 @@ def _union(parent: list[int], a: int, b: int) -> None:
         parent: The union-find parent array (mutated in place).
         a: Index in the first set.
         b: Index in the second set.
+
     """
     ra, rb = _find(parent, a), _find(parent, b)
     if ra == rb:
@@ -363,6 +370,7 @@ def _union_merges_distinct_near_white_pair(
     Returns:
         ``True`` if merging the two clusters would co-locate a distinct near-white pair,
         else ``False``.
+
     """
     root_i, root_j = _find(parent, i), _find(parent, j)
     if root_i == root_j:
@@ -384,6 +392,7 @@ def _total_vote_mass(entry: _Entry) -> float:
 
     Returns:
         The summed vote mass across the entry's components.
+
     """
     return sum(entry.vote_mass.values())
 
@@ -397,6 +406,7 @@ def _entry_has_cta_action_mass(entry: _Entry) -> bool:
     Returns:
         ``True`` if the entry carries mass from any `CTA_ACTION_BG_COMPONENTS` component,
         else ``False``.
+
     """
     return any(component in CTA_ACTION_BG_COMPONENTS for component in entry.vote_mass)
 
@@ -422,6 +432,7 @@ def _union_merges_distinct_near_black_cta_pair(
     Returns:
         ``True`` if merging the two clusters would co-locate a distinct near-black pair in
         which at least one member carries CTA/action mass, else ``False``.
+
     """
     root_i, root_j = _find(parent, i), _find(parent, j)
     if root_i == root_j:
@@ -451,6 +462,7 @@ def _cluster_pool(entries: list[_Entry], family: PropertyFamily) -> list[ColorCl
     Returns:
         The family's `ColorCluster`s, pre-sorted by ``(-area_weight, hex)``; ``[]`` for an
         empty pool.
+
     """
     entry_count = len(entries)
     if entry_count == 0:
@@ -565,6 +577,7 @@ def build_inventory(harvest: Harvest, classified: list[ClassifiedElement]) -> li
         (background, text, border) and then **stably** sorted by ``area_weight``
         descending, ties broken by ``hex`` (the stable sort preserves family order for
         same-(area, hex) ties, keeping the output deterministic).
+
     """
     pools: dict[PropertyFamily, list[_Entry]] = {
         PropertyFamily.BACKGROUND: [

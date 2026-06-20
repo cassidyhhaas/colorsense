@@ -136,6 +136,7 @@ class RobotsDisallowedError(RuntimeError):
 
     Attributes:
         url: The disallowed URL.
+
     """
 
     def __init__(self, url: str) -> None:
@@ -143,6 +144,7 @@ class RobotsDisallowedError(RuntimeError):
 
         Args:
             url: The URL ``robots.txt`` disallowed.
+
         """
         super().__init__(f"robots.txt disallows fetching {url!r}")
         self.url = url
@@ -158,6 +160,7 @@ class UnsupportedSchemeError(ValueError):
 
     Attributes:
         url: The offending URL whose scheme was rejected.
+
     """
 
     def __init__(self, url: str, *, hint: str | None = None) -> None:
@@ -166,6 +169,7 @@ class UnsupportedSchemeError(ValueError):
         Args:
             url: The URL whose scheme is unsupported.
             hint: Optional remediation hint appended to the message in parentheses.
+
         """
         message = f"unsupported URL scheme for fetching {url!r}"
         if hint:
@@ -183,6 +187,7 @@ def _robots_url_for(url: str) -> str | None:
     Returns:
         The ``http(s)://host/robots.txt`` URL, or ``None`` when ``url`` is not a network
         URL (no scheme/host to anchor a robots lookup).
+
     """
     parts = urlsplit(url)
     if parts.scheme not in _NETWORK_SCHEMES or not parts.netloc:
@@ -249,6 +254,7 @@ async def _default_robots_loader(
         The ``robots.txt`` body text, or ``None`` on any failure (a rejected/raising filter
         verdict, redirect-cap exhaustion, an oversized body, or any HTTP error) — all
         treated by callers as "no rules".
+
     """
     try:
         async with httpx.AsyncClient(
@@ -299,6 +305,7 @@ def _cache_key(url: str, theme: Theme, viewport: Viewport) -> tuple[str, str, in
 
     Returns:
         The render cache key: ``(url, str(theme), width, height, device_scale_factor)``.
+
     """
     return (url, str(theme), viewport.width, viewport.height, viewport.device_scale_factor)
 
@@ -380,6 +387,7 @@ class PolitenessPolicy:
         clock: Synchronous time source, injectable for tests.
         sleeper: Injectable async sleep seam — swapped out by the test suite so no real
             wall-clock delay is incurred.
+
     """
 
     def __init__(
@@ -466,6 +474,7 @@ class PolitenessPolicy:
 
         Raises:
             UnsupportedSchemeError: When ``url``'s scheme is not fetchable under this policy.
+
         """
         scheme = urlsplit(url).scheme.lower()
         if scheme in _NETWORK_SCHEMES:
@@ -498,6 +507,7 @@ class PolitenessPolicy:
         Returns:
             A memoized `RobotFileParser`, or ``None`` when no rules apply (missing,
             unreachable, or unfetchable ``robots.txt``).
+
         """
         while True:
             if robots_url in self._robots_cache:
@@ -564,6 +574,7 @@ class PolitenessPolicy:
 
         Returns:
             ``True`` if ``url`` may be fetched under this policy, else ``False``.
+
         """
         if not self.respect_robots:
             return True
@@ -590,6 +601,7 @@ class PolitenessPolicy:
 
         Returns:
             The pacing interval in seconds: ``max(min_interval, capped Crawl-delay)``.
+
         """
         crawl_delay = self._crawl_delay.get(host)
         if crawl_delay is None:
@@ -612,6 +624,7 @@ class PolitenessPolicy:
         Args:
             url: The URL whose host's rate limit is enforced (non-network URLs return at
                 once — no host to pace).
+
         """
         parts = urlsplit(url)
         if parts.scheme not in _NETWORK_SCHEMES or not parts.netloc:
@@ -643,6 +656,7 @@ class PolitenessPolicy:
         Returns:
             The render-bounding `asyncio.Semaphore`, or ``None`` when renders are unbounded
             (``max_concurrent_renders is None``).
+
         """
         if self.max_concurrent_renders is None:
             return None
@@ -717,6 +731,7 @@ class PolitenessPolicy:
             UnsupportedSchemeError: When ``url``'s scheme is not fetchable under this policy.
             RobotsDisallowedError: When ``robots.txt`` disallows ``url`` and
                 ``respect_robots`` is set.
+
         """
         # Scheme gate BEFORE the cache lookup — see the docstring for why order matters.
         self._validate_scheme(url)

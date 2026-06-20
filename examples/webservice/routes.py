@@ -34,6 +34,7 @@ async def analyze_palette(request: AnalyzeRequest) -> AnalyzeResponse:
             unsupported scheme, 403 if the target's robots.txt disallows the fetch,
             502 if the page fails to load or render, or 504 if the analysis exceeds
             the configured deadline.
+
     """
     # Pre-call validation first: nothing browser-shaped happens for input that fails the
     # cheap checks (scheme, userinfo, allowlist). Address-level checks are NOT done here —

@@ -126,6 +126,7 @@ def _alias_target(raw_value: str) -> str | None:
     Returns:
         The referenced custom-property name with its leading ``--`` (e.g.
         ``"--accent"``), or ``None`` when the value has no ``var()`` reference.
+
     """
     match = _VAR_REF_RE.search(raw_value)
     if match is None:
@@ -148,6 +149,7 @@ async def harvest_tokens(page: Page) -> list[TokenRecord]:
     Returns:
         One `TokenRecord` per declared custom property, in stylesheet order, capped at
         `_MAX_HARVEST_TOKENS`.
+
     """
     # Bounded like the DOM evaluate: a wedged renderer must fail, not hang.
     raw_tokens = cast(

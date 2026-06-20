@@ -60,6 +60,7 @@ def prune_distribution[T](
     Returns:
         ``(item, probability)`` pairs in input order, the probabilities renormalized
         over the survivors. An empty ``items`` yields ``[]``.
+
     """
     if not items:
         return []

@@ -39,6 +39,7 @@ def validate_target_url(url: str, *, allowed_hosts: frozenset[str] | None = None
     Raises:
         ValueError: If the scheme is not http(s), the URL carries userinfo, the host is
             missing, or the host is not on a configured allowlist.
+
     """
     parts = urlsplit(url)
     if parts.scheme.lower() not in _FETCHABLE_SCHEMES:

@@ -82,6 +82,7 @@ def _default_resolver(host: str) -> list[IPAddress]:
 
     Raises:
         OSError: On resolution failure — the guard treats that as fail-closed.
+
     """
     infos = socket.getaddrinfo(host, None, proto=socket.IPPROTO_TCP)
     addresses: list[IPAddress] = []
@@ -108,6 +109,7 @@ def _is_public_address(ip: IPAddress) -> bool:
 
     Returns:
         ``True`` if ``ip`` is a globally routable fetch target, else ``False``.
+
     """
     if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped is not None:
         return _is_public_address(ip.ipv4_mapped)
@@ -212,6 +214,7 @@ class _PrivateNetworkBlocker:
         Raises:
             RuntimeError: On detected *concurrent* use from a second event loop while a
                 resolution from the first is still in flight.
+
         """
         loop = asyncio.get_running_loop()
         if self._loop is None or self._loop is loop:
@@ -303,6 +306,7 @@ class _PrivateNetworkBlocker:
 
         Returns:
             The lazily-created, predicate-owned DNS lookup pool.
+
         """
         if self._executor is None:
             self._executor = ThreadPoolExecutor(
@@ -406,6 +410,7 @@ def block_private_networks(
 
     Returns:
         An async ``request_filter`` predicate (``await guard(url) -> bool``).
+
     """
     hosts = None if allowed_hosts is None else frozenset(h.lower() for h in allowed_hosts)
     return _PrivateNetworkBlocker(

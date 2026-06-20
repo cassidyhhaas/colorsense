@@ -74,6 +74,7 @@ def _is_interactive_pill(
 
     Returns:
         ``True`` when the element is both clickable and a pill shape, else ``False``.
+
     """
     return clickable and is_pill_shape(width, height, min_corner_radius)
 
@@ -99,6 +100,7 @@ def _gradient_fill_stops(bg: Color | None, raw_colors: Sequence[str]) -> tuple[C
     Returns:
         The opaque fill stops as a tuple, or ``()`` when the gradient is decorative rather
         than a fill.
+
     """
     if is_painting(bg):
         return ()
@@ -373,6 +375,7 @@ def _vendor_match(blob: str, vendor_prefixes: Sequence[str]) -> bool:
     Returns:
         ``True`` if the blob contains any vendor prefix (case-insensitively), else
         ``False``.
+
     """
     return any(prefix.lower() in blob for prefix in vendor_prefixes)
 
@@ -392,6 +395,7 @@ async def harvest_elements(
         element) so pseudo-state probing can re-target the same elements. A selector is
         either uniquely resolvable to its element or the empty string (probing skips it);
         the payload is capped at `_MAX_HARVEST_ELEMENTS` records (largest area wins).
+
     """
     # ``wait_for`` bounds the evaluate (Playwright gives it no timeout of its own); a
     # wedged renderer surfaces as TimeoutError -> RenderError instead of a hung harvest.

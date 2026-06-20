@@ -52,6 +52,7 @@ class _TokenRoleClassification(BaseModel):
         semantic_role: The semantic role inferred for the token.
         weight: The classification scoring weight (relative confidence/intent mass).
         origin: Which classification path produced this role.
+
     """
 
     semantic_role: TokenSemanticRole
@@ -73,6 +74,7 @@ def _classify_role_without_alias_inheritance(
 
     Returns:
         The token's semantic role, scoring weight, and origin path.
+
     """
     name = record.name
 
@@ -133,6 +135,7 @@ def _usage_intent_for_role(role: TokenSemanticRole, config: Config) -> dict[Usag
     Returns:
         The per-[`UsageRole`][colorsense.UsageRole] intent distribution, or ``{}`` when the
         role has no usage intent (unmapped or a channel route).
+
     """
     row = config.token_vocabulary.semantic_role_to_usage_intent_or_channel.get(role)
     if row is None:
@@ -164,6 +167,7 @@ def _resolve_alias_role(
         The inherited classification with origin rewritten to `TokenOrigin.ALIAS` (the alias
         itself was not matched, its target was), or ``None`` when the chain dead-ends
         (missing target, cycle, or all targets are ``ignore``).
+
     """
     seen: set[str] = {record.name}
     target_name = record.alias_target
@@ -198,6 +202,7 @@ def classify_tokens(tokens: list[TokenRecord], config: Config) -> list[Classifie
 
     Returns:
         One `ClassifiedToken` per input record, in the same order.
+
     """
     # Index by name; later declarations win for duplicate names.
     index: dict[str, TokenRecord] = {record.name: record for record in tokens}

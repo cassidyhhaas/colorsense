@@ -77,6 +77,7 @@ async def evaluate_request_filter(request_filter: RequestFilter, url: str) -> bo
     Returns:
         ``True`` to permit the request, ``False`` to abort it — including whenever the
         predicate raises (fail closed).
+
     """
     try:
         verdict = request_filter(url)
@@ -252,6 +253,7 @@ def normalize_browser_args(browser_args: Sequence[str]) -> tuple[str, ...]:
         TypeError: If ``browser_args`` is a bare string (almost certainly a forgotten
             one-tuple: pass ``("--flag",)``, not ``"--flag"``), or if any entry is not a
             string.
+
     """
     if isinstance(browser_args, str):
         raise TypeError(
@@ -295,6 +297,7 @@ def _route_handler(
     Returns:
         An async ``context.route`` handler that continues permitted requests and aborts
         the rest.
+
     """
 
     async def handle(route: Route) -> None:
@@ -322,6 +325,7 @@ async def _refuse_web_socket(ws_route: WebSocketRoute) -> None:
 
     Args:
         ws_route: The intercepted WebSocket route to close without connecting.
+
     """
     await ws_route.close()
 
@@ -352,6 +356,7 @@ class SharedBrowser:
             memory — container/cgroup limits remain the enforceable bound (see
             ``SECURITY.md`` §2). Non-string entries (or a bare string) raise `TypeError`
             at construction.
+
     """
 
     def __init__(self, *, browser_args: Sequence[str] = ()) -> None:
@@ -404,6 +409,7 @@ class SharedBrowser:
         Raises:
             RuntimeError: If called after teardown, rather than silently relaunching a
                 browser nobody closes.
+
         """
         async with self._lock:
             if self._closed:
@@ -459,6 +465,7 @@ class RenderSession:
             arguments only exist at launch time, so combining a non-empty ``browser_args``
             with an external ``browser`` (already launched, by someone else) raises
             `ValueError` — put the args on the `SharedBrowser` instead.
+
     """
 
     def __init__(
@@ -609,6 +616,7 @@ class RenderSession:
                 ``page.goto``. Defaults to `DEFAULT_NAV_TIMEOUT_MS`. Exceeding it raises a
                 Playwright ``TimeoutError`` (wrapped as
                 [`RenderError`][colorsense.RenderError] upstream).
+
         """
         page = self.page
         await page.goto(url, wait_until="load", timeout=nav_timeout_ms)
@@ -646,6 +654,7 @@ class RenderSession:
 
         Args:
             page: The live Playwright page to inject the disabling CSS into.
+
         """
         last_error: Exception | None = None
         for _attempt in range(2):
@@ -670,6 +679,7 @@ class RenderSession:
 
         Returns:
             Bounding boxes (CSS px) of detected banners; empty on a best-effort failure.
+
         """
         return await self._detect_boxes(_CONSENT_BOXES_JS)
 
@@ -686,6 +696,7 @@ class RenderSession:
         Returns:
             Bounding boxes (CSS px) of detected raster media, capped at `_MAX_MEDIA_BOXES`;
             empty on a best-effort failure.
+
         """
         return await self._detect_boxes(_MEDIA_BOXES_JS, _MAX_MEDIA_BOXES)
 
@@ -704,6 +715,7 @@ class RenderSession:
 
         Returns:
             The parsed `BoundingBox` objects, or an empty list on any best-effort failure.
+
         """
         try:
             raw = await asyncio.wait_for(self.page.evaluate(js, *args), _BEST_EFFORT_TIMEOUT_S)

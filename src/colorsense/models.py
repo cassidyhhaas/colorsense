@@ -70,6 +70,7 @@ class PropertyFamily(StrEnum):
         BACKGROUND: ``background-color`` / ``background-image`` fills.
         TEXT: The ``color`` property (typography).
         BORDER: The ``border-color`` property.
+
     """
 
     BACKGROUND = "background"
@@ -96,6 +97,7 @@ class UsageRole(StrEnum):
         TEXT: Body/heading typography at every layer.
         LINK: Link color (typography of anchors).
         BORDER: Borders and dividers.
+
     """
 
     PAGE = "page"
@@ -123,6 +125,7 @@ class UsageRole(StrEnum):
             [`PropertyFamily.TEXT`][colorsense.PropertyFamily] for ``text``/``link``,
             [`PropertyFamily.BORDER`][colorsense.PropertyFamily] for ``border``, and
             [`PropertyFamily.BACKGROUND`][colorsense.PropertyFamily] for every other role.
+
         """
         if self in (UsageRole.TEXT, UsageRole.LINK):
             return PropertyFamily.TEXT
@@ -147,6 +150,7 @@ class TokenSemanticRole(StrEnum):
         TEXT_ON: Foreground meant to sit on a colored fill (an "on" color).
         STATUS: Status color (success/warning/error/info).
         IGNORE: Not a meaningful palette token (filtered out).
+
     """
 
     BRAND_PRIMARY = "brand_primary"
@@ -193,6 +197,7 @@ class ComponentType(StrEnum):
         BORDER: Border/divider color.
         BADGE: Badge/chip/pill background.
         THIRD_PARTY: Color from an embedded third-party widget.
+
     """
 
     PAGE_BG = "page_bg"
@@ -239,6 +244,7 @@ class ComponentType(StrEnum):
             [`PropertyFamily.TEXT`][colorsense.PropertyFamily] for ``*_text`` components and
             ``link``, [`PropertyFamily.BORDER`][colorsense.PropertyFamily] for ``border``, and
             [`PropertyFamily.BACKGROUND`][colorsense.PropertyFamily] for every other component.
+
         """
         if self.value.endswith("_text") or self is ComponentType.LINK:
             return PropertyFamily.TEXT
@@ -268,6 +274,7 @@ def is_pill_shape(width: float, height: float, min_corner_radius: float) -> bool
 
     Returns:
         ``True`` if the box is a fully-rounded pill (excluding circles), else ``False``.
+
     """
     return height > 0.0 and min_corner_radius >= height / 2.0 and width > height
 
@@ -295,6 +302,7 @@ def is_circle_shape(width: float, height: float, min_corner_radius: float) -> bo
     Returns:
         ``True`` if the box is a fully-rounded square circle/dot (within a 1px tolerance),
         else ``False``.
+
     """
     return height > 0.0 and min_corner_radius >= height / 2.0 and abs(width - height) <= 1.0
 
@@ -305,6 +313,7 @@ class Theme(StrEnum):
     Attributes:
         LIGHT: Light color scheme (the default).
         DARK: Dark color scheme (``prefers-color-scheme: dark``).
+
     """
 
     LIGHT = "light"
@@ -675,6 +684,7 @@ class TokenOrigin(StrEnum):
         SCALE: A member of a detected color scale.
         ALIAS: Inherited from an aliased token via ``var(...)``.
         FALLBACK: No signal matched (lowest intent).
+
     """
 
     RELATIONAL = "relational"
@@ -929,6 +939,7 @@ class UsagePalette(BaseModel):
 
         Returns:
             This model, with ``mapping`` backfilled so every role is a key.
+
         """
         # ``frozen=True`` blocks reassigning ``mapping`` itself, but the dict it points to
         # is a regular (non-deep-frozen) dict, so in-place backfill is sound.

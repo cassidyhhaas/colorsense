@@ -82,6 +82,7 @@ def _add_votes(
     Args:
         vote_totals: The running per-component vote totals, mutated in place.
         votes: The config vote dict to add, keyed by component-type strings.
+
     """
     for key, weight in votes.items():
         if key in _NON_COMPONENT_VOTE_KEYS:
@@ -107,6 +108,7 @@ def _is_pill(element: HarvestedElement) -> bool:
 
     Returns:
         ``True`` if the element is a fully-rounded pill (wider than tall), else ``False``.
+
     """
     return is_pill_shape(
         element.bounding_box.width, element.bounding_box.height, element.min_corner_radius
@@ -127,6 +129,7 @@ def _is_small_circle(element: HarvestedElement, max_h_px: float) -> bool:
 
     Returns:
         ``True`` if the element is a circle no taller than ``max_h_px``, else ``False``.
+
     """
     return (
         is_circle_shape(
@@ -149,6 +152,7 @@ def _paints_visible_fill(element: HarvestedElement) -> bool:
     Returns:
         ``True`` if the element paints a non-transparent background, a border, or a
         box-shadow, else ``False``.
+
     """
     return is_painting(element.bg) or element.border is not None or element.has_box_shadow
 
@@ -172,6 +176,7 @@ def _paints_button_surface(element: HarvestedElement) -> bool:
     Returns:
         ``True`` if the element paints a non-transparent background, a border, or a gradient
         fill, else ``False``.
+
     """
     return (
         is_painting(element.bg) or element.border is not None or len(element.bg_gradient_stops) > 0
@@ -195,6 +200,7 @@ def _derive_page_canvas_color(elements: list[HarvestedElement]) -> Color | None:
     Returns:
         The page canvas color, or ``None`` when nothing on the page paints an opaque
         background.
+
     """
 
     def opaque_bg(element: HarvestedElement) -> Color | None:
@@ -237,6 +243,7 @@ def _canonical_canvas_is_opaque(elements: list[HarvestedElement]) -> bool:
     Returns:
         ``True`` if any ``html``/``body``/``main`` element paints an opaque background, else
         ``False``.
+
     """
     for element in elements:
         if element.tag in {"html", "body", "main"} and is_opaque(element.bg):
@@ -275,6 +282,7 @@ def _find_page_canvas_index(
 
     Returns:
         The index of the fallback page-canvas element, or ``None`` if no fallback applies.
+
     """
     if _canonical_canvas_is_opaque(elements) or page_canvas is None:
         return None
@@ -351,6 +359,7 @@ def _is_cta_label(
     Returns:
         ``True`` if the element's text is a CTA-button label rather than an inline link, else
         ``False``.
+
     """
     if element.tag == "a" or not element.clickable:
         return False
@@ -382,6 +391,7 @@ def _semantic_tag_rule_applies(rule: VoteRule, element: HarvestedElement) -> boo
 
     Returns:
         ``True`` if the rule matches the element's tag, role, or input type, else ``False``.
+
     """
     match = rule.match
     if match.startswith("role="):
@@ -401,6 +411,7 @@ def _interactivity_rule_applies(rule: WhenRule, element: HarvestedElement) -> bo
 
     Returns:
         ``True`` if the predicate holds for the element, else ``False``.
+
     """
     when = rule.when
     if when == "clickable":
@@ -440,6 +451,7 @@ def _geometry_rule_applies(
 
     Returns:
         ``True`` if the geometry predicate holds for the element, else ``False``.
+
     """
     box = element.bounding_box
     vp_w = float(viewport.width)
@@ -482,6 +494,7 @@ def _class_token_rule_applies(rule: VoteRule, element: HarvestedElement) -> bool
     Returns:
         ``True`` if the rule's substring is found in any class token or the id, else
         ``False``.
+
     """
     needle = rule.match.lower()
     for token in element.class_tokens:
@@ -499,6 +512,7 @@ def _is_third_party(element: HarvestedElement) -> bool:
     Returns:
         ``True`` if the element is an iframe, cross-origin, vendor-matched, or a shadow host,
         else ``False``.
+
     """
     return element.is_iframe or element.cross_origin or element.vendor_match or element.shadow_host
 
@@ -521,6 +535,7 @@ def _find_repetition_member_indices(
 
     Returns:
         The indices of elements belonging to a qualifying repeated-sibling group.
+
     """
     rep = config.component_classifier.repetition
     requires_any = set(rep.requires_any)
@@ -590,6 +605,7 @@ def _find_circle_badge_member_indices(
 
     Returns:
         The indices of small clickable circular chips that recur as a qualifying group.
+
     """
     circle_cfg = config.component_classifier.circle_badge
     max_h = circle_cfg.max_h_px
@@ -629,6 +645,7 @@ def _dampen_votes(
         vote_totals: The running per-component vote totals, scaled down in place.
         element: The harvested element whose flags decide which suppressors trigger.
         config: The loaded configuration supplying the suppressor factors.
+
     """
     suppressors = config.component_classifier.suppressors
     box = element.bounding_box
@@ -675,6 +692,7 @@ def _softmax_prune_renormalize(
     Returns:
         The softmaxed, pruned, renormalized distribution; if pruning removes everything, the
         single argmax mapped to ``1.0``.
+
     """
     # Max-shifted softmax: mathematically the probabilities are shift-invariant, but
     # unshifted exp(vote/T) overflows once a config's vote weights stack high enough
@@ -716,6 +734,7 @@ def _compute_recombination_weights(
 
     Returns:
         Per-family recombination weights summing to 1.0 across the painted families.
+
     """
     family_mass = {family: sum(votes.values()) for family, votes in by_family.items()}
     total_mass = sum(family_mass.values())
@@ -757,6 +776,7 @@ def _finalize_distribution(
     Returns:
         The final per-component probability distribution (summing to ~1.0), or ``{}`` when no
         positive votes remain.
+
     """
     classifier_config = config.component_classifier
     # Suppressors have already been applied upstream; they are multiplicative and never
@@ -806,6 +826,7 @@ def classify_components(
     Returns:
         One [`ClassifiedElement`][colorsense.ClassifiedElement] per input element, in the
         same order.
+
     """
     active_viewport = viewport if viewport is not None else _DEFAULT_VIEWPORT
     classifier_config = config.component_classifier

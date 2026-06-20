@@ -73,6 +73,7 @@ class AnalysisTimeoutError(TimeoutError):
     Attributes:
         url: The URL whose analysis exceeded the deadline.
         max_total_seconds: The configured overall deadline, in seconds.
+
     """
 
     def __init__(self, url: str, max_total_seconds: float) -> None:
@@ -81,6 +82,7 @@ class AnalysisTimeoutError(TimeoutError):
         Args:
             url: The URL whose analysis exceeded the deadline.
             max_total_seconds: The configured overall deadline, in seconds.
+
         """
         super().__init__(
             f"analysis of {url!r} exceeded its overall deadline of {max_total_seconds:g}s"
@@ -101,6 +103,7 @@ class _ThemeOutput:
         palette: The fully-derived palette for the theme.
         third_party_colors: Colors attributed to third-party widgets, carried alongside the
             palette for cross-theme aggregation.
+
     """
 
     palette: ThemePalette
@@ -184,6 +187,7 @@ async def analyze(
             timeout, TLS, or navigation error).
         AnalysisTimeoutError: If ``max_total_seconds`` is set and the whole analysis does not
             finish within it.
+
     """
     # Validate eagerly: a broken browser_args value must raise here, before any robots
     # fetch or render starts (and on the deadline path, before the timer even exists).
@@ -225,6 +229,7 @@ async def _analyze(
 
     Returns:
         The assembled [`AnalysisResult`][colorsense.AnalysisResult] for the run.
+
     """
     config = load_default_config() if config_path is None else load_config(config_path)
     policy = politeness if politeness is not None else PolitenessPolicy()
@@ -301,6 +306,7 @@ def _reraise_first_leaf(eg: ExceptionGroup[Exception]) -> NoReturn:
 
     Raises:
         Exception: The first leaf exception of ``eg``, with ``eg`` attached as ``__cause__``.
+
     """
     leaf: BaseException = eg
     while isinstance(leaf, BaseExceptionGroup):
@@ -324,6 +330,7 @@ def _analyze_theme(
 
     Returns:
         The derived palette plus this theme's third-party colors.
+
     """
     classified_tokens = classify_tokens(harvest.tokens, config)
     classified_elements = classify_components(harvest.elements, config, viewport)
@@ -368,6 +375,7 @@ def _design_tokens(classified: list[ClassifiedToken]) -> tuple[DesignToken, ...]
     Returns:
         The meaningful tokens as public [`DesignToken`][colorsense.DesignToken]s, deduped by
         name and sorted by name.
+
     """
     meaningful = [
         token
@@ -405,6 +413,7 @@ def _collapse_themes(ordered_themes: list[Theme], harvests: dict[Theme, Harvest]
 
     Returns:
         The themes to analyze: the primary plus every later theme that differs from it.
+
     """
     if len(ordered_themes) <= 1:
         return ordered_themes
@@ -434,6 +443,7 @@ def _near_identical(a: Harvest, b: Harvest) -> bool:
     Returns:
         ``True`` if the two renders' dominant screenshot colors match symmetrically within
         the collapse threshold, else ``False``.
+
     """
     bins_a = sorted(a.screenshot_bins, key=lambda s: (-s.area_fraction, s.color.hex))
     bins_b = sorted(b.screenshot_bins, key=lambda s: (-s.area_fraction, s.color.hex))
@@ -458,6 +468,7 @@ def _third_party_colors(clusters: list[ColorCluster]) -> list[Color]:
 
     Returns:
         The deduped colors of clusters whose dominant component is third-party.
+
     """
     out: list[Color] = []
     for cluster in clusters:
@@ -479,6 +490,7 @@ def _dedupe_colors(colors: Iterable[Color]) -> list[Color]:
 
     Returns:
         The colors with later duplicates (by hex) removed, in first-seen order.
+
     """
     return dedupe_by(colors, key=lambda c: c.hex)
 
@@ -495,6 +507,7 @@ def _build_metadata(
 
     Returns:
         The assembled [`RunMetadata`][colorsense.RunMetadata] for the run.
+
     """
     return RunMetadata(
         themes_requested=tuple(requested),

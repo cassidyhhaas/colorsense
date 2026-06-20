@@ -82,6 +82,7 @@ def shape_response(result: AnalysisResult) -> AnalyzeResponse:
 
     Returns:
         The trimmed per-theme response payload.
+
     """
     themes = {
         theme.value: ThemeOut(

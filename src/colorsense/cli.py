@@ -73,6 +73,7 @@ def _parse_viewport(value: str, scale: float) -> Viewport:
     Raises:
         typer.BadParameter: On a malformed ``WxH`` string, non-positive dimensions, or a
             non-positive scale.
+
     """
     width_text, sep, height_text = value.lower().partition("x")
     if not sep or not width_text.strip().isdigit() or not height_text.strip().isdigit():
@@ -95,6 +96,7 @@ def _print_palette(result: AnalysisResult) -> None:
 
     Args:
         result: The analysis result to render to stdout.
+
     """
     typer.echo(result.url)
     for theme, palette in result.themes.items():
@@ -160,6 +162,7 @@ async def _run(
 
     Returns:
         The number of URLs that failed (the process exit-status driver).
+
     """
     failures = 0
     results: list[AnalysisResult] = []

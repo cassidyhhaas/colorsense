@@ -165,6 +165,7 @@ class AnchorRange(BaseModel):
 
         Raises:
             ValueError: If ``value`` is a list/tuple without exactly two elements.
+
         """
         if isinstance(value, (list, tuple)):
             if len(value) != 2:
@@ -180,6 +181,7 @@ class AnchorRange(BaseModel):
 
         Returns:
             ``True`` if ``low <= number <= high``, else ``False``.
+
         """
         return self.low <= number <= self.high
 
@@ -210,6 +212,7 @@ class ScaleDetectionConfig(BaseModel):
         Raises:
             ValueError: If ``number_pattern`` does not compile or lacks a capture group for
                 the scale number (group 1).
+
         """
         try:
             compiled = re.compile(self.number_pattern)
@@ -288,6 +291,7 @@ class TokenVocabularyConfig(BaseModel):
         Raises:
             ValueError: On a non-mapping row, a negative weight, or a distribution that does
                 not sum to a positive value.
+
         """
         table = "semantic_role_to_usage_intent_or_channel"
         if not isinstance(data, dict):
@@ -546,6 +550,7 @@ class ComponentClassifierConfig(BaseModel):
         Raises:
             ValueError: On an interactivity/geometry ``when`` predicate or a suppressor key
                 that the classifier does not implement.
+
         """
         for rule in self.interactivity:
             if rule.when not in _KNOWN_INTERACTIVITY_PREDICATES:
@@ -620,6 +625,7 @@ class Config(BaseModel):
         Returns:
             The matching prefix as declared in the config (original casing), or ``None`` if
             no prefix matches.
+
         """
         lowered = remainder.lower()
         best: str | None = None
@@ -639,6 +645,7 @@ class Config(BaseModel):
 
         Returns:
             The matched ``(role, weight)`` pair, or ``None`` when no rule matches.
+
         """
         remainder = name[2:] if name.startswith("--") else name
 
@@ -703,6 +710,7 @@ class Config(BaseModel):
         Returns:
             A `ScaleInfo` describing the family and number, or ``None`` when scale
             detection is disabled or no scale number is present.
+
         """
         scale = self.token_vocabulary.scale_detection
         if not scale.enabled:
@@ -753,6 +761,7 @@ class Config(BaseModel):
         Returns:
             A `RelationalInfo` carrying the captured ``base`` token, the modifier ``type``,
             and its ``weight``, or ``None`` when nothing matches.
+
         """
         remainder = name[2:] if name.startswith("--") else name
         prefix = self._matched_namespace_prefix(remainder)
@@ -787,6 +796,7 @@ def load_default_config() -> Config:
 
     Returns:
         The validated `Config` loaded from the bundled YAML.
+
     """
     raw_text = resources.files(_DATA_PACKAGE).joinpath(_BUNDLED_CONFIG).read_text(encoding="utf-8")
     return _build_config(raw_text, f"<bundled {_BUNDLED_CONFIG}>")
@@ -808,6 +818,7 @@ def load_config(path: str | Path) -> Config:
         ValueError: If the file cannot be read, or wrapping malformed YAML / a top-level
             non-mapping.
         pydantic.ValidationError: On schema violations — never a bare ``KeyError``.
+
     """
     config_path = Path(path)
     try:
@@ -830,6 +841,7 @@ def _build_config(raw_text: str, source: str) -> Config:
 
     Raises:
         ValueError: On invalid YAML or a top-level value that is not a mapping.
+
     """
     try:
         data = yaml.safe_load(raw_text)

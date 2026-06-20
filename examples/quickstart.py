@@ -38,6 +38,7 @@ def print_palette(result: AnalysisResult) -> None:
 
     Args:
         result: The analysis result to render to stdout.
+
     """
     print(result.url)
     for theme, palette in result.themes.items():
@@ -65,6 +66,7 @@ async def main(urls: tuple[str, ...]) -> None:
 
     Args:
         urls: The URLs to analyze, in order.
+
     """
     # Sequential on purpose: one shared policy paces and caches the fetches; analyze()
     # itself already renders a page's themes concurrently in one shared browser.

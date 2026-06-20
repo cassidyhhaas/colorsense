@@ -147,6 +147,7 @@ def _group_by_color(eligible: list[ClassifiedToken]) -> list[_IntentGroup]:
 
     Returns:
         One `_IntentGroup` per distinct (approximate) color.
+
     """
     groups: list[_IntentGroup] = []
     for token in sorted(eligible, key=lambda t: t.record.name):
@@ -174,6 +175,7 @@ def _aggregate_intent(tokens: list[ClassifiedToken]) -> list[_IntentGroup]:
 
     Returns:
         One `_IntentGroup` per distinct color among the pooling-eligible tokens.
+
     """
     return _group_by_color(
         [t for t in tokens if t.record.resolved is not None and len(t.usage_intent) > 0]
@@ -195,6 +197,7 @@ def _aggregate_relational(tokens: list[ClassifiedToken]) -> list[_IntentGroup]:
     Returns:
         One `_IntentGroup` per distinct color among the resolved relational tokens that
         carry no usage intent.
+
     """
     return _group_by_color(
         [
@@ -215,6 +218,7 @@ def _clamp_alpha(alpha: float) -> float:
 
     Returns:
         ``alpha`` clamped to ``[0, 1]``; out-of-range values are silently clamped.
+
     """
     if alpha < 0.0:
         return 0.0
@@ -253,6 +257,7 @@ def reconcile(
     Returns:
         The posterior [`UsagePalette`][colorsense.UsagePalette] and a deterministic list of
         [`DivergenceItem`][colorsense.DivergenceItem].
+
     """
     alpha = _clamp_alpha(alpha)
     groups = _aggregate_intent(tokens)
@@ -276,6 +281,7 @@ class _PoolCandidate:
         p_usage: Its measured in-role probability.
         p_intent: Its matched declared-intent share (``0.0`` when no declared group is
             within `MAX_MEASURED_MATCH_DELTA_E`).
+
     """
 
     measured: UsageEntry
@@ -312,6 +318,7 @@ def _pool_role(
     Returns:
         The pooled, pruned, renormalized `UsageEntry` list for the role, sorted by
         ``(-probability, hex)``; ``[]`` when the role has no measured entries.
+
     """
     usage_entries = usage.mapping.get(role, ())
     if not usage_entries:
@@ -399,6 +406,7 @@ def _build_divergence(
 
     Returns:
         The divergence items, sorted by ``(note, hex)``.
+
     """
     usage_colors: list[Color] = (
         list(measured_colors)

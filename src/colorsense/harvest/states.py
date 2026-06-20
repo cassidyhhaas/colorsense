@@ -71,6 +71,7 @@ async def probe_hover_states(
         A new list with ``has_hover_color_change`` / ``hover_bg`` updated on clickable
         elements that change background color under forced ``:hover``/``:focus``; other
         elements are returned unchanged.
+
     """
     updated: list[HarvestedElement] = list(elements)
 
@@ -131,6 +132,7 @@ async def _open_cdp(page: Page) -> CDPSession | None:
     Returns:
         The enabled `CDPSession`, or ``None`` if CDP is unavailable (e.g. a non-Chromium
         engine) so the hover pass can degrade to a no-op.
+
     """
     try:
         client = await page.context.new_cdp_session(page)
@@ -153,6 +155,7 @@ async def _document_root(client: CDPSession) -> int | None:
 
     Returns:
         The document root ``nodeId``, or ``None`` if the ``DOM.getDocument`` send fails.
+
     """
     try:
         doc = cast(dict[str, Any], await client.send("DOM.getDocument"))
@@ -175,6 +178,7 @@ async def _read_hover_bg(client: CDPSession, root: int, selector: str) -> Color 
     Returns:
         The parsed forced ``background-color``, or ``None`` on any failure (element gone,
         not resolvable, or a computed value that does not parse).
+
     """
     node_id: int | None = None
     try:
@@ -219,6 +223,7 @@ async def _clear_pseudo(client: CDPSession, node_id: int | None) -> None:
     Args:
         client: An open CDP session with the CSS domain enabled.
         node_id: The node whose forced pseudo-classes to clear; a no-op when ``None``.
+
     """
     if node_id is None:
         return

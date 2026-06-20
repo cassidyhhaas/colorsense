@@ -114,6 +114,7 @@ def _rgb_to_color(r: int, g: int, b: int) -> Color | None:
 
     Returns:
         The parsed `Color`, or ``None`` if the triple does not parse.
+
     """
     return parse_css_color(f"rgb({r}, {g}, {b})")
 
@@ -147,6 +148,7 @@ async def harvest_screenshot(
     Raises:
         _OversizedCaptureError: If the captured image's declared dimensions exceed the
             decode pixel cap (surfaced by ``harvest_page`` as ``RenderError``).
+
     """
     # Bound capture dimensions: a pathologically tall or wide (e.g. attacker-controlled)
     # page would decode into a huge array + keep-mask before any downscaling. The clip is
@@ -224,6 +226,7 @@ def _quantize(array: np.ndarray, keep: np.ndarray) -> list[ScreenshotBin]:
     Returns:
         The `ScreenshotBin` objects above the noise floor, sorted by descending area then
         color hex; empty when no pixels are kept.
+
     """
     height, width = array.shape[0], array.shape[1]
 

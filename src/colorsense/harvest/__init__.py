@@ -65,6 +65,7 @@ class RenderError(Exception):
 
     Attributes:
         url: The offending URL that failed to render or harvest.
+
     """
 
     def __init__(self, url: str, message: str | None = None) -> None:
@@ -73,6 +74,7 @@ class RenderError(Exception):
         Args:
             url: The URL that failed to render or harvest.
             message: An optional detail line; a generic default is used when ``None``.
+
         """
         detail = message or "render/navigation failed"
         super().__init__(f"{detail} for {url!r}")
@@ -159,6 +161,7 @@ async def harvest_page(
             malformed in-page payloads from a DOM-tampering page, or an oversized screenshot
             capture — with the original error chained (see
             [`RenderError`][colorsense.RenderError]).
+
     """
     vendor_prefixes = config.component_classifier.third_party.vendor_prefixes
 

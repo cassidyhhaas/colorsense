@@ -157,6 +157,7 @@ def _build_usage_role_by_component_type() -> dict[ComponentType, UsageRole]:
 
     Raises:
         AssertionError: If any component type is routed to more than one usage role.
+
     """
     inverse: dict[ComponentType, UsageRole] = {}
     for role, component_types in COMPONENT_TYPES_BY_USAGE_ROLE.items():
@@ -209,6 +210,7 @@ def _split_masses_by_role(
     Returns:
         Per-usage-role component masses; roles with no contributing component are absent
         (zero-or-negative masses are dropped).
+
     """
     split: dict[UsageRole, dict[ComponentType, float]] = {}
     for comp, mass in component_mass.items():
@@ -235,6 +237,7 @@ class _ScoredCluster(NamedTuple):
             roles, ``log1p`` of vote mass for element roles).
         masses: The cluster's component masses routed to this one role (a slice of
             `_split_masses_by_role`).
+
     """
 
     cluster: ColorCluster
@@ -263,6 +266,7 @@ def _build_entries(
 
     Returns:
         The surviving `UsageEntry` colors, sorted by ``(-probability, hex)``.
+
     """
     mass_exempt = (
         [sum(s.masses.values()) >= MIN_EXEMPT_VOTE_MASS for s in scored] if exempt_by_mass else None
@@ -314,6 +318,7 @@ def build_usage(clusters: list[ColorCluster]) -> UsagePalette:
         The measured role-keyed usage projection. A role with no mass anywhere maps to
         ``()`` (the [`UsagePalette`][colorsense.UsagePalette] validator backfills it); an
         empty cluster list yields an empty (all-``()``) palette.
+
     """
     per_role: dict[UsageRole, list[_ScoredCluster]]
     per_role = {role: [] for role in UsageRole}
@@ -350,6 +355,7 @@ class _MergedColor(NamedTuple):
         area: The largest member ``area_weight``.
         role_masses: The merged per-role component masses.
         total_mass: The summed routed vote mass (precomputed for the log1p normalization).
+
     """
 
     color: Color
@@ -370,6 +376,7 @@ def _blend_prominence(area_norm: float, mass_norm: float) -> float:
 
     Returns:
         The blended prominence in ``[0, 1]``.
+
     """
     return PROMINENCE_AREA_WEIGHT * area_norm + (1.0 - PROMINENCE_AREA_WEIGHT) * mass_norm
 
@@ -389,6 +396,7 @@ def _build_color_usages(
     Returns:
         One `Usage` slot per role the color appears in, sorted by ``(-weight, role.value)``;
         ``()`` when the color has no routed mass.
+
     """
     total_routed = sum(sum(masses.values()) for masses in role_masses.values())
     if total_routed <= 0.0:
@@ -437,6 +445,7 @@ def build_color_index(clusters: list[ColorCluster]) -> tuple[ColorUsage, ...]:
     Returns:
         The canonical color-keyed index, sorted by ``prominence`` descending with a
         ``hex`` tiebreak. An empty cluster list yields ``()``.
+
     """
     # Group clusters by exact hex (first-seen order over the inventory's stable sort),
     # merging same-hex clusters across families into one color.
