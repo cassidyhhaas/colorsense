@@ -6,11 +6,12 @@ and a rough idea of how web pages are built.
 
 The one-line version: `analyze(url)` renders the page in headless Chromium, **harvests**
 four kinds of raw evidence from it, **classifies** the declared design tokens and the
-visible DOM elements, fuses everything into a perceptually clustered **color inventory**,
-builds the **color-keyed index** ("how each color is used") and the **role-keyed usage
-projection** ("which colors paint each role" — page, surface, banner, cta, action, text,
-link, border), and **reconciles** the latter against what the site's CSS declared.
-Everything after the harvest is deterministic, pure CPU work.
+visible DOM elements, establishes canonical color identities in a **color inventory**,
+accumulates per-`(color, role)` evidence records in a **fusion** pass, then runs a
+**detection-plus-ranking** step that decides which colors genuinely fill each role and in
+what order — building the **color-keyed index** ("how each color is used") and the
+**role-keyed projection** ("which colors paint each role" — page, surface, banner, cta,
+action, text, link, border). Everything after the harvest is deterministic, pure CPU work.
 
 Perceptual color distance appears throughout. It is always the same function: Euclidean
 distance in the OKLab color space ("ΔE", `deltaEOK`), whose units are small — in this
@@ -118,8 +119,8 @@ A final pass lets a token that fell through to `ignore` *inherit* the classifica
 the token its `var(--x)` value points at, following the alias chain transitively (with
 cycle protection). Each classified token records which path produced it — its **origin**
 (`relational`, `name_rule`, `scale`, `alias`, or `fallback`) — which matters later:
-reconciliation treats only `relational` and `name_rule` classifications as direct
-evidence of author intent.
+only `relational` and `name_rule` classifications are treated as direct evidence of
+author intent and contribute to the intent multiplier and divergence reporting.
 
 The classified role is then mapped (via the YAML's `semantic_role_to_usage_intent_or_channel` table) to its
 usage intent — a distribution over the eight usage roles expressing where the color is
@@ -277,7 +278,7 @@ family** — background, text, and border — and a color never crosses between 
    component votes are kept both raw (`component_mass` — cross-cluster magnitudes matter
    later) and normalized (`component_mix`). The three pools' clusters are returned as one
    flat list (each cluster's `component_mass` holds only its own family's components, so the
-   downstream usage/reconcile stages need no family bookkeeping).
+   downstream fusion and detection stages need no family bookkeeping).
 
 Segregating the pools is what stops a low-area text or border color from being swallowed by a
 high-area background bin of a near-identical hue and then *reported as the bin's hex* — the
@@ -348,192 +349,181 @@ concern only.
 
 ### The cross-OS quantizer incident
 
-The loose bg radius has a knock-on effect on reconciliation (§5), pinned down by a real
-cross-platform bug. Reconciliation needs to decide whether a *measured* usage color
-matches a *declared* token color. A measured entry's representative color is a screenshot
-quantizer bin whenever the cluster matched one — and quantizer output is
-platform-dependent (anti-aliasing and font rendering differ across OSes). Concretely: an
-amber CTA (declared `#f59e0b`) sitting over a blue hero quantized to `#c4a571` on Linux —
-more than ΔE 0.08 from the declared color, but within 0.10. At a tight 0.08 match radius,
-a pixel-perfect rendered token *failed its own intent match* on one OS: the posterior
-winner flipped and a false "declared unused in render" divergence appeared, on Linux
-only. The fix is structural: since an element may join a bin up to the bg radius (0.10)
-away, the measured-vs-declared match radius (`MAX_MEASURED_MATCH_DELTA_E`) must be **at
-least** that — so it is defined as equal to `MAX_BG_MATCH_DELTA_E`, and can never silently
-fall below it.
+The loose bg radius has a knock-on effect on token matching (§4), pinned down by a real
+cross-platform bug. The detection pass needs to decide whether a *measured* color
+matches a *declared* token color to apply the intent multiplier. A measured entry's
+representative color is a screenshot quantizer bin whenever the cluster matched one — and
+quantizer output is platform-dependent (anti-aliasing and font rendering differ across
+OSes). Concretely: an amber CTA (declared `#f59e0b`) sitting over a blue hero quantized
+to `#c4a571` on Linux — more than ΔE 0.08 from the declared color, but within 0.10. At a
+tight 0.08 match radius, a pixel-perfect rendered token *failed its own intent match* on
+one OS: the intent multiplier dropped to f = 1, the ranking shifted, and a false "declared
+unused in render" divergence appeared, on Linux only. The fix is structural: since an
+element may join a bin up to the bg radius (0.10) away, the measured-vs-declared match
+radius (`MAX_MEASURED_MATCH_DELTA_E`) must be **at least** that — so it is defined as
+equal to `MAX_BG_MATCH_DELTA_E`, and can never silently fall below it.
 
-## 4. The usage views
+## 4. Evidence fusion and detection-plus-ranking
 
-`palette/usage.py` turns the clusters into two complementary views, keyed off one fixed
-code-level convention: the **role→component collapse** (`COMPONENT_TYPES_BY_USAGE_ROLE`). Each component
-type belongs to exactly one of eight developer-facing **usage roles** — `page_bg` → `page`;
-`card_bg`/`modal_bg`/`hero_bg`/`input_bg` → `surface`; `header_bg`/`nav_bg`/`footer_bg` →
-`banner`; `cta_bg` → `cta`; `button_secondary`/`badge` → `action`; the `*_text` components →
-`text`; `link` → `link`; `border` → `border`. Two components route nowhere on purpose:
-`cta_text` (the button-label sink — a button-styled element's text color is part of the CTA,
-not an independent palette role, so it is emitted but carries no usage) and `third_party`
-(vendor-widget colors are excluded and surface separately on the result). The inverse map is built once and asserted
-to partition every routed component to exactly one role. This taxonomy is the redesign's
-core: it splits the two axes the old 4-value usage taxonomy conflated — *which CSS property
-paints the color* (a `property_family` rollup: background / text / border) versus *what kind
-of element it is* — so a link's color and a CTA button's background no longer share one slot.
+The inventory's color clusters establish *what colors exist* on the page. The next two
+stages decide *which colors fill each usage role and in what order*: a fusion pass
+accumulates per-`(color, role)` evidence, and a detection pass applies absolute gates,
+folds in declared intent, ranks survivors, and emits both views.
 
-### The role-keyed projection (`build_usage`)
+The **role→component collapse** (`COMPONENT_TYPES_BY_USAGE_ROLE`) is the fixed mapping that
+connects low-level component types to the eight developer-facing **usage roles** —
+`page_bg` → `page`; `card_bg`/`modal_bg`/`hero_bg`/`input_bg` → `surface`;
+`header_bg`/`nav_bg`/`footer_bg` → `banner`; `cta_bg` → `cta`;
+`button_secondary`/`badge` → `action`; the `*_text` components → `text`;
+`link` → `link`; `border` → `border`. Two components route nowhere on purpose:
+`cta_text` (the button-label sink) and `third_party` (vendor-widget colors, surfaced
+separately on the result). The inverse map is asserted to partition every routed component
+to exactly one role.
 
-For each usage role, a probability-ranked list of colors. A color used in multiple ways,
-like the same gray as both text and border, correctly appears in multiple roles.
-**Prominence** — how clusters rank within a role — depends on whether the role names a
-*structural surface* or an *element color*:
+### Fusion: per-(color, role) evidence records (`palette/fusion.py`)
 
-- **Structural-surface roles (page/surface/banner) are ranked by screenshot area.** Area is
-  the authoritative signal for surfaces, and vote *counts* would actively mislead: a page
-  with 30 repeated cards produces 30 card-background votes, while the page background —
-  covering, say, 86% of every pixel — is one `<body>` element with one vote. Ranking by votes
-  would crown the cards; ranking by area correctly crowns the background. A dominant-area
-  cluster anchors each of these roles, so the winner is also stable across operating systems.
-  (Only clusters with nonzero vote mass in the role participate at all — area alone doesn't
-  prove a color *is* used that way.)
+`build_evidence` walks every classified element instance and accumulates, for each
+`(canonical_color, role)` pair, a `RoleEvidence` record. The central quantity is
+**per-instance salience**:
 
-- **Element-color roles (cta/action/text/link/border) are ranked by `log1p` of vote mass.**
-  These paint negligible screenshot area, so area would be wrong twice over. It would be
-  *incorrect*: the page background out-areas every button, so an area-ranked `cta` collapses
-  to the page-background hex and the real brand CTA is pruned below `MIN_PROBABILITY_SHARE` — on
-  github.com the `cta` role reported the dark page background and the green "Sign up" button
-  vanished. And it would be *non-deterministic*: which of two near-zero-area buttons forms its
-  own median-cut screenshot bin (and so gets area) flips between macOS and Linux on identical
-  input — the cross-OS coin flip the golden tests kept catching. Vote mass is DOM-derived
-  (computed colors, not rendered pixels), so it ranks the real element color — and the primary
-  button over the secondary — correctly and *stably*. `log1p` damps it *sub-linearly* so that
-  element count can't drown high-confidence evidence: it compresses big masses
-  (`log1p(93) ≈ 4.5` vs `log1p(1.0) ≈ 0.69`) without changing the *ordering* (the logarithm is
-  monotonic), while genuinely tiny masses still prune (`log1p(0.05) ≈ 0.05`).
+```
+sigma_i = p_role(i, r) * pi_i
+```
 
-This is why each interactive color also gets its own role rather than one shared slot: on
-github.com ~200 link votes (clusters with mass 93 / 55 / 48) and the lone green CTA once
-competed for a single `interactive` slot, dropping the CTA below the pruning floor. With
-links in `link` and the CTA mass-ranked in `cta`, the brand green surfaces (and on a page
-with two hero buttons, the higher-mass primary button wins the role on every OS). The
-cta/action `property_family` stays `background` for the family rollups and the color-keyed
-index below; only their *ranking signal* is vote mass.
+where `p_role(i, r)` is the element's component-probability share mapping to role `r`
+(reusing the same role→component collapse), and `pi_i` is the element's **instance
+prominence** — a bounded product of its area and three modulators:
 
-Within each role the prominence scores are normalized to probabilities, entries below
-`MIN_PROBABILITY_SHARE` (0.02) are pruned, and survivors are renormalized. If pruning would empty a
-non-empty role, the single argmax entry is kept at probability 1.0 instead — a role that
-measured *something* never reports nothing.
+```
+pi_i = a_i * m_pos(i) * m_sib(i) * m_con(i)
+```
 
-`MIN_PROBABILITY_SHARE` is a *relative* threshold, so when a role accumulates many colors every
-entry's share shrinks and a genuine low-mass color can drop below 0.02 purely from
-dilution. To stop that, an element-color entry whose raw in-role vote mass clears
-`MIN_EXEMPT_VOTE_MASS` (≈ one element's worth of confident vote) is exempt from the share prune — it
-has independent, DOM-derived evidence that it genuinely paints the role. The exemption is
-element-color-only; the area-ranked structural-surface roles rank by screenshot area and
-stay on pure share.
+`a_i` is the element's viewport-fraction area (the magnitude carrier); `m_pos`, `m_sib`,
+and `m_con` are position, sibling-relative size, and contrast modulators, each clamped
+near 1 so a tiny element cannot be promoted past a large one by being centered or
+high-contrast. For **surface roles** (`page`, `surface`, `banner`) all modulators are set
+to 1, so `pi_i = a_i` — area is the only meaningful signal for "which color covers the
+most screen". Each `RoleEvidence` record preserves the full per-instance distribution so
+that the detection pass can use peak-instance salience rather than a sum.
 
-### The color-keyed index (`build_color_index`)
+### Detection: detect, rank, and present (`palette/detect.py`)
 
-The same clusters, re-projected as the canonical, color-first answer to "how is each color
-used?". Because the inventory now clusters per family, one color can arrive as several
-clusters (the same gray as a text cluster *and* a border cluster, or `#ffffff` as both a
-background bin and a text color), so clusters are first grouped by **exact hex** and merged
-into one color each — exact equality is deliberate, since it keeps family-distinct hexes
-like a near-white `#e5e5ea` border and the `#ffffff` page apart while collapsing only what is
-truly the same value. Each merged color becomes a `ColorUsage`: its `usages` are one slot per
-role it participates in (the role's routed mass over the color's total routed mass — slots
-sum to ~1 — plus normalized per-component evidence and the `property_family` rollup), and its
-overall `prominence` blends the merged color's normalized screenshot area with its normalized
-`log1p` of total routed vote mass. The blend (`PROMINENCE_AREA_WEIGHT`, default 0.7 toward
-area) is a **first-cut heuristic** — area-truth primary so dominant backgrounds rank high,
-vote-mass secondary so zero-area brand accents (CTA/link colors) are not buried — and is
-flagged in-code as worth later empirical tuning the way the role taxonomy was. The tuple is
-sorted by `prominence` descending; third-party-dominated clusters are excluded (as in the
+`detect` operates on the `RoleEvidence` records. The five steps:
+
+**1. Measured salience** — for each `(color, role)`, compute an unnormalized score
+S_measured from the evidence record. The aggregation is **role-parameterized**:
+
+- **Element roles** (`cta`, `action`, `text`, `link`, `border`) use **peak-dominant** aggregation:
+
+  ```
+  S_measured(c, r) = sigma_(1)  +  lambda_r * sum_{i >= 2} sigma_(i)^{beta_r}
+  ```
+
+  `sigma_(1)` is the single most-prominent instance (the "hero" button, the dominant body
+  text color). `lambda_r < 1` and `beta_r < 1` give additional instances
+  diminishing-returns corroboration — headcount cannot overwhelm peak prominence. `cta` is
+  the most peak-dominant (`lambda = 0.2, beta = 0.5`); `text`/`link`/`border` are more
+  aggregate (`lambda = 1.0, beta = 0.9`).
+
+- **Surface roles** (`page`, `surface`, `banner`) sum area directly: the page color is
+  whatever covers the most screen, and vote counts would mislead (a page with 30 repeated
+  cards has 30 `card_bg` votes but one `<body>` carrying 86% of every pixel).
+
+This replaces the old summed vote mass — which was linear in instance count and let a
+swarm of tiny buttons outrank a single hero CTA. With peak-dominant aggregation, the
+swarm adds confidence with diminishing returns while the single large instance always
+anchors the score.
+
+**2. Intent multiplier** — declared tokens are matched to canonical colors using the ΔE
+0.10 radius from §3. For a match, the bounded multiplier:
+
+```
+f = 1 + alpha * q_intent(c, r),   f in [1, 1 + alpha]
+S_final(c, r) = S_measured(c, r) * f
+```
+
+`q_intent(c, r)` is the matched token's usage-intent share for role `r`. No matching
+token gives `f = 1` — neutral, never a penalty. Intent can therefore **re-rank** at the
+margin (declare color settles a near-tie) or **rescue** a measured-but-faint color past
+the second detection gate; it cannot veto (a missing token is not a penalty) and cannot
+manufacture (a color with no S_measured has nothing to multiply). `alpha` is the cap on
+the intent boost; default 0.4.
+
+**3. Detection gates** — two absolute, `K`-independent thresholds:
+
+```
+S_measured(c, r) >= theta_noise(r)     # intent-independent artifact floor
+S_final(c, r)    >= theta_present(r)   # combined; intent may rescue a faint-but-real color
+```
+
+`theta_noise` rejects sub-perceptual slivers and classification noise; it is
+declaration-independent, anchored to a reference minimum-credible instance (roughly a
+20×20 CSS-px element at the reference viewport for element roles; 0.5% screenshot area
+for surface roles). A color must clear this floor regardless of any token declaration —
+undeclared colors face exactly the same noise gate as declared ones, which is what makes
+the "do not require a declaration" goal a guarantee rather than an accident. `theta_present`
+is the role-membership floor; intent can only raise S_final to help a color clear it, and
+the `theta_noise` floor is always the lower bound of the rescue band (intent can never rescue
+a color the artifact floor rejected). Both thresholds are absolute and live in
+`data/palette_config.yaml` under `detection:` for each role.
+
+**4. Ranking** — within each role, sort survivors by S_final descending. Peak-instance
+salience yields primary-likelihood order; the intent multiplier settles near-ties. A role
+with no survivors emits an empty tuple.
+
+**5. Normalization (display only)** — after detection and ranking are finalized, normalize
+survivors' S_final scores to sum to 1 per role:
+
+```
+share(c, r) = S_final(c, r) / sum_{c' in survivors(r)} S_final(c', r)
+```
+
+This is cosmetic. Detection has already happened; normalization cannot delete anything. The
+reported `UsageEntry.probability` is this display-normalized salience share — not a pooled
+posterior. Declared-only colors never enter the role view (a declared color with no measured
+evidence has no S_measured and therefore nothing to normalize).
+
+### The color-keyed index
+
+The same evidence records, re-projected as the canonical, color-first answer to "how is each
+color used?". Because the inventory clusters per family, one color can arrive in multiple
+roles (the same gray used as both `text` and `border`, or a `#ffffff` as both a background
+bin and a text color). Each detected color across all its surviving roles becomes a
+`ColorUsage`: its `usages` are one slot per role it survived in (with normalized
+per-component evidence and the `property_family` rollup), and its overall `prominence` is
+the color's maximum role-salience (globally normalized across all detected colors). The tuple
+is sorted by `prominence` descending; third-party-dominated clusters are excluded (as in the
 role view).
-
-## 5. Reconciling with declared intent
-
-`palette/reconcile.py` operates on the role-keyed projection. It fuses two independent
-signals about each usage role: the **measured** usage probabilities from §4 ("what actually
-rendered") and the **declared** token intent from §2 ("what the author said"). First,
-declared token colors are grouped with each other at a tight ΔE 0.08 (both sides are exact
-computed values), accumulating each group's weighted usage intent; measured entries then
-match declared groups at the looser 0.10 radius from §3.
-
-### Log-linear pooling, unpacked
-
-For each candidate color in a role, the two probabilities are combined as a
-**weighted geometric mean**:
-
-```
-posterior ∝ p_usage^(1 − α) × (p_intent + 1/K)^α
-```
-
-over the K measured entries in the role, then all candidates are normalized to
-sum to 1. Reading the formula:
-
-- **The candidates are the measured entries only.** Declared intent re-weights colors
-  that actually rendered; a declared color with no measured match never enters the
-  posterior (it surfaces through the divergence report instead). This is what makes the
-  contract guarantee structural: every posterior entry inherits its measured entry's
-  area and non-empty component breakdown.
-- **α (alpha) is the weight on intent**, default 0.4 and clamped to [0, 1]. At `α = 0`
-  the intent factor collapses to `x^0 = 1` and the posterior is pure measurement; at
-  `α = 1` it's pure declared intent. At 0.4, measurement leads but strong declared intent
-  can shift the ranking.
-- **Why a *geometric* mean** (multiplying powers) rather than a weighted average? A
-  geometric mean rewards agreement: a color must score in *both* signals to score high,
-  and a near-zero on either side drags the product toward zero. A weighted average would
-  let a barely-rendered color coast on intent alone.
-- **The `1/K` term is uniform smoothing** on the intent side: a color with no token
-  match within ΔE 0.10 still gets the uniform pseudo-intent `1/K`, so lacking a token
-  costs at most a bounded, universe-scaled factor of `(K + 1)^α` (≈1.6× at K = 2, ≈2.6×
-  at K = 10 for the default α) — a penalty, never a veto. An absolute floor (the
-  pre-0.4.0 `EPS = 10⁻⁹`) made the same term a ~4000× multiplier that let one minor
-  declared color erase a 95%-dominant undeclared one from the posterior entirely.
-
-Posterior entries below 0.02 are pruned and survivors renormalized (argmax kept if
-pruning empties the role). Every entry keeps its measured area and component breakdown.
-
-### The empty-role gate
-
-A role with **no measured usage at all yields an empty posterior.** Declared-only
-colors never enter any posterior, and the original motivation was a live failure in
-exactly this case: when token-only colors were still injected, zero measurement gave
-every one the *same* floor usage factor, so the posterior collapsed to `intent^α` — a
-near-uniform spread where everything survives pruning. On github.com that meant
-`usage.border` reported **16 never-rendered theme tokens**, every entry with empty
-components — pure noise presented as measurement. Honest emptiness beats intent-only
-noise. Declared intent for an unmeasured role can still surface through the
-divergence report — but only when the declared color has no perceptual match (within
-0.10) among measured colors in *any* role; a near-white border token on a
-white-surfaced page reads as "used" and stays silent.
 
 ### Divergence reporting
 
-Two kinds of discrepancy are reported:
+Two kinds of discrepancy fall out of the same pass:
 
-- **Declared but unused** — a declared color with no perceptual match (within 0.10)
-  among measured usage in *any* role. This is gated to **high-intent** origins only:
-  tokens classified by an explicit name rule or relational pattern. The gate exists
-  because of another live failure: on token-heavy sites, every unused shade of every
-  numbered color scale is technically "declared", and the report was 100% noise — **54
-  out of 54 items on github.com** were unused scale shades. Scale members, alias
-  followers, and fallbacks therefore never fire this item. Name-rule tokens report under
-  their intent's strongest role; relational tokens (`--on-primary`-style foreground
-  colors, which carry no role prior) report under `text`.
-- **Used but undeclared** — a measured entry with probability ≥ 0.15 whose color matches
-  no *declared* color at all. Membership is tested against every resolved token color —
-  including relational, status, scale, and fallback classifications that carry no intent
-  mass — because "undeclared" is a statement about the stylesheet: a page rendering
-  exactly its declared `--on-primary` text color is not undeclared. A prominent rendered
-  color the design system doesn't name.
+- **Declared but unused** — a token whose canonical color produced no surviving S_measured
+  in any role (it never cleared `theta_noise`). Gated to **high-intent** origins only
+  (tokens classified by an explicit name rule or relational pattern) — the same gate that
+  kept 54 unused color-scale shades from flooding the github.com report. Name-rule tokens
+  report under their intent's strongest role; relational tokens (`--on-primary`-style
+  foreground colors, which carry no role prior) report under `text`.
+- **Used but undeclared** — a color that survived detection with `f = 1` (no token matched
+  it within ΔE 0.10 in any role) and whose S_final clears a reporting floor. Membership is
+  tested against every resolved token color — including relational, status, scale, and
+  fallback classifications — because "undeclared" is a statement about the stylesheet: a
+  page rendering exactly its declared `--on-primary` text color is not undeclared. A
+  prominent rendered color the design system doesn't name.
 
-## 6. Concurrency and safety
+For design details and calibration guidance, see
+[`docs/design/detection-ranking-redesign.md`](design/detection-ranking-redesign.md) and
+[`docs/design/tuning-spec.md`](design/tuning-spec.md).
+
+## 5. Concurrency and safety
 
 A few structural guarantees hold across the pipeline; this section explains what they are
 and why they hold, not the line-by-line mechanics.
 
 **Everything downstream of the harvest is pure.** Networking lives entirely behind
-`PolitenessPolicy` / `harvest_page`; given a `Harvest`, the classify/inventory/usage/
-reconcile chain does no I/O and shares no mutable state. That is why the per-theme
+`PolitenessPolicy` / `harvest_page`; given a `Harvest`, the classify/inventory/fusion/
+detection chain does no I/O and shares no mutable state. That is why the per-theme
 CPU work (which includes O(n²) perceptual clustering) can be pushed onto worker threads
 with `asyncio.to_thread` — the event loop stays responsive while themes are analyzed
 concurrently — and why the whole downstream pipeline is testable without a network or a

@@ -9,25 +9,13 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
-- **Additive foundations for the detection-plus-ranking redesign (internal, not yet wired in).**
-  New internal contracts and a pure salience module that later phases will build on, with no
-  change to existing behavior or public API:
-  - `models.py`: `EvidenceStream` enum and the frozen `RoleEvidence` per-`(color, role)`
-    evidence record (validated sorted-descending instance saliences, with a `peak` property).
-  - `palette/salience.py`: pure helpers for per-instance salience — `area_fraction`,
-    `vertical_fraction`, the bounded `position`/`sibling`/`contrast` modulators,
-    `instance_prominence`, the role-parameterized `aggregate_salience`, and the bounded
-    `intent_multiplier`. All constants read from config; nothing hard-coded.
-  - `config.py` + `data/palette_config.yaml`: a new optional `detection:` section
-    (`DetectionConfig` with `alpha`, the three modulator sub-configs, and per-`UsageRole`
-    `RoleAggregationConfig` aggregation/threshold tables) seeded with the pre-fit starting
-    values. The section is optional, so existing configs still validate.
-  - `palette/fusion.py`: `build_evidence(harvest, classified, config, viewport)`, the successor
-    to `build_inventory`. It establishes the same canonical color identities (reusing
-    inventory's color-identity helpers unchanged) but preserves the per-instance salience
-    distribution, emitting one `RoleEvidence` per `(canonical color, role)`. `build_inventory`
-    is untouched and remains the shipping path; `instance_prominence` now accepts
-    `contrast=None` (neutral `m_con = 1.0`) for the missing-contrast case.
+- **New `detection:` configuration section** (`data/palette_config.yaml` + `DetectionConfig` in
+  `config.py`): the tuning surface for the detection-plus-ranking model — `alpha` (the intent
+  boost cap), the three bounded salience modulators (`position`/`sibling`/`contrast`), and a
+  per-`UsageRole` table of `lambda`/`beta` (salience aggregation) and `theta_noise`/`theta_present`
+  (the two absolute detection thresholds). Optional, so existing configs still validate.
+- **`eval/calibrate_thresholds.py`**: an offline harness that sweeps `theta_present` per role
+  against the ground-truth must-keep set and reports the recall/precision knee (tuning-spec §5).
 
 ### Fixed
 
@@ -37,11 +25,41 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   The field now accepts both `bounding_box` and `rect` on input via a validation alias
   (`populate_by_name` keeps the canonical name usable in code); serialization is unchanged.
 - **Zero-weight fallback tokens no longer surface as declared-but-unused divergences.** The
-  `DECLARE_MIN_WEIGHT` gate in `palette/reconcile.py` tested `token_weight < 0.0`, which can
-  never fire (weights are non-negative; the fallback rung emits weight 0). Corrected to
-  `<= 0.0` so weightless fallbacks are excluded as intended.
+  `DECLARE_MIN_WEIGHT` gate tested `token_weight < 0.0`, which can never fire (weights are
+  non-negative; the fallback rung emits weight 0). Corrected to `<= 0.0` so weightless fallbacks
+  are excluded as intended; the corrected gate carries forward into the new divergence logic.
 
 ### Changed
+
+- **BREAKING (behavior): rewrote the semantic-assignment half of the pipeline to a
+  detection-plus-ranking model.** The result-tree *shapes* are unchanged, but the values and the
+  math that produces them are different. Presence in a usage role is now an **absolute, per-`(color,
+  role)` detection decision** rather than a share of a normalized, competitive distribution:
+  - `palette/fusion.py` (`build_evidence`) replaces the summed-mass fusion output with one
+    `RoleEvidence` per `(canonical color, role)`, preserving the per-instance salience distribution
+    (`sigma_i = p_role * pi_i`, area-driven with bounded position/sibling/contrast modulators).
+    `inventory.build_inventory` is retained as the internal color-identity layer (perceptual
+    clustering, near-white/near-black guards) and third-party-color source.
+  - `palette/detect.py` (`detect`) replaces `build_usage` + `build_color_index` + `reconcile`: it
+    computes measured salience (peak-dominant for element roles, screenshot area for surface roles),
+    folds declared intent in as a **bounded multiplier** `f = 1 + alpha*q_intent` that re-ranks and
+    rescues at the margin but never vetoes or manufactures a color, applies a **two-gate** test
+    (`S_measured >= theta_noise` and `S_final >= theta_present`, both absolute and `K`-independent),
+    ranks survivors, and normalizes to a display share **last**. Divergences fall out of the same pass.
+  - **Removed** `palette/reconcile.py` (log-linear pooling, `+1/K` smoothing, the `epsilon` floor,
+    the `(p)^(1-alpha)` tempering exponent, the relative prune floor and min-exempt-mass exemption),
+    `palette/_pruning.py`, and the `build_usage` / `build_color_index` functions.
+  - **Changed field semantics** (shapes unchanged): `UsageEntry.probability` is now a
+    display-normalized salience share (not a pooled posterior); `ColorUsage.prominence` is now the
+    color's maximum role-salience, globally normalized (not a blended `0.7*area + 0.3*mass` scalar).
+  - The new tuning surface (`alpha`, per-role `lambda`/`beta`, `theta_noise`/`theta_present`,
+    modulator ranges) lives in the `detection:` config section, seeded with pre-fit starting values;
+    `theta_present` is fit per role from the ground-truth must-keep set. On the offline 10-site
+    quality panel the rewrite holds parity with the prior pipeline (recall 218/232, role winners
+    74/77, NOISE 74). Known follow-ups (deferred): the per-role `lambda`/`beta` are hand-set, not
+    learning-to-rank-fit, and the `surface` role recalls ~70% of must-keep colors — both are
+    aggregation-bound, not threshold-bound. See `docs/design/detection-ranking-redesign.md` and
+    `docs/design/tuning-spec.md`.
 
 - **Every field on the `models.py` contracts now carries an explicit `pydantic.Field`** with a
   description, validation bounds, and (where useful) examples. Numeric fields gained range

@@ -64,14 +64,19 @@ from colorsense import load_default_config
 config = load_default_config()
 ```
 
-`config_path=` tunes the token vocabulary and the component classifier. The measurement-side
-scoring constants are documented in-code, not part of the YAML: the usage view's pruning
-threshold, the role→component collapse, log-damped vote-mass prominence, and the
-color-index prominence blend in
-[`palette/usage.py`](https://github.com/cassidyhhaas/colorsense/blob/main/src/colorsense/palette/usage.py) (`MIN_PROBABILITY_SHARE`, `MIN_EXEMPT_VOTE_MASS`, `COMPONENT_TYPES_BY_USAGE_ROLE`, `PROMINENCE_AREA_WEIGHT`),
+`config_path=` tunes the token vocabulary, the component classifier, and the detection
+thresholds. The detection tuning surface lives in the YAML under the `detection:` key:
+the intent-boost cap (`alpha`), per-role aggregation parameters (`lambda_r`, `beta_r`),
+absolute detection floors (`theta_noise`, `theta_present` per role), and the per-instance
+prominence modulator ranges (`m_pos`, `m_sib`, `m_con`). These are the primary knobs for
+changing which colors survive detection and how they rank.
+
+Constants that are documented in-code rather than in the YAML: the role→component
+collapse in
+[`palette/detect.py`](https://github.com/cassidyhhaas/colorsense/blob/main/src/colorsense/palette/detect.py) (`COMPONENT_TYPES_BY_USAGE_ROLE`),
 the per-channel perceptual join radii in
 [`palette/inventory.py`](https://github.com/cassidyhhaas/colorsense/blob/main/src/colorsense/palette/inventory.py) (`MAX_BG_MATCH_DELTA_E`,
 `MAX_TEXT_BORDER_MATCH_DELTA_E`, `MAX_CLUSTER_MERGE_DELTA_E`),
-and the declared/measured token-match radii in
-[`palette/reconcile.py`](https://github.com/cassidyhhaas/colorsense/blob/main/src/colorsense/palette/reconcile.py) (`MAX_TOKEN_MERGE_DELTA_E`,
+and the token-merge and measured-vs-declared match radii in
+[`palette/fusion.py`](https://github.com/cassidyhhaas/colorsense/blob/main/src/colorsense/palette/fusion.py) (`MAX_TOKEN_MERGE_DELTA_E`,
 `MAX_MEASURED_MATCH_DELTA_E`).
