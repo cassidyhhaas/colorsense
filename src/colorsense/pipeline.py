@@ -45,9 +45,9 @@ from colorsense.models import (
     Viewport,
 )
 from colorsense.net.politeness import PolitenessPolicy
+from colorsense.palette.detect import detect
+from colorsense.palette.fusion import build_evidence
 from colorsense.palette.inventory import build_inventory
-from colorsense.palette.reconcile import reconcile
-from colorsense.palette.usage import build_color_index, build_usage
 
 DEFAULT_VIEWPORT = Viewport(width=1280, height=800, device_scale_factor=1.0)
 
@@ -317,7 +317,7 @@ def _reraise_first_leaf(eg: ExceptionGroup[Exception]) -> NoReturn:
 def _analyze_theme(
     harvest: Harvest, config: Config, viewport: Viewport, include_tokens: bool
 ) -> _ThemeOutput:
-    """Run the per-theme classify → inventory → colors/usage → reconcile chain.
+    """Run the per-theme classify → fuse evidence → detect (rank + intent) chain.
 
     Pure CPU over immutable inputs (no I/O, no shared mutable state); ``analyze`` runs it
     on a worker thread via ``asyncio.to_thread`` to keep the event loop responsive.
@@ -334,23 +334,22 @@ def _analyze_theme(
     """
     classified_tokens = classify_tokens(harvest.tokens, config)
     classified_elements = classify_components(harvest.elements, config, viewport)
-    clusters = build_inventory(harvest, classified_elements)
 
-    # The canonical color-keyed index and the role-keyed projection are both built from
-    # the same clusters (third-party-dominated colors are excluded from the index, just
-    # as they are from the role view; they ride on AnalysisResult.third_party_colors).
-    color_index = build_color_index(clusters)
-    measured_usage = build_usage(clusters)
-    # The full (pre-prune) inventory colors back the declared-but-unused divergence test,
-    # so a declared color that rendered below the usage prune threshold is not
-    # misreported as "unused in render" (see reconcile's measured_colors doc).
-    posterior_usage, divergence = reconcile(
-        measured_usage, classified_tokens, measured_colors=[c.color for c in clusters]
-    )
+    # Detection-plus-ranking: fuse per-(color, role) evidence, then detect on absolute
+    # evidence, rank survivors, fold declared intent in as a bounded multiplier, and
+    # normalize only for display. The color-keyed index, role-keyed projection, and
+    # divergences all fall out of the one detection pass.
+    evidence = build_evidence(harvest, classified_elements, config, viewport)
+    usage, color_index, divergence = detect(evidence, classified_tokens, config)
+
+    # Third-party-dominated colors carry no usage role (so they never enter the views) and
+    # ride on AnalysisResult.third_party_colors instead. They are still read off the cluster
+    # view, whose component mix records third-party dominance.
+    clusters = build_inventory(harvest, classified_elements)
     palette = ThemePalette(
         theme=harvest.theme,
         colors=color_index,
-        usage=posterior_usage,
+        usage=usage,
         divergence=tuple(divergence),
         tokens=_design_tokens(classified_tokens) if include_tokens else None,
     )
