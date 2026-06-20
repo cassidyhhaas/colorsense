@@ -11,14 +11,14 @@ theme:
     - media: "(prefers-color-scheme: light)"
       scheme: default
       primary: deep purple
-      accent: deep orange
+      accent: pink
       toggle:
         icon: material/weather-night
         name: Switch to dark mode
     - media: "(prefers-color-scheme: dark)"
       scheme: slate
       primary: deep purple
-      accent: deep orange
+      accent: pink
       toggle:
         icon: material/weather-sunny
         name: Switch to light mode
@@ -42,9 +42,7 @@ plugins:
       handlers:
         python:
           options:
-            # The codebase uses NumPy-style docstring sections
-            # ("Parameters\n----------", "Raises", ...).
-            docstring_style: numpy
+            docstring_style: google
             heading_level: 3
             show_root_heading: true
             show_source: false
