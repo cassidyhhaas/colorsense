@@ -9,9 +9,9 @@ theme:
   palette:
     # Light/dark toggle — fitting for a library that analyzes both themes.
     - media: "(prefers-color-scheme: light)"
-      scheme: default
+      scheme: slate
       primary: deep purple
-      accent: amber
+      accent: cyan
       toggle:
         icon: material/weather-night
         name: Switch to dark mode
