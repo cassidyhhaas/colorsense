@@ -66,6 +66,7 @@ from colorsense.models import (
     Harvest,
     HarvestedElement,
     PropertyFamily,
+    UsageRole,
 )
 
 __all__ = ["build_inventory"]
@@ -303,14 +304,21 @@ def _nearest_mergeable_near_white_entry(
 
 
 class _Entry:
-    """A mutable working color entry: a color, its area weight and its raw vote mass."""
+    """A mutable working color entry: a color, its area weight and its raw vote mass.
 
-    __slots__ = ("area_weight", "color", "vote_mass")
+    ``role_instances`` is an additional, defaulted field used only by the successor fusion
+    module (`colorsense.palette.fusion`): it records the per-instance salience sigma_i routed
+    to this entry, keyed by usage role. `build_inventory` never reads or writes it, so its
+    presence is invisible to the shipping inventory path.
+    """
+
+    __slots__ = ("area_weight", "color", "role_instances", "vote_mass")
 
     def __init__(self, color: Color, area_weight: float) -> None:
         self.color = color
         self.area_weight = area_weight
         self.vote_mass: dict[ComponentType, float] = defaultdict(float)
+        self.role_instances: dict[UsageRole, list[float]] = defaultdict(list)
 
 
 def _find(parent: list[int], i: int) -> int:
@@ -447,21 +455,24 @@ def _union_merges_distinct_near_black_cta_pair(
     )
 
 
-def _cluster_pool(entries: list[_Entry], family: PropertyFamily) -> list[ColorCluster]:
-    """Union-find cluster one family's entry pool into `ColorCluster`s.
+def _cluster_groups(entries: list[_Entry], family: PropertyFamily) -> list[list[_Entry]]:
+    """Union-find group one family's entry pool into perceptual clusters (pure grouping only).
 
-    Representative selection is family-specific: ``background`` picks the largest area
-    weight (hex tiebreak — area is authoritative for surfaces); ``text``/``border`` pick
-    the largest in-family vote mass (hex tiebreak — they paint no screenshot area).
+    The side-effect-free grouping core shared by `_cluster_pool` (the shipping inventory path)
+    and `colorsense.palette.fusion.build_evidence` (the successor). It applies the family's
+    distinctness guards exactly as `_cluster_pool` did inline — the near-white check for
+    text/border families and the near-black CTA/action check for the background family — so the
+    grouping is identical to the inventory path, only its consumption differs.
 
     Args:
         entries: The family's working entry pool to cluster.
         family: The [`PropertyFamily`][colorsense.PropertyFamily] the pool belongs to
-            (selects the representative rule and which distinctness check applies).
+            (selects which distinctness check applies).
 
     Returns:
-        The family's `ColorCluster`s, pre-sorted by ``(-area_weight, hex)``; ``[]`` for an
-        empty pool.
+        One ``list[_Entry]`` per perceptual cluster (group membership only — no representative
+        selection or aggregation); ``[]`` for an empty pool. Group order follows union-find root
+        order, which is deterministic for a given input.
 
     """
     entry_count = len(entries)
@@ -499,19 +510,52 @@ def _cluster_pool(entries: list[_Entry], family: PropertyFamily) -> list[ColorCl
     groups: dict[int, list[int]] = defaultdict(list)
     for i in range(entry_count):
         groups[_find(parent, i)].append(i)
+    return [[entries[i] for i in members] for members in groups.values()]
 
+
+def _group_representative(group: list[_Entry], family: PropertyFamily) -> _Entry:
+    """The representative entry of one perceptual cluster (shared family-specific rule).
+
+    The single source of truth for picking a cluster's canonical color, shared by
+    `_cluster_pool` and `colorsense.palette.fusion.build_evidence`: ``background`` picks the
+    largest area weight (smallest hex breaks ties and the all-zero case); ``text``/``border``
+    pick the largest in-family vote mass (hex tiebreak — they paint no screenshot area).
+
+    Args:
+        group: The cluster's member entries (non-empty).
+        family: The [`PropertyFamily`][colorsense.PropertyFamily] selecting the rule.
+
+    Returns:
+        The member chosen as the cluster's representative.
+
+    """
+    if family is PropertyFamily.BACKGROUND:
+        # Area truth: largest area weight, ties (and all-zero) broken by smallest hex.
+        return min(group, key=lambda entry: (-entry.area_weight, entry.color.hex))
+    # Text/border paint no area: rank by in-family vote mass, hex tiebreak.
+    return min(group, key=lambda entry: (-_total_vote_mass(entry), entry.color.hex))
+
+
+def _cluster_pool(entries: list[_Entry], family: PropertyFamily) -> list[ColorCluster]:
+    """Union-find cluster one family's entry pool into `ColorCluster`s.
+
+    Representative selection is family-specific: ``background`` picks the largest area
+    weight (hex tiebreak — area is authoritative for surfaces); ``text``/``border`` pick
+    the largest in-family vote mass (hex tiebreak — they paint no screenshot area).
+
+    Args:
+        entries: The family's working entry pool to cluster.
+        family: The [`PropertyFamily`][colorsense.PropertyFamily] the pool belongs to
+            (selects the representative rule and which distinctness check applies).
+
+    Returns:
+        The family's `ColorCluster`s, pre-sorted by ``(-area_weight, hex)``; ``[]`` for an
+        empty pool.
+
+    """
     clusters: list[ColorCluster] = []
-    for members in groups.values():
-        group = [entries[i] for i in members]
-
-        if family is PropertyFamily.BACKGROUND:
-            # Area truth: largest area weight, ties (and all-zero) broken by smallest hex.
-            representative = min(group, key=lambda entry: (-entry.area_weight, entry.color.hex))
-        else:
-            # Text/border paint no area: rank by in-family vote mass, hex tiebreak.
-            representative = min(
-                group, key=lambda entry: (-_total_vote_mass(entry), entry.color.hex)
-            )
+    for group in _cluster_groups(entries, family):
+        representative = _group_representative(group, family)
 
         total_area = sum(entry.area_weight for entry in group)
 

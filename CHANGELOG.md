@@ -22,6 +22,12 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
     (`DetectionConfig` with `alpha`, the three modulator sub-configs, and per-`UsageRole`
     `RoleAggregationConfig` aggregation/threshold tables) seeded with the pre-fit starting
     values. The section is optional, so existing configs still validate.
+  - `palette/fusion.py`: `build_evidence(harvest, classified, config, viewport)`, the successor
+    to `build_inventory`. It establishes the same canonical color identities (reusing
+    inventory's color-identity helpers unchanged) but preserves the per-instance salience
+    distribution, emitting one `RoleEvidence` per `(canonical color, role)`. `build_inventory`
+    is untouched and remains the shipping path; `instance_prominence` now accepts
+    `contrast=None` (neutral `m_con = 1.0`) for the missing-contrast case.
 
 ### Fixed
 

@@ -165,7 +165,7 @@ def instance_prominence(
     *,
     y_frac: float,
     median_sibling_area: float,
-    contrast: float,
+    contrast: float | None,
     surface: bool,
     cfg: DetectionConfig,
 ) -> float:
@@ -179,7 +179,10 @@ def instance_prominence(
         a_i: The instance's own area fraction (from `area_fraction`).
         y_frac: Element center-y as a fraction of the first-viewport height.
         median_sibling_area: Median area fraction of sibling interactive elements.
-        contrast: WCAG contrast ratio against the effective background.
+        contrast: WCAG contrast ratio against the effective background, or ``None`` when
+            contrast is unavailable (the painted color or its effective background is
+            missing). ``None`` yields the neutral ``m_con = 1.0`` so a missing contrast
+            neither rewards nor penalizes the instance.
         surface: Whether this is a surface role (disables all modulators).
         cfg: The detection config carrying the modulator sub-configs.
 
@@ -191,7 +194,7 @@ def instance_prominence(
         return a_i
     m_pos = position_modulator(y_frac, cfg.position)
     m_sib = sibling_modulator(a_i, median_sibling_area, cfg.sibling)
-    m_con = contrast_modulator(contrast, cfg.contrast)
+    m_con = 1.0 if contrast is None else contrast_modulator(contrast, cfg.contrast)
     return a_i * m_pos * m_sib * m_con
 
 
