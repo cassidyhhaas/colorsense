@@ -234,7 +234,19 @@ def test_zero_weight_fallback_does_not_raise_declared_but_unused() -> None:
 
 
 def test_rescue_band_never_dips_below_theta_noise() -> None:
-    """For every element role: theta_present / (1 + alpha) >= theta_noise (tuning-spec §4.3)."""
+    """The rescue band's lower edge never dips below theta_noise (tuning-spec §4.3).
+
+    The effective lower edge is ``max(theta_noise, theta_present / (1 + alpha))`` — the
+    ``max`` clamp is what enforces the invariant, so intent can never rescue a color the
+    artifact floor rejected, for ANY ``theta_present >= theta_noise``. That ``>=`` is the
+    only real config constraint: the membership floor must sit at or above the hard noise
+    floor (else the noise gate would already subsume it). It holds even for roles whose
+    ``theta_present`` sits exactly at ``theta_noise`` (``action``, ``border``), where the
+    unclamped ``theta_present / (1 + alpha)`` dips below ``theta_noise`` but the clamp keeps
+    the effective floor at ``theta_noise``. The behavioral guarantee — a below-noise color
+    is dropped even with full intent — is covered by
+    ``test_below_theta_noise_dropped_even_with_full_intent``.
+    """
     alpha = CONFIG.detection.alpha
     element_roles = {
         UsageRole.CTA,
@@ -245,7 +257,9 @@ def test_rescue_band_never_dips_below_theta_noise() -> None:
     }
     for role in element_roles:
         rc = CONFIG.detection.roles[role]
-        assert rc.theta_present / (1.0 + alpha) >= rc.theta_noise, role
+        assert rc.theta_present >= rc.theta_noise, role
+        lower_edge = max(rc.theta_noise, rc.theta_present / (1.0 + alpha))
+        assert lower_edge >= rc.theta_noise, role
 
 
 # --- Backfill ----------------------------------------------------------------

@@ -494,11 +494,11 @@ detection:
   # text/link/border: near-sum — the most-USED color, so a lone huge headline does
   # not outrank body text.
   roles:
-    page:    {lambda: 1.0, beta: 1.0, theta_noise: 0.005,  theta_present: 0.005}
-    surface: {lambda: 1.0, beta: 1.0, theta_noise: 0.005,  theta_present: 0.005}
-    banner:  {lambda: 1.0, beta: 1.0, theta_noise: 0.005,  theta_present: 0.005}
-    cta:     {lambda: 0.2, beta: 0.5, theta_noise: 0.0001, theta_present: 0.0002}
-    action:  {lambda: 0.7, beta: 0.8, theta_noise: 0.0001, theta_present: 0.0002}
-    text:    {lambda: 1.0, beta: 0.9, theta_noise: 0.0001, theta_present: 0.0002}
+    page:    {lambda: 1.0, beta: 1.0, theta_noise: 0.005,  theta_present: 0.04}
+    surface: {lambda: 1.0, beta: 1.0, theta_noise: 0.005,  theta_present: 0.015}
+    banner:  {lambda: 1.0, beta: 1.0, theta_noise: 0.005,  theta_present: 0.04}
+    cta:     {lambda: 0.2, beta: 0.5, theta_noise: 0.0001, theta_present: 0.0003}
+    action:  {lambda: 0.7, beta: 0.8, theta_noise: 0.0001, theta_present: 0.0001}
+    text:    {lambda: 1.0, beta: 0.9, theta_noise: 0.0001, theta_present: 0.0012}
     link:    {lambda: 1.0, beta: 0.9, theta_noise: 0.0001, theta_present: 0.0002}
-    border:  {lambda: 1.0, beta: 0.9, theta_noise: 0.0001, theta_present: 0.0002}
+    border:  {lambda: 1.0, beta: 0.9, theta_noise: 0.0001, theta_present: 0.0001}

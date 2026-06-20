@@ -22,12 +22,18 @@ The math helpers are reused from `colorsense.palette.salience` (``aggregate_sali
 (``nearest_within``, ``any_within``). The divergence behavior reproduces
 `colorsense.palette.reconcile`'s two arms self-contained (its constants are redefined locally
 here) so this module carries no dependency on the stage it replaces.
+
+The internal helper `_score_candidates` is the pre-gate scoring step: it computes
+``(S_measured, S_final, q_intent)`` for every ``(color, role)`` evidence record and returns a
+flat list of `_Candidate` named tuples.  `detect` calls it and then applies the threshold gates
+so the calibration harness in ``eval/calibrate_thresholds.py`` can sweep ``theta_present``
+at ANY multiple of ``theta_noise`` without re-deriving scores.
 """
 
 from __future__ import annotations
 
 from collections import defaultdict
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, NamedTuple
 
 from colorsense.color.match import any_within, first_within, nearest_within
 from colorsense.models import (
@@ -47,7 +53,7 @@ if TYPE_CHECKING:
     from colorsense.config import Config
     from colorsense.models import ClassifiedToken, Color, ComponentType
 
-__all__ = ["detect"]
+__all__ = ["_Candidate", "_score_candidates", "detect"]
 
 # --- Tunable constants (reproduced from reconcile.py so detect.py is self-contained) ---
 
@@ -169,6 +175,64 @@ def _relational_groups(tokens: list[ClassifiedToken]) -> list[_IntentGroup]:
     )
 
 
+# --- Pre-gate candidate scoring (used by detect and the calibration harness) -
+
+
+class _Candidate(NamedTuple):
+    """Pre-gate score record for one ``(color, role)`` evidence record.
+
+    Produced by `_score_candidates` BEFORE the ``theta_noise``/``theta_present`` gates are
+    applied.  The calibration harness in ``eval/calibrate_thresholds.py`` uses this to sweep
+    ``theta_present`` over a multiplier grid without re-deriving scores from scratch.
+
+    Attributes:
+        evidence: The originating `RoleEvidence` record.
+        s_measured: The intent-independent measured salience ``S_measured``.
+        s_final: The intent-multiplied salience ``S_final = S_measured * f``.
+        q_intent: The normalized intent share for this ``(color, role)`` pair, in ``[0, 1]``.
+    """
+
+    evidence: RoleEvidence
+    s_measured: float
+    s_final: float
+    q_intent: float
+
+
+def _score_candidates(
+    evidence: list[RoleEvidence],
+    tokens: list[ClassifiedToken],
+    config: Config,
+) -> list[_Candidate]:
+    """Score every ``(color, role)`` evidence record, returning pre-gate candidate tuples.
+
+    Computes ``S_measured``, ``q_intent``, and ``S_final = S_measured * f`` for each record
+    WITHOUT applying ``theta_noise`` or ``theta_present`` gates.  `detect` calls this and
+    then applies the gates; the calibration harness calls this directly so it can sweep
+    ``theta_present`` at any multiplier of ``theta_noise`` without re-deriving scores.
+
+    Args:
+        evidence: The per-``(canonical color, role)`` records from ``build_evidence``.
+        tokens: All classified declared tokens for the site (declared intent).
+        config: The loaded config; ``config.detection`` carries ``alpha`` and the per-role
+            ``lambda_``/``beta``/``theta_noise``/``theta_present``.
+
+    Returns:
+        One `_Candidate` per evidence record, in the same order as ``evidence``.
+
+    """
+    groups = _intent_groups(tokens)
+    intents = [group.normalized_intent() for group in groups]
+
+    candidates: list[_Candidate] = []
+    for record in evidence:
+        role = record.role
+        s_measured = _s_measured(record, role, config)
+        q_intent = _q_intent_for(record.color, role, groups, intents)
+        s_final = s_measured * intent_multiplier(q_intent, config.detection.alpha)
+        candidates.append(_Candidate(record, s_measured, s_final, q_intent))
+    return candidates
+
+
 # --- Detection survivors -----------------------------------------------------
 
 
@@ -276,21 +340,23 @@ def detect(
         [`DivergenceItem`][colorsense.DivergenceItem] list.
 
     """
+    # Score every (color, role) pair (pre-gate): compute S_measured, q_intent, S_final.
+    candidates = _score_candidates(evidence, tokens, config)
+
+    # Rebuild the intent groups used for divergence reporting (parallel to score_candidates'
+    # internal groups; we need them again for _build_divergences).
     groups = _intent_groups(tokens)
     intents = [group.normalized_intent() for group in groups]
 
     # --- Detection: keep (color, role) iff S_measured >= theta_noise AND S_final >= theta_present.
     survivors_by_role: dict[UsageRole, list[_Survivor]] = defaultdict(list)
-    for record in evidence:
-        role = record.role
+    for candidate in candidates:
+        role = candidate.evidence.role
         rc = config.detection.roles[role]
-        s_measured = _s_measured(record, role, config)
-        q_intent = _q_intent_for(record.color, role, groups, intents)
-        s_final = s_measured * intent_multiplier(q_intent, config.detection.alpha)
         # theta_noise is intent-INDEPENDENT (the hard noise floor); theta_present may be
         # cleared with intent help. This is goal-3 by construction.
-        if s_measured >= rc.theta_noise and s_final >= rc.theta_present:
-            survivors_by_role[role].append(_Survivor(record, s_final))
+        if candidate.s_measured >= rc.theta_noise and candidate.s_final >= rc.theta_present:
+            survivors_by_role[role].append(_Survivor(candidate.evidence, candidate.s_final))
 
     usage_palette = _build_usage_palette(survivors_by_role)
     color_index = _build_color_index(survivors_by_role)

@@ -220,7 +220,8 @@ def test_default_config_detection_section() -> None:
     assert cta.lambda_ == pytest.approx(0.2)
     assert cta.beta == pytest.approx(0.5)
     assert cta.theta_noise == pytest.approx(0.0001)
-    assert cta.theta_present == pytest.approx(0.0002)
+    # theta_present for cta is the calibrated value (3.0x theta_noise = 0.0003).
+    assert cta.theta_present == pytest.approx(0.0003)
 
     text = detection.roles[UsageRole.TEXT]
     assert text.lambda_ == pytest.approx(1.0)
@@ -228,7 +229,8 @@ def test_default_config_detection_section() -> None:
 
     surface = detection.roles[UsageRole.SURFACE]
     assert surface.theta_noise == pytest.approx(0.005)
-    assert surface.theta_present == pytest.approx(0.005)
+    # theta_present for surface is the calibrated value (3.0x theta_noise = 0.015).
+    assert surface.theta_present == pytest.approx(0.015)
 
 
 def test_role_aggregation_lambda_alias_populate_by_name() -> None:
