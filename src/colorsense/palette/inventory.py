@@ -38,7 +38,7 @@ representative is chosen by what is authoritative for that family: ``background`
 largest area weight (hex tiebreak), ``text``/``border`` by largest in-family vote mass
 (hex tiebreak). The flat union of all three pools' `ColorCluster`s is returned; because
 each cluster's ``component_mass`` only contains its own family's components (by
-construction), the downstream usage/reconcile/third-party stages operate on the flat
+construction), the downstream fusion/detect/third-party stages operate on the flat
 list unchanged.
 
 Perceptual distance is measured exclusively with

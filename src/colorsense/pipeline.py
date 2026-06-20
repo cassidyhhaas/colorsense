@@ -2,10 +2,9 @@
 
 ``analyze`` wires every stage into one typed call: render each requested
 theme (gated by [`PolitenessPolicy`][colorsense.PolitenessPolicy]), classify tokens
-and components, build a color inventory, build the color-keyed index and the role-keyed
-usage projection, and reconcile the latter against declared token intent — per theme.
-Sites that ignore
-``prefers-color-scheme`` (near-identical light/dark renders)
+and components, fuse per-``(color, role)`` evidence, then detect-plus-rank to build the
+color-keyed index, role-keyed usage view, and divergence report — per theme.
+Sites that ignore ``prefers-color-scheme`` (near-identical light/dark renders)
 are collapsed to a single theme. The whole thing is assembled into a typed
 [`AnalysisResult`][colorsense.AnalysisResult].
 
