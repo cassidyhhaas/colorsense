@@ -794,6 +794,104 @@ class ColorCluster(BaseModel):
     )
 
 
+class EvidenceStream(StrEnum):
+    """Which of the four harvest evidence streams contributed to a record.
+
+    Names which stream supplied a [`RoleEvidence`][colorsense.models.RoleEvidence]
+    record's measurement, used for a confidence read and for divergence logic.
+
+    Attributes:
+        DECLARED: Declared CSS custom properties (design tokens).
+        DOM: Computed colors of visible DOM elements.
+        HOVER: Hover/focus color changes probed via CDP.
+        SCREENSHOT: Area-weighted bins from the masked full-page screenshot.
+
+    """
+
+    DECLARED = "declared"
+    DOM = "dom"
+    HOVER = "hover"
+    SCREENSHOT = "screenshot"
+
+
+class RoleEvidence(BaseModel):
+    """The per-``(canonical color, role)`` evidence record emitted by fusion.
+
+    The central data-model object of the detection-plus-ranking redesign (redesign
+    §5.3): one record per ``(color, role)`` pair, preserving the per-instance salience
+    distribution rather than collapsing instances to a single summed mass. Detection,
+    ranking, and intent corroboration all read these records.
+
+    ``instance_saliences`` carries the per-instance salience sigma_i (each ``= p_role * pi_i``)
+    sorted descending, so the peak instance is ``instance_saliences[0]``. The peak-dominant
+    aggregation (``palette/salience.py``) consumes them in that order.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    color: Color = Field(
+        description="The canonical color this evidence record describes.",
+    )
+    role: UsageRole = Field(
+        description="The usage role this evidence record describes.",
+    )
+    instance_saliences: tuple[float, ...] = Field(
+        default=(),
+        description=(
+            "Per-instance salience sigma_i (each ``= p_role * pi_i``), sorted **descending** so "
+            "``instance_saliences[0]`` is the peak instance. Every value is non-negative."
+        ),
+    )
+    area: float = Field(
+        default=0.0,
+        description=(
+            "Area-fraction evidence routed to this role (screenshot/element area), used for "
+            "surface-role salience and auditing; a viewport fraction in ``[0, 1]``."
+        ),
+        ge=0.0,
+        le=1.0,
+        examples=[0.31],
+    )
+    streams: tuple[EvidenceStream, ...] = Field(
+        default=(),
+        description=(
+            "Which evidence streams contributed to this record (sorted and deduped by the caller)."
+        ),
+    )
+
+    @property
+    def peak(self) -> float:
+        """The peak (most-prominent) instance salience sigma_(1).
+
+        Returns:
+            ``instance_saliences[0]`` when non-empty, else ``0.0``.
+
+        """
+        return self.instance_saliences[0] if self.instance_saliences else 0.0
+
+    @model_validator(mode="after")
+    def _validate_sorted(self) -> RoleEvidence:
+        """Require ``instance_saliences`` to be non-negative and sorted descending.
+
+        Returns:
+            This validated model.
+
+        Raises:
+            ValueError: If any salience is negative or the sequence is not sorted descending.
+
+        """
+        previous: float | None = None
+        for value in self.instance_saliences:
+            if value < 0.0:
+                raise ValueError(f"instance_saliences must be non-negative, got {value}")
+            if previous is not None and value > previous:
+                raise ValueError(
+                    f"instance_saliences must be sorted descending, got {self.instance_saliences!r}"
+                )
+            previous = value
+        return self
+
+
 class Usage(BaseModel):
     """One usage slot of a color in the color-keyed index ([`ColorUsage`][colorsense.ColorUsage]).
 

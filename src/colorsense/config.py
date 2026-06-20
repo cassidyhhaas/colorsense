@@ -41,9 +41,14 @@ __all__ = [
     "ChannelRoute",
     "ComponentClassifierConfig",
     "Config",
+    "ContrastModulatorConfig",
+    "DetectionConfig",
     "MatchType",
+    "PositionModulatorConfig",
     "RelationalInfo",
+    "RoleAggregationConfig",
     "ScaleInfo",
+    "SiblingModulatorConfig",
     "TokenVocabularyConfig",
     "UsageIntent",
     "load_config",
@@ -574,6 +579,122 @@ class ComponentClassifierConfig(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# detection (salience + ranking) leaf models
+# ---------------------------------------------------------------------------
+
+
+class PositionModulatorConfig(BaseModel):
+    """Above-the-fold position modulator ``m_pos`` (tuning-spec §1.2, §8).
+
+    ``m_pos = clamp(intercept - slope * y_frac, min, max)``, where ``y_frac`` is the
+    element center as a fraction of the first-viewport height. Bounded and centered near
+    ``1`` so position nudges but cannot manufacture prominence.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    intercept: float = Field(default=1.3, description="Value at the top of the page (y_frac=0).")
+    slope: float = Field(default=0.6, ge=0.0, description="Damping per unit of y_frac.")
+    min: float = Field(default=0.7, ge=0.0, description="Lower clamp bound.")
+    max: float = Field(default=1.3, gt=0.0, description="Upper clamp bound.")
+
+
+class SiblingModulatorConfig(BaseModel):
+    """Sibling-relative size modulator ``m_sib`` (tuning-spec §1.2, §8).
+
+    ``m_sib = clamp((a_i / median_sibling_area) ** exponent, min, max)``. The gentle
+    ``exponent`` keeps sibling-size influence mild.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    exponent: float = Field(default=0.25, gt=0.0, description="Concavity of the size ratio.")
+    min: float = Field(default=0.7, ge=0.0, description="Lower clamp bound.")
+    max: float = Field(default=1.5, gt=0.0, description="Upper clamp bound.")
+
+
+class ContrastModulatorConfig(BaseModel):
+    """Contrast modulator ``m_con`` (tuning-spec §1.2, §8).
+
+    ``m_con = clamp(intercept + slope * (cr - pivot), min, max)``, where ``cr`` is the
+    WCAG contrast ratio. Centered near ``1`` around the AA threshold — a tiebreak-strength
+    signal, not a primary one.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    intercept: float = Field(default=0.85, description="Value at the contrast pivot.")
+    slope: float = Field(default=0.05, ge=0.0, description="Boost per WCAG contrast unit.")
+    pivot: float = Field(default=3.0, description="Contrast ratio at which m_con == intercept.")
+    min: float = Field(default=0.85, ge=0.0, description="Lower clamp bound.")
+    max: float = Field(default=1.3, gt=0.0, description="Upper clamp bound.")
+
+
+class RoleAggregationConfig(BaseModel):
+    """Per-role salience aggregation + detection thresholds (tuning-spec §2, §4, §8).
+
+    Drives ``S_measured = sigma_(1) + lambda * sum sigma_(i) ** beta`` and the two absolute
+    detection thresholds. ``lambda_`` is exposed in YAML as ``lambda`` (a Python keyword,
+    so the field is named ``lambda_`` with the ``lambda`` alias and ``populate_by_name``).
+    """
+
+    model_config = ConfigDict(frozen=True, populate_by_name=True)
+
+    lambda_: float = Field(
+        default=1.0,
+        ge=0.0,
+        le=1.0,
+        validation_alias="lambda",
+        serialization_alias="lambda",
+        description="Corroboration weight lambda_r for additional instances, in [0, 1].",
+    )
+    beta: float = Field(
+        default=1.0,
+        gt=0.0,
+        le=1.0,
+        description="Concavity exponent beta_r for the corroboration tail, in (0, 1].",
+    )
+    theta_noise: float = Field(
+        default=0.0,
+        ge=0.0,
+        description="Hard, intent-independent artifact floor (salience units).",
+    )
+    theta_present: float = Field(
+        default=0.0,
+        ge=0.0,
+        description="Role-membership / reporting floor (salience units).",
+    )
+
+
+class DetectionConfig(BaseModel):
+    """The ``detection`` config domain: salience modulators, aggregation, and intent.
+
+    Carries the tuning surface introduced by the detection-plus-ranking redesign
+    (tuning-spec §1-§4, §8). Every field has a default so the whole section is optional —
+    existing configs that omit ``detection:`` still validate, falling back to the pre-fit
+    starting values.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    alpha: float = Field(
+        default=0.4,
+        ge=0.0,
+        le=1.0,
+        description="Intent boost cap; the intent multiplier f is bounded to [1, 1 + alpha].",
+    )
+    position: PositionModulatorConfig = Field(default_factory=PositionModulatorConfig)
+    sibling: SiblingModulatorConfig = Field(default_factory=SiblingModulatorConfig)
+    contrast: ContrastModulatorConfig = Field(default_factory=ContrastModulatorConfig)
+    roles: dict[UsageRole, RoleAggregationConfig] = Field(
+        default_factory=dict,
+        description=(
+            "Per-[`UsageRole`][colorsense.UsageRole] aggregation parameters and thresholds."
+        ),
+    )
+
+
+# ---------------------------------------------------------------------------
 # Helper result models
 # ---------------------------------------------------------------------------
 
@@ -611,6 +732,7 @@ class Config(BaseModel):
 
     token_vocabulary: TokenVocabularyConfig
     component_classifier: ComponentClassifierConfig
+    detection: DetectionConfig = Field(default_factory=DetectionConfig)
 
     # -- helpers ----------------------------------------------------------
 

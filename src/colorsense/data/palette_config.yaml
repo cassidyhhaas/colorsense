@@ -459,3 +459,46 @@ component_classifier:
   contrast_relabel:
     wcag_min_contrast: 4.5
     canvas_delta_e: 1.0
+
+# =============================================================================
+# detection — instance salience, role aggregation, and detection thresholds.
+#
+# The tuning surface of the detection-plus-ranking redesign (tuning-spec §1–§4).
+# Per-instance salience  σ_i = p_role · π_i,  with bounded prominence modulators
+# (position, sibling-relative size, contrast); role-level measured salience
+#   S_measured(c,r) = σ_(1) + lambda_r · Σ_{i≥2} σ_(i) ** beta_r ;
+# bounded intent multiplier  f = 1 + alpha · q_intent  (f in [1, 1+alpha]); and the
+# two absolute detection thresholds theta_noise (hard, intent-independent) and
+# theta_present (role-membership floor).
+#
+# Every value below is a PRE-FIT STARTING value (tuning-spec §8), not a tuned one.
+# The theta_noise element-role values are anchored to a 20x20px reference instance at
+# a 1280x800 viewport with p_min=0.25:  a_min = 400/1_024_000 ≈ 3.9e-4, so
+# theta_noise ≈ 0.25 · 3.9e-4 ≈ 1.0e-4. Surface roles reuse the 0.5% screenshot
+# noise floor (0.005). Recalibrate theta_* whenever the salience definition changes.
+# =============================================================================
+detection:
+
+  # Intent boost cap: the only thing alpha controls now. f in [1, 1+alpha].
+  alpha: 0.4
+
+  # --- Bounded prominence modulators (centered near 1; a_i carries magnitude). --
+  position: {intercept: 1.3, slope: 0.6, min: 0.7, max: 1.3}
+  sibling:  {exponent: 0.25, min: 0.7, max: 1.5}
+  contrast: {intercept: 0.85, slope: 0.05, pivot: 3.0, min: 0.85, max: 1.3}
+
+  # --- Per-role aggregation (lambda, beta) and detection thresholds. -----------
+  # page/surface/banner: area-sum (the page color is whatever covers most screen).
+  # cta: peak-dominant — the primary CTA is one prominent button, not a headcount.
+  # action: aggregate — the most-repeated secondary button color.
+  # text/link/border: near-sum — the most-USED color, so a lone huge headline does
+  # not outrank body text.
+  roles:
+    page:    {lambda: 1.0, beta: 1.0, theta_noise: 0.005,  theta_present: 0.005}
+    surface: {lambda: 1.0, beta: 1.0, theta_noise: 0.005,  theta_present: 0.005}
+    banner:  {lambda: 1.0, beta: 1.0, theta_noise: 0.005,  theta_present: 0.005}
+    cta:     {lambda: 0.2, beta: 0.5, theta_noise: 0.0001, theta_present: 0.0002}
+    action:  {lambda: 0.7, beta: 0.8, theta_noise: 0.0001, theta_present: 0.0002}
+    text:    {lambda: 1.0, beta: 0.9, theta_noise: 0.0001, theta_present: 0.0002}
+    link:    {lambda: 1.0, beta: 0.9, theta_noise: 0.0001, theta_present: 0.0002}
+    border:  {lambda: 1.0, beta: 0.9, theta_noise: 0.0001, theta_present: 0.0002}

@@ -7,6 +7,22 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **Additive foundations for the detection-plus-ranking redesign (internal, not yet wired in).**
+  New internal contracts and a pure salience module that later phases will build on, with no
+  change to existing behavior or public API:
+  - `models.py`: `EvidenceStream` enum and the frozen `RoleEvidence` per-`(color, role)`
+    evidence record (validated sorted-descending instance saliences, with a `peak` property).
+  - `palette/salience.py`: pure helpers for per-instance salience — `area_fraction`,
+    `vertical_fraction`, the bounded `position`/`sibling`/`contrast` modulators,
+    `instance_prominence`, the role-parameterized `aggregate_salience`, and the bounded
+    `intent_multiplier`. All constants read from config; nothing hard-coded.
+  - `config.py` + `data/palette_config.yaml`: a new optional `detection:` section
+    (`DetectionConfig` with `alpha`, the three modulator sub-configs, and per-`UsageRole`
+    `RoleAggregationConfig` aggregation/threshold tables) seeded with the pre-fit starting
+    values. The section is optional, so existing configs still validate.
+
 ### Fixed
 
 - **`HarvestedElement` again loads harvests serialized under the legacy `rect` key.** The
